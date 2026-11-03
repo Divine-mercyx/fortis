@@ -3,10 +3,15 @@ import { join } from 'node:path';
 import { execFileSync } from 'node:child_process';
 
 const MARKER = '# fortis-pre-push';
+/** Finds the CLI wherever it was installed: in this project (npm, pnpm, yarn), or globally (any language). */
+const RUN = `if [ -x ./node_modules/.bin/fortis ]; then ./node_modules/.bin/fortis scan --pre-push
+elif command -v fortis >/dev/null 2>&1; then fortis scan --pre-push
+else npx --no-install fortis scan --pre-push; fi`;
+
 const HOOK = `#!/bin/sh
 ${MARKER}
 # Installed by Fortis. Checks the files you are about to push. Skip once with: git push --no-verify
-npx --no-install fortis scan --pre-push
+${RUN}
 `;
 
 function hooksDir(root: string): string {
@@ -26,7 +31,7 @@ export function installHook(root: string): { path: string; status: 'installed' |
   if (existsSync(path)) {
     const current = readFileSync(path, 'utf8');
     if (current.includes(MARKER)) return { path, status: 'already' };
-    writeFileSync(path, `${current.trimEnd()}\n\n${MARKER}\nnpx --no-install fortis scan --pre-push || exit 1\n`);
+    writeFileSync(path, `${current.trimEnd()}\n\n${MARKER}\n( ${RUN.replace(/\n/g, '\n  ')} ) || exit 1\n`);
     chmodSync(path, 0o755);
     return { path, status: 'appended' };
   }
