@@ -7,7 +7,9 @@ import { FINDING_STATUSES, findRule, RULE_CATALOG, SEVERITIES, updateFindingSche
 import { db } from '../db/client';
 import { auditLog, findingEvents, findings, projects, scans, users } from '../db/schema';
 import { audit } from '../lib/audit';
-import { notFound } from '../lib/errors';
+import { sha256 } from '../lib/crypto';
+import { notFound, paymentRequired } from '../lib/errors';
+import { planLimits } from './orgs.routes';
 import { parse } from '../lib/validate';
 import { requireOrgRole } from '../plugins/auth';
 
@@ -199,6 +201,96 @@ export async function findingsRoutes(app: FastifyInstance) {
       .orderBy(desc(scans.createdAt))
       .limit(q.limit);
     return { scans: rows };
+  });
+
+  /**
+   * Evidence pack for auditors: what was checked, found, fixed and decided in a period, with who
+   * decided and why. "basic" (Core) is the summary and findings; "full" (Plus) adds the complete
+   * event trail, staging-test authorisations and the admin audit log. A SHA-256 digest of the
+   * content lets an auditor confirm the pack was not edited after it was generated.
+   */
+  app.get('/v1/orgs/:orgId/evidence', async (req) => {
+    const { orgId } = parse(orgParams, req.params);
+    const { org, user } = await requireOrgRole(req, orgId, 'viewer');
+    const limits = planLimits(org.plan);
+    if (limits.evidencePack === 'none') throw paymentRequired(`${limits.name} does not include evidence packs. Upgrade to Fortis Core.`);
+    const q = parse(
+      z.object({
+        from: z.coerce.date().optional(),
+        to: z.coerce.date().optional(),
+        projectId: z.string().uuid().optional(),
+      }),
+      req.query,
+    );
+    const to = q.to ?? new Date();
+    const from = q.from ?? new Date(to.getTime() - 90 * 86_400_000);
+    const p = q.projectId ? sql`and f.project_id = ${q.projectId}` : sql``;
+    const ps = q.projectId ? sql`and s.project_id = ${q.projectId}` : sql``;
+    const full = limits.evidencePack === 'full';
+
+    const [scansBy, open, detected, fixed, fixTimes, list, decisions] = await Promise.all([
+      db.execute(sql`select s.kind, s.trigger, count(*)::int as n from scans s where s.org_id = ${orgId} ${ps} and s.created_at between ${from} and ${to} group by 1, 2 order by 1, 2`),
+      db.execute(sql`select f.severity, count(*)::int as n from findings f where f.org_id = ${orgId} ${p} and f.status = 'open' group by 1`),
+      db.execute(sql`select count(*)::int as n from findings f where f.org_id = ${orgId} ${p} and f.first_seen_at between ${from} and ${to}`),
+      db.execute(sql`select count(*)::int as n from findings f where f.org_id = ${orgId} ${p} and f.status = 'fixed' and f.fixed_at between ${from} and ${to}`),
+      db.execute(sql`select f.severity, percentile_cont(0.5) within group (order by extract(epoch from f.fixed_at - f.first_seen_at))::float as seconds, count(*)::int as n
+        from findings f where f.org_id = ${orgId} ${p} and f.status = 'fixed' and f.fixed_at between ${from} and ${to} group by 1`),
+      db.execute(sql`select f.id, f.rule_id as "ruleId", f.kind, f.severity, f.title, f.file, f.line, f.status, f.status_reason as "statusReason",
+          f.first_seen_at as "firstSeenAt", f.fixed_at as "fixedAt", pr.name as "projectName"
+        from findings f join projects pr on pr.id = f.project_id
+        where f.org_id = ${orgId} ${p} and f.first_seen_at <= ${to} and (f.fixed_at is null or f.fixed_at >= ${from})
+        order by case f.severity when 'critical' then 4 when 'high' then 3 when 'medium' then 2 when 'low' then 1 else 0 end desc, f.first_seen_at
+        limit 2000`),
+      db.execute(sql`select e.created_at as "at", e.to_status as "decision", e.reason, u.name as "by", f.title, f.rule_id as "ruleId", f.severity
+        from finding_events e join findings f on f.id = e.finding_id left join users u on u.id = e.actor_user_id
+        where e.org_id = ${orgId} ${p} and e.to_status in ('accepted_risk', 'false_positive') and e.created_at between ${from} and ${to}
+        order by e.created_at`),
+    ]);
+
+    let trail: unknown[] = [];
+    let authorisations: unknown[] = [];
+    let adminLog: unknown[] = [];
+    if (full) {
+      const [ev, tg, al] = await Promise.all([
+        db.execute(sql`select e.created_at as "at", e.type, e.from_status as "from", e.to_status as "to", e.reason, u.name as "by", f.rule_id as "ruleId", f.title
+          from finding_events e join findings f on f.id = e.finding_id left join users u on u.id = e.actor_user_id
+          where e.org_id = ${orgId} ${p} and e.created_at between ${from} and ${to} order by e.created_at, e.id limit 5000`),
+        db.execute(sql`select t.url, t.environment, t.verified_at as "verifiedAt", t.authorized_signer as "signer", t.authorization_version as "version",
+            t.authorized_at as "authorizedAt", t.paused_at as "pausedAt", t.last_run_at as "lastRunAt", pr.name as "projectName"
+          from targets t join projects pr on pr.id = t.project_id where t.org_id = ${orgId} ${q.projectId ? sql`and t.project_id = ${q.projectId}` : sql``} order by t.created_at`),
+        db.execute(sql`select a.created_at as "at", a.action, u.name as "by", a.meta from audit_log a left join users u on u.id = a.actor_user_id
+          where a.org_id = ${orgId} and a.created_at between ${from} and ${to}
+            and (a.action like 'target.%' or a.action like 'token.%' or a.action like 'member.%' or a.action like 'project.%' or a.action = 'plan.changed')
+          order by a.created_at limit 2000`),
+      ]);
+      trail = ev.rows;
+      authorisations = tg.rows;
+      adminLog = (al.rows as { meta: Record<string, unknown> | null }[]).map((r) => ({ ...r, meta: r.meta ? { ...r.meta, text: undefined } : null }));
+    }
+
+    const openBySeverity: Record<string, number> = { critical: 0, high: 0, medium: 0, low: 0, info: 0 };
+    for (const r of open.rows as { severity: string; n: number }[]) openBySeverity[r.severity] = r.n;
+    const content = {
+      organisation: { name: org.name, plan: limits.name },
+      period: { from: from.toISOString(), to: to.toISOString() },
+      projectId: q.projectId ?? null,
+      level: limits.evidencePack,
+      generatedAt: new Date().toISOString(),
+      generatedBy: user.name,
+      summary: {
+        scans: scansBy.rows,
+        openBySeverity,
+        detected: (detected.rows[0] as { n: number }).n,
+        fixed: (fixed.rows[0] as { n: number }).n,
+        medianFixSeconds: fixTimes.rows,
+      },
+      findings: list.rows,
+      decisions: decisions.rows,
+      trail,
+      authorisations,
+      adminLog,
+    };
+    return { ...content, digest: sha256(JSON.stringify(content)) };
   });
 
   /** Numbers for the dashboard home: open by severity, 30-day trend, fix speed, recent scans. */

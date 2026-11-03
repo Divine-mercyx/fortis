@@ -7,7 +7,7 @@ import useSWR from 'swr';
 import { fetcher } from '@/lib/api';
 import type { FindingRow, ProjectRow } from '@/lib/types';
 
-import { Alert, Book, Folder, Home, Search, Settings } from './icons';
+import { Alert, Book, File, Folder, Home, Search, Settings } from './icons';
 import { useSession } from './session';
 
 type Item = { id: string; label: string; hint: string; href: string; icon: typeof Home; group: string };
@@ -17,6 +17,7 @@ const PAGES: Item[] = [
   { id: 'p-findings', label: 'Open findings', hint: 'Everything not yet fixed', href: '/findings', icon: Alert, group: 'Pages' },
   { id: 'p-critical', label: 'Critical findings', hint: 'What blocks the push', href: '/findings?severity=critical', icon: Alert, group: 'Pages' },
   { id: 'p-projects', label: 'Projects', hint: 'Repos, keys and scans', href: '/projects', icon: Folder, group: 'Pages' },
+  { id: 'p-evidence', label: 'Evidence pack', hint: 'PCI DSS, CBN and NDPA evidence as a PDF', href: '/evidence', icon: File, group: 'Pages' },
   { id: 'p-rules', label: 'Rules', hint: 'What Fortis checks and how to fix it', href: '/rules', icon: Book, group: 'Pages' },
   { id: 'p-settings', label: 'Settings', hint: 'Workspace, plan, team, audit log', href: '/settings', icon: Settings, group: 'Pages' },
 ];

@@ -8,7 +8,7 @@ import useSWR from 'swr';
 import { api, fetcher } from '@/lib/api';
 import { initials } from '@/lib/format';
 
-import { Alert, Book, Chevron, Folder, Home, LogoMark, Logout, Menu, Search, Settings } from './icons';
+import { Alert, Book, Chevron, File, Folder, Home, LogoMark, Logout, Menu, Search, Settings } from './icons';
 import { CommandPalette } from './palette';
 import { useSession } from './session';
 
@@ -17,6 +17,7 @@ const NAV = [
   { href: '/findings', label: 'Findings', icon: Alert, badge: true },
   { href: '/projects', label: 'Projects', icon: Folder },
   { href: '/rules', label: 'Rules', icon: Book },
+  { href: '/evidence', label: 'Evidence', icon: File },
   { href: '/settings', label: 'Settings', icon: Settings },
 ];
 

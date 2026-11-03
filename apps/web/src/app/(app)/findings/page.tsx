@@ -4,6 +4,8 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { Suspense, useEffect, useState } from 'react';
 import useSWR from 'swr';
 
+import { controlsFor, FRAMEWORKS } from '@fortis/shared';
+
 import { Alert, Check, Search, Shield } from '@/components/icons';
 import { Words } from '@/components/motion';
 import { useSession } from '@/components/session';
@@ -81,6 +83,9 @@ function FindingDrawer({ id, onClose, onChanged }: { id: string; onClose: () => 
               <dt>Last seen</dt><dd>{timeAgo(f.lastSeenAt)}</dd>
               {f.statusReason ? (<><dt>Reason</dt><dd>{f.statusReason}</dd></>) : null}
             </dl>
+            <div className="ctl-chips" aria-label="Compliance controls">
+              {controlsFor(f.ruleId).map((ctl) => <span key={`${ctl.framework}-${ctl.ref}`} title={ctl.title}>{FRAMEWORKS[ctl.framework].short} {ctl.framework === 'cbn' ? `· ${ctl.ref}` : ctl.ref}</span>)}
+            </div>
             {f.snippet ? <div className="snippet">{f.snippet}</div> : null}
             {data.rule ? (
               <div className="rule-box">

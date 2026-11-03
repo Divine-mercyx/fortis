@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { createPublicKey, verify } from 'node:crypto';
 
 import type { FastifyInstance } from 'fastify';
@@ -204,5 +205,33 @@ describe('rule health', () => {
     const health = (await c.req({ method: 'GET', url: `/v1/orgs/${c.orgId}/rules/health` })).json().rules;
     expect(health.find((r: { ruleId: string }) => r.ruleId === 'FX-OWN-001')).toMatchObject({ total: 2, triaged: 2, falsePositive: 1, falsePositiveRate: 0.5 });
     expect(health.find((r: { ruleId: string }) => r.ruleId === 'FX-SEC-001')).toMatchObject({ open: 1, falsePositiveRate: null });
+  });
+});
+
+describe('evidence pack', () => {
+  it('is gated by plan, covers the period and is tamper-evident', async () => {
+    const free = await signup(app);
+    expect((await free.req({ method: 'GET', url: `/v1/orgs/${free.orgId}/evidence` })).statusCode).toBe(402);
+
+    const { c, key } = await coreProject();
+    await upload(key, scanPayload([liveKeyFinding, ownershipFinding]));
+    const list = (await c.req({ method: 'GET', url: `/v1/orgs/${c.orgId}/findings` })).json().findings as { id: string; ruleId: string }[];
+    await c.req({ method: 'PATCH', url: `/v1/orgs/${c.orgId}/findings/${list.find((f) => f.ruleId === 'FX-OWN-001')!.id}`, payload: { status: 'accepted_risk', reason: 'Internal route, scoped by gateway' } });
+
+    const basic = (await c.req({ method: 'GET', url: `/v1/orgs/${c.orgId}/evidence` })).json();
+    expect(basic.level).toBe('basic');
+    expect(basic.findings).toHaveLength(2);
+    expect(basic.summary.detected).toBe(2);
+    expect(basic.decisions[0]).toMatchObject({ decision: 'accepted_risk', reason: 'Internal route, scoped by gateway', by: 'Ada Okafor' });
+    expect(basic.trail).toEqual([]);
+    const { digest, ...content } = basic;
+    expect(digest).toBe(createHash('sha256').update(JSON.stringify(content)).digest('hex'));
+    expect(JSON.stringify(basic)).not.toContain(FAKE_LIVE_KEY);
+
+    await setPlan(c.orgId, 'plus');
+    const full = (await c.req({ method: 'GET', url: `/v1/orgs/${c.orgId}/evidence` })).json();
+    expect(full.level).toBe('full');
+    expect(full.trail.length).toBeGreaterThanOrEqual(3);
+    expect(full.adminLog.some((a: { action: string }) => a.action === 'token.created')).toBe(true);
   });
 });
