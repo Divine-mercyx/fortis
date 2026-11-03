@@ -9,7 +9,7 @@ The marketing site lives in a separate repo (`fortis-website`).
 
 ```
 apps/api         Backend API (Fastify, PostgreSQL, Drizzle)
-apps/web         Dashboard (Next.js), coming next
+apps/web         Dashboard (Next.js), styled like fortis.dev
 packages/shared  Plans, rule catalogue and request schemas shared by every app
 ```
 
@@ -22,7 +22,11 @@ pnpm install
 cp apps/api/.env.example apps/api/.env   # then set DATABASE_URL
 pnpm db:migrate
 pnpm dev:api                             # http://localhost:4000
+pnpm dev:web                             # http://localhost:3000 (proxies /api to the API)
 ```
+
+The dashboard calls the API through its own `/api` path (see `apps/web/next.config.ts`), so the
+session cookie stays first-party. Set `API_URL` for the dashboard when the API runs elsewhere.
 
 Run the checks:
 
@@ -66,6 +70,21 @@ Core and above upload findings to the dashboard. Until billing is built, set a p
 ```bash
 pnpm --filter @fortis/api exec tsx scripts/set-plan.ts <org-slug> core
 ```
+
+## Dashboard
+
+Next.js App Router with no UI framework: the design tokens, fonts, buttons and motion are ported from
+the marketing site into `apps/web/src/app/globals.css`.
+
+| Page | What it shows |
+|---|---|
+| `/login`, `/signup` | Sign in, or create a workspace (free plan, owner role) |
+| `/overview` | Open criticals, 30-day detected vs fixed, severity breakdown, fix speed, recent scans, activity |
+| `/findings` | Filter and search, then a drawer with the rule explanation, fix, evidence trail and status actions |
+| `/projects`, `/projects/:id` | Projects, CLI setup steps, keys (shown once, revocable), scans |
+| `/settings` | Workspace name, plan and usage, team and roles, audit log |
+
+The CLI package name shown in the dashboard is set in `apps/web/src/lib/cli.ts`.
 
 ## Deploying the API
 
