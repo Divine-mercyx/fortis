@@ -13,6 +13,7 @@ export default defineConfig({
       DATABASE_URL: process.env.TEST_DATABASE_URL ?? 'postgres://postgres:postgres@localhost:5432/fortis_test',
       WEB_ORIGINS: 'http://localhost:3000',
       WEB_URL: 'http://localhost:3000',
+      AUTH_RATE_LIMIT_PER_MIN: '1000',
     },
   },
 });

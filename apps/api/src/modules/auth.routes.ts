@@ -13,7 +13,7 @@ import { slugWithSuffix } from '../lib/slug';
 import { parse } from '../lib/validate';
 import { requireUser, SESSION_COOKIE, startSession } from '../plugins/auth';
 
-const authRateLimit = { rateLimit: { max: 10, timeWindow: '1 minute' } };
+const authRateLimit = { rateLimit: { max: env.AUTH_RATE_LIMIT_PER_MIN, timeWindow: '1 minute' } };
 
 export async function listUserOrgs(userId: string) {
   const rows = await db
