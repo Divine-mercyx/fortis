@@ -61,6 +61,20 @@ Or exclude paths in `.fortis.json`: `{ "ignore": ["fixtures/**"] }`.
 
 The git hook can be skipped once with `git push --no-verify`.
 
+## Releasing (maintainers)
+
+First release, from a maintainer's machine (npm asks for a 2FA code):
+
+```bash
+pnpm install && pnpm --filter fortis-watchdog build
+cd packages/cli && pnpm publish --access public --tag beta
+```
+
+Then on npmjs.com: package → Settings → Trusted publishing → GitHub Actions, repository
+`Divine-mercyx/fortis`, workflow `release-cli.yml`. After that, bump `version` in
+`packages/cli/package.json` and push a matching tag (for example `cli-v0.1.0`); GitHub Actions
+tests, builds and publishes with provenance. Versions with a pre-release suffix go to the `beta` tag.
+
 ## Configuration
 
 `.fortis.json` (committed; never contains the key):

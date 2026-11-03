@@ -1,0 +1,49 @@
+name: Release CLI
+
+# Publishes fortis-watchdog to npm when a tag like cli-v0.1.1 is pushed.
+# Uses npm trusted publishing (OIDC): no npm token is stored in GitHub, and every
+# release carries a signed provenance statement linking it to this workflow run.
+# One-time setup on npmjs.com: package → Settings → Trusted publishing → GitHub Actions,
+# repository Divine-mercyx/fortis, workflow release-cli.yml.
+
+on:
+  push:
+    tags: ['cli-v*']
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          registry-url: https://registry.npmjs.org
+      - name: Trusted publishing needs npm 11.5 or later
+        run: npm install -g npm@latest
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter fortis-watchdog typecheck
+      - run: pnpm --filter fortis-watchdog test
+      - name: Check the tag matches the package version
+        working-directory: packages/cli
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          if [ "cli-v$VERSION" != "$GITHUB_REF_NAME" ]; then
+            echo "Tag $GITHUB_REF_NAME does not match package version $VERSION"; exit 1
+          fi
+      - name: Build
+        working-directory: packages/cli
+        run: node build.mjs
+      - name: Publish
+        working-directory: packages/cli
+        run: |
+          # The CLI is a single bundled file; drop workspace-only dev dependencies from the published manifest.
+          npm pkg delete devDependencies
+          TAG=$(node -p "require('./package.json').version.includes('-') ? 'beta' : 'latest'")
+          npm publish --provenance --access public --tag "$TAG"

@@ -1,18 +1,45 @@
 {
   "name": "fortis-watchdog",
-  "version": "0.1.0",
+  "version": "0.1.0-beta.0",
   "description": "Fortis: fintech security checks on every push, for African fintech teams.",
+  "homepage": "https://fortis.dev",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Divine-mercyx/fortis.git",
+    "directory": "packages/cli"
+  },
+  "bugs": {
+    "url": "https://github.com/Divine-mercyx/fortis/issues"
+  },
+  "author": "Fortis",
   "type": "module",
-  "bin": { "fortis": "dist/fortis.js" },
-  "files": ["dist", "README.md"],
-  "engines": { "node": ">=18.17" },
-  "keywords": ["security", "fintech", "paystack", "flutterwave", "secrets", "pre-push", "nigeria"],
-  "license": "UNLICENSED",
+  "bin": {
+    "fortis": "dist/fortis.js"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=18.17"
+  },
+  "keywords": [
+    "security",
+    "fintech",
+    "paystack",
+    "flutterwave",
+    "secrets",
+    "pre-push",
+    "nigeria"
+  ],
+  "license": "MIT",
   "scripts": {
     "build": "node build.mjs",
     "typecheck": "tsc -p tsconfig.json",
     "test": "vitest run",
-    "fortis": "tsx src/index.ts"
+    "fortis": "tsx src/index.ts",
+    "prepublishOnly": "node build.mjs"
   },
   "devDependencies": {
     "@fortis/shared": "workspace:*",
@@ -21,5 +48,9 @@
     "tsx": "^4.23.15",
     "typescript": "5.9.3",
     "vitest": "^3.2.7"
+  },
+  "publishConfig": {
+    "access": "public",
+    "tag": "beta"
   }
 }
