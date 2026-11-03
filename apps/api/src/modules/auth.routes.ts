@@ -3,6 +3,7 @@ import type { FastifyInstance } from 'fastify';
 
 import { loginSchema, PLANS, isPlanId, signupSchema } from '@fortis/shared';
 
+import { env } from '../config/env';
 import { db } from '../db/client';
 import { memberships, organizations, sessions, users } from '../db/schema';
 import { audit } from '../lib/audit';
@@ -33,7 +34,7 @@ export async function authRoutes(app: FastifyInstance) {
       const existing = await tx.select({ id: users.id }).from(users).where(sql`lower(${users.email}) = ${input.email}`).limit(1);
       if (existing.length) throw conflict('An account with this email already exists. Try signing in.', 'EMAIL_TAKEN');
       const [user] = await tx.insert(users).values({ email: input.email, name: input.name, passwordHash }).returning();
-      const [org] = await tx.insert(organizations).values({ name: input.company, slug: slugWithSuffix(input.company) }).returning();
+      const [org] = await tx.insert(organizations).values({ name: input.company, slug: slugWithSuffix(input.company), plan: env.DEFAULT_PLAN }).returning();
       await tx.insert(memberships).values({ orgId: org!.id, userId: user!.id, role: 'owner' });
       req.user = { id: user!.id, email: user!.email, name: user!.name };
       await audit(tx, req, { orgId: org!.id, action: 'org.created', targetType: 'organization', targetId: org!.id });

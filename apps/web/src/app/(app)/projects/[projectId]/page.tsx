@@ -49,8 +49,10 @@ function NewKey({ projectId, onClose, onCreated }: { projectId: string; onClose:
           <div className="warn"><Alert /> Copy it now. For your security, Fortis only shows it once.</div>
           <div className="code"><code>{secret}</code><CopyButton text={secret} /></div>
         </div>
-        <p className="small" style={{ marginTop: 0 }}>Store it as <span className="mono">FORTIS_KEY</span> in your CI secrets, or run the init command below on your machine.</p>
-        <CodeLine cmd={`FORTIS_KEY=${secret.slice(0, 8)}… npx ${CLI_COMMAND} init`} />
+        <p className="small" style={{ marginTop: 0 }}>In your repository, install the CLI and connect it with this key:</p>
+        <CodeLine cmd={`npm i -D ${CLI_PACKAGE}`} />
+        <CodeLine cmd={`npx ${CLI_COMMAND} init --key ${secret}`} />
+        <p className="small" style={{ marginBottom: 0 }}>For CI, save the key as a secret named <span className="mono">FORTIS_KEY</span> and run <span className="mono">npx {CLI_COMMAND} scan --ci</span>.</p>
         <div className="modal-actions" style={{ marginTop: 18 }}>
           <button className="btn btn-primary" onClick={onClose}><Check /> I've saved it</button>
         </div>

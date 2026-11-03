@@ -12,6 +12,8 @@ const schema = z.object({
   /** Public dashboard URL, used in CLI responses. */
   WEB_URL: z.string().default('http://localhost:3000'),
   SESSION_TTL_DAYS: z.coerce.number().int().min(1).max(90).default(14),
+  /** Plan for new workspaces (e.g. core during early access and demos). */
+  DEFAULT_PLAN: z.enum(['free', 'core', 'plus', 'enterprise']).default('free'),
   COOKIE_SECURE: z.enum(['true', 'false']).optional(),
   /** Ed25519 private key (PEM) that signs rule packs. Required in production. */
   RULES_SIGNING_PRIVATE_KEY: z.string().optional(),

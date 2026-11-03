@@ -13,7 +13,7 @@ await build({
   banner: { js: '#!/usr/bin/env node' },
   define: {
     __FORTIS_VERSION__: JSON.stringify(pkg.version),
-    __FORTIS_API_URL__: JSON.stringify(process.env.FORTIS_DEFAULT_API_URL ?? 'https://api.fortis.dev'),
+    __FORTIS_API_URL__: JSON.stringify(process.env.FORTIS_DEFAULT_API_URL ?? 'https://fortis-api-prqr.onrender.com'),
   },
   legalComments: 'none',
 });

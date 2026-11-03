@@ -80,7 +80,7 @@ tests, builds and publishes with provenance. Versions with a pre-release suffix 
 `.fortis.json` (committed; never contains the key):
 
 ```json
-{ "projectId": "…", "failOn": "critical", "ignore": ["fixtures/**"], "apiUrl": "https://api.fortis.dev" }
+{ "projectId": "…", "failOn": "critical", "ignore": ["fixtures/**"], "apiUrl": "https://fortis-api-prqr.onrender.com" }
 ```
 
 Keys are read from `FORTIS_KEY`, then from `~/.config/fortis/credentials.json` (written by `fortis login`, mode 0600).
