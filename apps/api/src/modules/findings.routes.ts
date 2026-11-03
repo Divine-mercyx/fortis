@@ -184,7 +184,15 @@ export async function findingsRoutes(app: FastifyInstance) {
           (select count(*)::int from scans where org_id = ${orgId} and created_at > now() - interval '30 days') as "scans30d",
           (select count(*)::int from scans where org_id = ${orgId} and trigger = 'pre-push' and created_at > now() - interval '30 days') as "prePush30d",
           (select count(*)::int from findings where org_id = ${orgId} and status = 'fixed' and fixed_at > now() - interval '30 days') as "fixed30d",
-          (select count(*)::int from projects where org_id = ${orgId}) as projects`),
+          (select count(*)::int from projects where org_id = ${orgId}) as projects,
+          (select count(*)::int from scans where org_id = ${orgId}) as "scansAllTime",
+          (select count(*)::int from project_tokens where org_id = ${orgId} and revoked_at is null) as "activeKeys",
+          (select count(*)::int from memberships where org_id = ${orgId}) as members,
+          (select count(*)::int from finding_events where org_id = ${orgId} and to_status in ('fixed','accepted_risk','false_positive')) as "resolvedAllTime",
+          (select count(*)::int from finding_events where org_id = ${orgId}) as "evidenceEvents",
+          (select count(*)::int from scans where org_id = ${orgId} and trigger = 'ci' and created_at > now() - interval '30 days') as "ci30d",
+          (select coalesce(sum(new_count), 0)::int from scans where org_id = ${orgId} and trigger = 'pre-push' and created_at > now() - interval '30 days') as "blockedPrePush30d",
+          (select extract(day from now() - min(first_seen_at))::int from findings where org_id = ${orgId} and status = 'open' and severity = 'critical') as "oldestOpenCriticalDays"`),
       db.execute(sql`
         select percentile_cont(0.5) within group (order by extract(epoch from (fixed_at - first_seen_at)))::float as seconds
         from findings where org_id = ${orgId} and severity = 'critical' and status = 'fixed' and fixed_at is not null`),
@@ -199,7 +207,19 @@ export async function findingsRoutes(app: FastifyInstance) {
       .where(eq(auditLog.orgId, orgId))
       .orderBy(desc(auditLog.createdAt))
       .limit(8);
+    const byProject = await db.execute(sql`
+      select p.id, p.name,
+        count(*) filter (where f.severity = 'critical')::int as critical,
+        count(*) filter (where f.severity = 'high')::int as high,
+        count(*)::int as total,
+        min(f.first_seen_at) as "oldestOpenAt"
+      from findings f join projects p on p.id = f.project_id
+      where f.org_id = ${orgId} and f.status = 'open'
+      group by p.id, p.name
+      order by critical desc, high desc, total desc
+      limit 6`);
     return {
+      openByProject: byProject.rows,
       open,
       openTotal: Object.values(open).reduce((a, b) => a + b, 0),
       trend: trend.rows,

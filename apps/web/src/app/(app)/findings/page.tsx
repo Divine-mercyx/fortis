@@ -142,6 +142,14 @@ function FindingDrawer({ id, onClose, onChanged }: { id: string; onClose: () => 
   );
 }
 
+/** How long a finding has been (or was) open, coloured by urgency. */
+function AgeTag({ from, to }: { from: string; to: string | null }) {
+  const days = Math.max(0, Math.floor(((to ? new Date(to) : new Date()).getTime() - new Date(from).getTime()) / 86_400_000));
+  const text = days === 0 ? 'Today' : `${days} day${days === 1 ? '' : 's'}`;
+  const tone = to ? 'muted' : days > 14 ? 'age-red' : days > 3 ? 'age-amber' : 'age-ok';
+  return <span className={`age ${tone}`} title={to ? 'Time it was open' : 'Open for'}>{text}</span>;
+}
+
 function FindingsInner() {
   const { org } = useSession();
   const router = useRouter();
@@ -174,6 +182,7 @@ function FindingsInner() {
   const key = `/v1/orgs/${org.id}/findings?${query.toString()}`;
   const { data, mutate } = useSWR<{ findings: FindingRow[]; total: number }>(key, fetcher, { keepPreviousData: true });
   const { data: projects } = useSWR<{ projects: ProjectRow[] }>(`/v1/orgs/${org.id}/projects`, fetcher);
+  const { data: summary } = useSWR<{ open: Record<string, number> }>(`/v1/orgs/${org.id}/overview`, fetcher);
 
   return (
     <div className="stack">
@@ -183,6 +192,20 @@ function FindingsInner() {
           <h1 className="display"><Words>Every issue, <span className="it accent">one list.</span></Words></h1>
           <p className="lead reveal" style={{ ['--d' as string]: '150ms' }}>From pre-push checks and CI, de-duplicated, with the full history of each fix.</p>
         </div>
+      </div>
+
+      <div className="sev-chips reveal" style={{ ['--d' as string]: '180ms' }}>
+        {(['critical', 'high', 'medium', 'low'] as const).map((s) => (
+          <button
+            key={s}
+            className={`sev-chip c-${s}${severity === s ? ' on' : ''}`}
+            onClick={() => setParam('severity', severity === s ? '' : s)}
+          >
+            <b>{summary ? summary.open[s] ?? 0 : '–'}</b>
+            <span>open {s}</span>
+            <small>{s === 'critical' ? 'Blocks the push' : s === 'high' ? 'Fix this sprint' : s === 'medium' ? 'Plan a fix' : 'Hygiene'}</small>
+          </button>
+        ))}
       </div>
 
       <section className="card reveal" style={{ ['--d' as string]: '200ms' }}>
@@ -220,7 +243,7 @@ function FindingsInner() {
           <div className="table-wrap">
             <table className="table">
               <thead>
-                <tr><th>Severity</th><th>Finding</th><th>Status</th><th>Project</th><th>Last seen</th></tr>
+                <tr><th>Severity</th><th>Finding</th><th>Status</th><th>Project</th><th>Age</th><th>Last seen</th></tr>
               </thead>
               <tbody>
                 {(data?.findings ?? Array.from({ length: 5 }, () => null)).map((f, i) =>
@@ -233,10 +256,11 @@ function FindingsInner() {
                       </td>
                       <td><StatusTag status={f.status} /></td>
                       <td>{f.projectName}</td>
+                      <td><AgeTag from={f.firstSeenAt} to={f.status === 'open' ? null : f.fixedAt} /></td>
                       <td className="muted">{timeAgo(f.lastSeenAt)}</td>
                     </tr>
                   ) : (
-                    <tr key={i}><td colSpan={5}><Skeleton h={30} /></td></tr>
+                    <tr key={i}><td colSpan={6}><Skeleton h={30} /></td></tr>
                   ),
                 )}
               </tbody>

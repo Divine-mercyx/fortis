@@ -204,7 +204,7 @@ export default function SettingsPage() {
       </section>
 
       {isAdmin ? (
-        <section className="card reveal" style={{ ['--d' as string]: '200ms' }}>
+        <section id="audit" className="card reveal" style={{ ['--d' as string]: '200ms' }}>
           <div className="card-head"><h3>Audit log</h3><span className="small">Last 100 actions</span></div>
           <div className="table-wrap">
             <table className="table">

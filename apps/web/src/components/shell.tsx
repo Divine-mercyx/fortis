@@ -8,13 +8,15 @@ import useSWR from 'swr';
 import { api, fetcher } from '@/lib/api';
 import { initials } from '@/lib/format';
 
-import { Alert, Chevron, Folder, Home, LogoMark, Logout, Menu, Settings } from './icons';
+import { Alert, Book, Chevron, Folder, Home, LogoMark, Logout, Menu, Search, Settings } from './icons';
+import { CommandPalette } from './palette';
 import { useSession } from './session';
 
 const NAV = [
   { href: '/overview', label: 'Overview', icon: Home },
   { href: '/findings', label: 'Findings', icon: Alert, badge: true },
   { href: '/projects', label: 'Projects', icon: Folder },
+  { href: '/rules', label: 'Rules', icon: Book },
   { href: '/settings', label: 'Settings', icon: Settings },
 ];
 
@@ -92,6 +94,10 @@ export function Shell({ children }: { children: ReactNode }) {
         </nav>
 
         <div className="side-foot">
+          <a className="help-card" href="https://fortis.dev/faq.html" target="_blank" rel="noreferrer noopener">
+            <strong>New to Fortis?</strong>
+            <span>How the checks work, what we see, and what we never touch.</span>
+          </a>
           <div className="plan-card">
             <strong>{org.planName}</strong>
             <span>{org.plan === 'free' ? 'Results stay on your machine. Upgrade to sync findings.' : 'Findings sync from every push and CI run.'}</span>
@@ -121,6 +127,11 @@ export function Shell({ children }: { children: ReactNode }) {
             <span className="cur">{current?.label ?? 'Fortis'}</span>
           </div>
           <div className="right">
+            <button className="kbar" onClick={() => window.dispatchEvent(new Event('fortis:palette'))}>
+              <Search />
+              <span>Search</span>
+              <kbd>⌘K</kbd>
+            </button>
             <span className="live">
               <span className="s-dot" />
               Watching every release
@@ -128,6 +139,7 @@ export function Shell({ children }: { children: ReactNode }) {
           </div>
         </header>
         <main className="content">{children}</main>
+        <CommandPalette />
       </div>
     </div>
   );

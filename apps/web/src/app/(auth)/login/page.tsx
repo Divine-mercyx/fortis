@@ -6,6 +6,7 @@ import { Suspense, useState } from 'react';
 
 import { Arrow } from '@/components/icons';
 import { Words } from '@/components/motion';
+import { PasswordField } from '@/components/password-field';
 import { FormError } from '@/components/ui';
 import { api } from '@/lib/api';
 import { safeNext } from '@/lib/format';
@@ -34,25 +35,23 @@ function LoginForm() {
     <form className="auth-form" onSubmit={onSubmit} noValidate>
       <span className="eyebrow reveal">Welcome back</span>
       <h1><Words>Sign in to <span className="it accent">Fortis.</span></Words></h1>
-      <p className="lead reveal" style={{ ['--d' as string]: '150ms' }}>See every finding, fix and re-test across your services.</p>
+      <p className="lead reveal" style={{ ['--d' as string]: '150ms' }}>
+        Pick up where your last push left off: open findings, fixes and the evidence trail.
+      </p>
       <div className="reveal" style={{ ['--d' as string]: '220ms' }}>
         <FormError message={error} />
         <label className="field">
           <span>Work email</span>
-          <input className="input" name="email" type="email" autoComplete="email" placeholder="you@company.com" required />
+          <input className="input" name="email" type="email" autoComplete="email" placeholder="you@company.com" required autoFocus />
         </label>
-        <label className="field">
-          <span>Password</span>
-          <input className="input" name="password" type="password" autoComplete="current-password" placeholder="Your password" required />
-        </label>
-        <button className="btn btn-primary btn-block" disabled={busy} type="submit">
+        <PasswordField name="password" label="Password" placeholder="Your password" autoComplete="current-password" />
+        <button className="btn btn-primary btn-block btn-lg" disabled={busy} type="submit">
           {busy ? <span className="spinner" /> : null}
           {busy ? 'Signing in…' : 'Sign in'}
           {!busy ? <Arrow className="arr" /> : null}
         </button>
-        <p className="auth-alt">
-          New to Fortis? <Link href="/signup">Create an account</Link>
-        </p>
+        <div className="auth-divider"><span>New to Fortis?</span></div>
+        <Link href="/signup" className="btn btn-outline btn-block btn-lg">Create a free workspace</Link>
       </div>
     </form>
   );
