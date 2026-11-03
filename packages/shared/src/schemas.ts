@@ -52,6 +52,8 @@ export const cliFindingSchema = z.object({
   file: z.string().trim().min(1).max(500),
   line: z.number().int().min(0).max(10_000_000).optional(),
   snippet: z.string().max(MAX_SNIPPET_LENGTH).optional(),
+  /** Longer explanation and fix from the tool (used for DAST findings, which have no catalogue entry). */
+  detail: z.string().max(4000).optional(),
   /** Stable hash from the CLI; the API computes one if missing. */
   fingerprint: z.string().trim().min(8).max(128).optional(),
 });
@@ -61,6 +63,10 @@ export const cliScanSchema = z.object({
   /** Client-generated UUID so retries don't create duplicate scans. */
   scanId: z.string().uuid(),
   trigger: z.enum(['pre-push', 'ci', 'manual']),
+  /** code: static checks of the repository. dast: OWASP ZAP against a verified staging target. */
+  kind: z.enum(['code', 'dast']).default('code'),
+  targetId: z.string().uuid().optional(),
+  dastMode: z.enum(['baseline', 'full']).optional(),
   /** "changed" scans only cover changed files, so they never auto-close findings. */
   scope: z.enum(['changed', 'full']),
   commit: z.string().trim().max(64).optional(),
@@ -72,6 +78,29 @@ export const cliScanSchema = z.object({
   findings: z.array(cliFindingSchema).max(MAX_FINDINGS_PER_SCAN),
 });
 export type CliScanInput = z.infer<typeof cliScanSchema>;
+
+/* ---------- Staging targets (DAST) ---------- */
+
+export const createTargetSchema = z.object({
+  url: z
+    .string()
+    .trim()
+    .url()
+    .max(500)
+    .refine((u) => /^https?:\/\//i.test(u), 'Use an http(s) URL'),
+  environment: z.enum(['staging', 'development', 'production']),
+  label: z.string().trim().max(80).optional(),
+});
+
+export const authorizeTargetSchema = z.object({
+  signerName: z.string().trim().min(3).max(120),
+  accept: z.literal(true),
+});
+
+/** Version of the testing-authorisation wording the signer agreed to. */
+export const TARGET_AUTHORIZATION_VERSION = '2026-11';
+export const TARGET_AUTHORIZATION_TEXT =
+  'I confirm that my organisation owns or has written permission to test this target, that it is a non-production environment using test data only, and I authorise Fortis to run automated security tests against it, including active attack simulations when my plan and settings allow. Tests can be paused at any time.';
 
 /* ---------- Findings ---------- */
 

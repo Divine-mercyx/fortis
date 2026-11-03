@@ -19,6 +19,7 @@ const listQuery = z.object({
   status: z.enum(FINDING_STATUSES).optional(),
   severity: z.enum(SEVERITIES).optional(),
   q: z.string().trim().max(100).optional(),
+  kind: z.enum(['code', 'dast']).optional(),
   limit: z.coerce.number().int().min(1).max(100).default(50),
   offset: z.coerce.number().int().min(0).max(100_000).default(0),
 });
@@ -36,6 +37,7 @@ export async function findingsRoutes(app: FastifyInstance) {
     if (q.projectId) where.push(eq(findings.projectId, q.projectId));
     if (q.status) where.push(eq(findings.status, q.status));
     if (q.severity) where.push(eq(findings.severity, q.severity));
+    if (q.kind) where.push(eq(findings.kind, q.kind));
     if (q.q) {
       const like = `%${q.q.replace(/[%_\\]/g, (c) => `\\${c}`)}%`;
       where.push(sql`(${findings.title} ilike ${like} or ${findings.file} ilike ${like} or ${findings.ruleId} ilike ${like})`);
@@ -47,6 +49,8 @@ export async function findingsRoutes(app: FastifyInstance) {
           projectId: findings.projectId,
           projectName: projects.name,
           ruleId: findings.ruleId,
+          kind: findings.kind,
+          targetId: findings.targetId,
           severity: findings.severity,
           title: findings.title,
           file: findings.file,
@@ -149,6 +153,8 @@ export async function findingsRoutes(app: FastifyInstance) {
         projectId: scans.projectId,
         projectName: projects.name,
         trigger: scans.trigger,
+        kind: scans.kind,
+        dastMode: scans.dastMode,
         scope: scans.scope,
         branch: scans.branch,
         commit: scans.commit,
@@ -192,6 +198,10 @@ export async function findingsRoutes(app: FastifyInstance) {
           (select count(*)::int from finding_events where org_id = ${orgId}) as "evidenceEvents",
           (select count(*)::int from scans where org_id = ${orgId} and trigger = 'ci' and created_at > now() - interval '30 days') as "ci30d",
           (select coalesce(sum(new_count), 0)::int from scans where org_id = ${orgId} and trigger = 'pre-push' and created_at > now() - interval '30 days') as "blockedPrePush30d",
+          (select count(*)::int from targets where org_id = ${orgId}) as targets,
+          (select count(*)::int from targets where org_id = ${orgId} and verified_at is not null and authorized_at is not null and paused_at is null) as "targetsReady",
+          (select count(*)::int from scans where org_id = ${orgId} and kind = 'dast' and created_at > now() - interval '30 days') as "dast30d",
+          (select count(*)::int from findings where org_id = ${orgId} and kind = 'dast' and status = 'open') as "dastOpen",
           (select extract(day from now() - min(first_seen_at))::int from findings where org_id = ${orgId} and status = 'open' and severity = 'critical') as "oldestOpenCriticalDays"`),
       db.execute(sql`
         select percentile_cont(0.5) within group (order by extract(epoch from (fixed_at - first_seen_at)))::float as seconds

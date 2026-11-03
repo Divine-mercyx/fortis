@@ -1,11 +1,11 @@
-import { and, eq, inArray, notInArray } from 'drizzle-orm';
+import { and, eq, inArray, notInArray, sql } from 'drizzle-orm';
 
 import { findRule, type CliScanInput } from '@fortis/shared';
 
 import { db } from '../db/client';
-import { findingEvents, findings, scans } from '../db/schema';
+import { findingEvents, findings, scans, targets } from '../db/schema';
 import { sha256 } from '../lib/crypto';
-import { maskSnippet } from '../lib/mask';
+import { maskSnippet, maskText } from '../lib/mask';
 import type { CliAuth } from '../plugins/auth';
 
 export type IngestResult = {
@@ -32,6 +32,8 @@ function fingerprintOf(ruleId: string, file: string, snippet: string | null, lin
  * closes open findings it no longer sees. Everything is written as finding events for the evidence trail.
  */
 export async function ingestScan(auth: CliAuth, input: CliScanInput): Promise<IngestResult> {
+  const isDast = input.kind === 'dast';
+  const targetId = isDast ? (input.targetId ?? null) : null;
   return db.transaction(async (tx) => {
     const inserted = await tx
       .insert(scans)
@@ -41,6 +43,9 @@ export async function ingestScan(auth: CliAuth, input: CliScanInput): Promise<In
         tokenId: auth.tokenId,
         clientScanId: input.scanId,
         trigger: input.trigger,
+        kind: input.kind,
+        targetId,
+        dastMode: isDast ? (input.dastMode ?? 'baseline') : null,
         scope: input.scope,
         commit: input.commit ?? null,
         branch: input.branch ?? null,
@@ -74,20 +79,26 @@ export async function ingestScan(auth: CliAuth, input: CliScanInput): Promise<In
     // Normalise, mask and de-duplicate within this upload.
     const incoming = new Map<string, {
       ruleId: string; severity: string; title: string; file: string; line: number | null; snippet: string | null;
+      detail: string | null; kind: string; targetId: string | null;
     }>();
     for (const f of input.findings) {
       const file = normaliseFile(f.file);
       const snippet = f.snippet ? maskSnippet(f.snippet) : null;
-      const fingerprint = f.fingerprint ?? fingerprintOf(f.ruleId, file, snippet, f.line);
+      const base = f.fingerprint ?? fingerprintOf(f.ruleId, file, snippet, f.line);
+      // DAST findings are per target, so the same alert on two environments stays two findings.
+      const fingerprint = isDast ? sha256(`dast|${targetId}|${base}`).slice(0, 40) : base;
       if (incoming.has(fingerprint)) continue;
       incoming.set(fingerprint, {
         ruleId: f.ruleId,
         severity: f.severity,
-        // Dependency findings keep the CLI's specific title (package, version and advisory).
-        title: f.ruleId === 'DEP-OSV' ? f.title : (findRule(f.ruleId)?.title ?? f.title),
+        // Dependency and ZAP findings keep the tool's specific title; catalogue rules use ours.
+        title: f.ruleId === 'DEP-OSV' || isDast ? f.title : (findRule(f.ruleId)?.title ?? f.title),
         file,
         line: f.line ?? null,
         snippet,
+        detail: f.detail ? maskText(f.detail).slice(0, 4000) : null,
+        kind: input.kind,
+        targetId,
       });
     }
     const fingerprints = [...incoming.keys()];
@@ -148,6 +159,7 @@ export async function ingestScan(auth: CliAuth, input: CliScanInput): Promise<In
           title: f.title,
           line: f.line,
           snippet: f.snippet,
+          detail: f.detail,
           lastSeenAt: now,
           lastScanId: scan.id,
           ...(reopen ? { status: 'open', fixedAt: null, statusReason: null } : {}),
@@ -165,7 +177,14 @@ export async function ingestScan(auth: CliAuth, input: CliScanInput): Promise<In
     // A full scan that no longer sees an open finding means it was fixed.
     let fixedCount = 0;
     if (input.scope === 'full') {
-      const conditions = [eq(findings.projectId, auth.projectId), eq(findings.status, 'open')];
+      const conditions = [eq(findings.projectId, auth.projectId), eq(findings.status, 'open'), eq(findings.kind, input.kind)];
+      if (isDast) {
+        conditions.push(eq(findings.targetId, targetId!));
+        // A passive baseline can't see what an active scan found, so it only closes baseline findings.
+        if ((input.dastMode ?? 'baseline') === 'baseline') {
+          conditions.push(sql`${findings.lastScanId} in (select id from scans where dast_mode = 'baseline')`);
+        }
+      }
       if (fingerprints.length) conditions.push(notInArray(findings.fingerprint, fingerprints));
       const closed = await tx
         .update(findings)
@@ -187,6 +206,7 @@ export async function ingestScan(auth: CliAuth, input: CliScanInput): Promise<In
       .update(scans)
       .set({ findingsCount: incoming.size, newCount, reopenedCount, fixedCount })
       .where(eq(scans.id, scan.id));
+    if (targetId) await tx.update(targets).set({ lastRunAt: now }).where(eq(targets.id, targetId));
 
     return { scanId: scan.id, duplicate: false, findingsCount: incoming.size, newCount, reopenedCount, fixedCount, findings: out };
   });

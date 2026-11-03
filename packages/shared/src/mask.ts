@@ -53,3 +53,8 @@ export function maskSnippet(snippet: string): string {
   }
   return out.replace(/[\r\n]+/g, ' ').trim();
 }
+
+/** Masks multi-line text (tool descriptions and advice) while keeping its line breaks. */
+export function maskText(text: string): string {
+  return text.split(/\r?\n/).map((l) => (l.trim() ? maskSnippet(l) : '')).join('\n');
+}

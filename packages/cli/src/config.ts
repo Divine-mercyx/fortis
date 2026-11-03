@@ -10,6 +10,8 @@ export type ProjectConfig = {
   projectId?: string;
   failOn?: Severity;
   ignore?: string[];
+  /** Default staging URL for `fortis test`. */
+  target?: string;
 };
 
 export const PROJECT_CONFIG = '.fortis.json';

@@ -18,9 +18,11 @@ export type WhoAmI = {
   project: { id: string; name: string };
   org: { id: string; name: string };
   plan: { id: string; name: string };
-  entitlements: { rulePacks: RulePack[]; uploadFindings: boolean; releaseGates: boolean; blockOn: string };
+  entitlements: { rulePacks: RulePack[]; uploadFindings: boolean; releaseGates: boolean; blockOn: string; dast?: 'none' | 'baseline' | 'full' };
   rulesVersion: string;
 };
+
+export type CliTarget = { id: string; url: string; environment: string; label: string | null; status: string; blocker: string | null };
 
 export function client(api: string, key: string, fetchImpl: typeof fetch = fetch) {
   async function call<T>(path: string, init: { method?: string; body?: unknown } = {}): Promise<T> {
@@ -47,6 +49,10 @@ export function client(api: string, key: string, fetchImpl: typeof fetch = fetch
 
   return {
     whoami: () => call<WhoAmI>('/v1/cli/whoami'),
+    targets: (url?: string, mode: 'baseline' | 'full' = 'baseline') =>
+      call<{ plan: { id: string; dast: string }; targets: CliTarget[] }>(
+        `/v1/cli/targets?mode=${mode}${url ? `&url=${encodeURIComponent(url)}` : ''}`,
+      ),
     upload: (body: unknown) => call<{ scanId: string; newCount: number; fixedCount: number; reopenedCount: number; duplicate: boolean; dashboardUrl: string }>('/v1/cli/scans', { method: 'POST', body }),
     async rulePacks(): Promise<RulePack[]> {
       const pack = await call<{ keyId: string; payload: string; signature: string }>('/v1/cli/rules');

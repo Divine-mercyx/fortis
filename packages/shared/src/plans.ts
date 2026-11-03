@@ -9,6 +9,10 @@ export type PlanId = (typeof PLAN_IDS)[number];
 export const RULE_PACKS = ['secrets', 'dependencies', 'fintech'] as const;
 export type RulePack = (typeof RULE_PACKS)[number];
 
+/** Running-app (DAST) testing with OWASP ZAP: none, passive baseline, or full active scan. */
+export const DAST_MODES = ['baseline', 'full'] as const;
+export type DastMode = (typeof DAST_MODES)[number];
+
 export type PlanLimits = {
   name: string;
   /** Monthly price in kobo; null means priced by agreement. */
@@ -19,6 +23,9 @@ export type PlanLimits = {
   rulePacks: readonly RulePack[];
   dashboard: boolean;
   stagingChecks: boolean;
+  /** Highest ZAP mode allowed against verified staging targets. */
+  dast: 'none' | DastMode;
+  maxTargets: number | null;
   releaseGates: boolean;
   evidencePack: 'none' | 'basic' | 'full';
   historyMonths: number | null;
@@ -34,6 +41,8 @@ export const PLANS: Record<PlanId, PlanLimits> = {
     rulePacks: ['secrets', 'dependencies'],
     dashboard: false,
     stagingChecks: false,
+    dast: 'none',
+    maxTargets: 0,
     releaseGates: false,
     evidencePack: 'none',
     historyMonths: 1,
@@ -47,6 +56,8 @@ export const PLANS: Record<PlanId, PlanLimits> = {
     rulePacks: ['secrets', 'dependencies', 'fintech'],
     dashboard: true,
     stagingChecks: false,
+    dast: 'baseline',
+    maxTargets: 2,
     releaseGates: false,
     evidencePack: 'basic',
     historyMonths: 12,
@@ -60,6 +71,8 @@ export const PLANS: Record<PlanId, PlanLimits> = {
     rulePacks: ['secrets', 'dependencies', 'fintech'],
     dashboard: true,
     stagingChecks: true,
+    dast: 'full',
+    maxTargets: 10,
     releaseGates: true,
     evidencePack: 'full',
     historyMonths: 36,
@@ -73,6 +86,8 @@ export const PLANS: Record<PlanId, PlanLimits> = {
     rulePacks: ['secrets', 'dependencies', 'fintech'],
     dashboard: true,
     stagingChecks: true,
+    dast: 'full',
+    maxTargets: null,
     releaseGates: true,
     evidencePack: 'full',
     historyMonths: null,
@@ -82,4 +97,10 @@ export const PLANS: Record<PlanId, PlanLimits> = {
 
 export function isPlanId(value: string): value is PlanId {
   return (PLAN_IDS as readonly string[]).includes(value);
+}
+
+/** Whether a plan may run a ZAP mode (full includes baseline). */
+export function planAllowsDast(plan: PlanLimits, mode: DastMode): boolean {
+  if (plan.dast === 'none') return false;
+  return plan.dast === 'full' || mode === 'baseline';
 }

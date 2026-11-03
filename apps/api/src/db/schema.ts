@@ -114,6 +114,40 @@ export const projectTokens = pgTable(
   (t) => [uniqueIndex('project_tokens_hash_key').on(t.tokenHash), index('project_tokens_project_idx').on(t.projectId)],
 );
 
+/* ---------- Staging targets for running-app (DAST) tests ---------- */
+
+export const targets = pgTable(
+  'targets',
+  {
+    id: id(),
+    orgId: uuid('org_id')
+      .notNull()
+      .references(() => organizations.id, { onDelete: 'cascade' }),
+    projectId: uuid('project_id')
+      .notNull()
+      .references(() => projects.id, { onDelete: 'cascade' }),
+    /** Origin only, e.g. https://staging.paywave.ng */
+    url: text('url').notNull(),
+    hostname: text('hostname').notNull(),
+    environment: text('environment').notNull(),
+    label: text('label'),
+    /** Value expected in the TXT record at _fortis-verify.<hostname>. */
+    verificationToken: text('verification_token').notNull(),
+    verifiedAt: timestamp('verified_at', { withTimezone: true }),
+    lastVerificationError: text('last_verification_error'),
+    authorizedBy: uuid('authorized_by').references(() => users.id, { onDelete: 'set null' }),
+    authorizedSigner: text('authorized_signer'),
+    authorizationVersion: text('authorization_version'),
+    authorizedAt: timestamp('authorized_at', { withTimezone: true }),
+    /** Kill switch: while set, no tests may run or upload. */
+    pausedAt: timestamp('paused_at', { withTimezone: true }),
+    lastRunAt: timestamp('last_run_at', { withTimezone: true }),
+    createdBy: uuid('created_by').references(() => users.id, { onDelete: 'set null' }),
+    createdAt: createdAt(),
+  },
+  (t) => [uniqueIndex('targets_project_url_key').on(t.projectId, t.url), index('targets_org_idx').on(t.orgId)],
+);
+
 /* ---------- Scans and findings ---------- */
 
 export const scans = pgTable(
@@ -129,6 +163,9 @@ export const scans = pgTable(
     tokenId: uuid('token_id').references(() => projectTokens.id, { onDelete: 'set null' }),
     clientScanId: uuid('client_scan_id').notNull(),
     trigger: text('trigger').notNull(),
+    kind: text('kind').notNull().default('code'),
+    targetId: uuid('target_id').references(() => targets.id, { onDelete: 'set null' }),
+    dastMode: text('dast_mode'),
     scope: text('scope').notNull(),
     commit: text('commit'),
     branch: text('branch'),
@@ -159,12 +196,15 @@ export const findings = pgTable(
       .notNull()
       .references(() => projects.id, { onDelete: 'cascade' }),
     fingerprint: text('fingerprint').notNull(),
+    kind: text('kind').notNull().default('code'),
+    targetId: uuid('target_id').references(() => targets.id, { onDelete: 'cascade' }),
     ruleId: text('rule_id').notNull(),
     severity: text('severity').notNull(),
     title: text('title').notNull(),
     file: text('file').notNull(),
     line: integer('line'),
     snippet: text('snippet'),
+    detail: text('detail'),
     status: text('status').notNull().default('open'),
     statusReason: text('status_reason'),
     firstSeenAt: timestamp('first_seen_at', { withTimezone: true }).notNull().defaultNow(),

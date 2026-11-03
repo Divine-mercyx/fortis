@@ -45,6 +45,31 @@ function printDetection(d: Detection) {
   log('');
 }
 
+/** Report for a ZAP run: one line per alert type, with where it was seen and how to fix it. */
+export function printDastReport(findings: (Omit<Detection, 'line' | 'snippet'> & { detail?: string; urls: string[] })[], opts: { failOn: Severity; origin: string }) {
+  const counts = { critical: 0, high: 0, medium: 0, low: 0, info: 0 } as Record<Severity, number>;
+  for (const f of findings) counts[f.severity]++;
+  const blocking = findings.filter((f) => meetsThreshold(f.severity, opts.failOn));
+  log('');
+  if (!findings.length) {
+    log(c.green(c.bold('✓ No alerts')), c.grey(`· ${opts.origin}`));
+    return;
+  }
+  const summary = (Object.keys(counts) as Severity[]).filter((s) => counts[s]).map((s) => sevColour[s]!(`${counts[s]} ${s}`)).join(c.grey(' · '));
+  if (blocking.length) log(c.bold(c.red('✖ TEST FAILED')), c.grey('·'), summary);
+  else log(c.yellow(c.bold('▲ Alerts to review')), c.grey('·'), summary, c.grey(`(not failing: threshold is ${opts.failOn})`));
+  log('');
+  for (const f of findings.filter((x) => x.severity !== 'info').slice(0, 40)) {
+    log(`  ${sevColour[f.severity]!(LABEL[f.severity].padEnd(8))} ${c.white(c.bold(f.ruleId))}  ${f.title}`);
+    const more = f.urls.length > 1 ? c.grey(` (+${f.urls.length - 1} more)`) : '';
+    log(`  ${' '.repeat(8)} ${c.cyan(f.file)}${more}`);
+    const fix = /\n\nFix: ([^\n]+)/.exec(f.detail ?? '')?.[1];
+    if (fix) log(`  ${' '.repeat(8)} ${c.green('fix')} ${fix.slice(0, 220)}`);
+    log('');
+  }
+  if (counts.info) log(c.grey(`  ${counts.info} informational alert(s) not shown. Use --json for all.`));
+}
+
 export function explain(ruleId: string): boolean {
   const rule = findRule(ruleId.toUpperCase());
   if (!rule) return false;

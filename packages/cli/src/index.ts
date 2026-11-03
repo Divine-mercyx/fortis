@@ -4,12 +4,13 @@ import { join } from 'node:path';
 
 import { MAX_FINDINGS_PER_SCAN, RULE_CATALOG, SEVERITIES, type RulePack, type Severity } from '@fortis/shared';
 
-import { ApiError, client, toUpload, type WhoAmI } from './api';
+import { ApiError, client, toUpload, type CliTarget, type WhoAmI } from './api';
+import { dockerAvailable, isLocalHost, parseZapReport, reportOrigins, runZap, ZAP_IMAGE, type DastFinding, type ZapReport } from './dast';
 import { PROJECT_CONFIG, readProjectConfig, removeKey, resolveKey, saveKey, writeProjectConfig } from './config';
 import { apiUrl, VERSION } from './env';
 import { currentBranch, currentCommit, repoRoot } from './git';
 import { installHook } from './hook';
-import { explain, printReport } from './report';
+import { explain, printDastReport, printReport } from './report';
 import { meetsThreshold, runScan } from './scan';
 import { c, err, log } from './ui';
 
@@ -24,6 +25,7 @@ ${c.bold('Usage')}
   fortis login <key> [--api URL]                     save a CLI key on this machine
   fortis logout [--api URL]                          remove the saved key
   fortis whoami                                      show the project and plan for your key
+  fortis test --target <url> [options]               OWASP ZAP test of a running staging app
   fortis explain <RULE-ID>                           why a rule matters and how to fix it
   fortis rules                                       list every rule
 
@@ -34,6 +36,15 @@ ${c.bold('Scan options')}
   --json           print machine-readable results
   --no-upload      keep results on this machine
   --offline        skip the network (no dependency check, no upload)
+
+${c.bold('Test options')}  ${c.grey('(needs Docker; the target must be verified and authorised in the dashboard)')}
+  --target <url>   staging URL to test (or set it once as "target" in .fortis.json)
+  --mode <m>       baseline: passive checks, no attacks (default) · full: active scan (Fortis Plus)
+  --openapi <url>  scan every operation in an OpenAPI spec (active, counts as full)
+  --minutes <n>    how long to crawl (default 2)
+  --local          test localhost on this machine; results stay local
+  --zap-report <f> import a ZAP JSON report you ran yourself instead of running Docker
+  --fail-on <sev>  fail at this severity or above (default: high)
 
 ${c.bold('Environment')}
   FORTIS_KEY       CLI key (preferred in CI)
@@ -51,7 +62,7 @@ function parseArgs(argv: string[]): { cmd: string; args: string[]; flags: Flags 
     if (a.startsWith('--')) {
       const [k, v] = a.slice(2).split('=', 2) as [string, string | undefined];
       if (v !== undefined) flags[k] = v;
-      else if (['key', 'api', 'fail-on'].includes(k) && rest[i + 1] && !rest[i + 1]!.startsWith('--')) flags[k] = rest[++i]!;
+      else if (['key', 'api', 'fail-on', 'target', 'mode', 'openapi', 'minutes', 'zap-report'].includes(k) && rest[i + 1] && !rest[i + 1]!.startsWith('--')) flags[k] = rest[++i]!;
       else flags[k] = true;
     } else args.push(a);
   }
@@ -134,6 +145,157 @@ async function cmdScan(flags: Flags): Promise<number> {
   return blocking.length ? 1 : 0;
 }
 
+async function cmdTest(flags: Flags): Promise<number> {
+  const root = repoRoot(process.cwd()) ?? process.cwd();
+  const config = readProjectConfig(root);
+  const api = apiUrl(str(flags.api) ?? config.apiUrl);
+  const json = Boolean(flags.json);
+  const rawTarget = str(flags.target) ?? config.target;
+  const openapi = str(flags.openapi);
+  const mode = (openapi ? 'full' : (str(flags.mode) ?? 'baseline')) as 'baseline' | 'full';
+  const failOn = (str(flags['fail-on']) ?? 'high') as Severity;
+  const minutes = Math.min(Math.max(Number(str(flags.minutes) ?? 2) || 2, 1), 60);
+  const say = (...p: string[]) => (json ? undefined : log(...p));
+
+  if (!rawTarget) {
+    err(c.red('✖ Give a target: fortis test --target https://staging.yourapp.com'));
+    return 2;
+  }
+  if (!['baseline', 'full'].includes(mode)) {
+    err(c.red('--mode must be baseline or full'));
+    return 2;
+  }
+  if (!SEVERITIES.includes(failOn)) {
+    err(c.red(`--fail-on must be one of: ${SEVERITIES.join(', ')}`));
+    return 2;
+  }
+  let origin: string;
+  let hostname: string;
+  try {
+    const u = new URL(rawTarget);
+    if (!/^https?:$/.test(u.protocol)) throw new Error('not http');
+    origin = u.origin;
+    hostname = u.hostname;
+  } catch {
+    err(c.red(`✖ "${rawTarget}" is not an http(s) URL.`));
+    return 2;
+  }
+
+  const local = Boolean(flags.local);
+  if (local && !isLocalHost(hostname)) {
+    err(c.red('✖ --local only tests this machine (localhost, 127.0.0.1, *.localhost).'), c.grey('Add other hosts as targets in the dashboard and verify them.'));
+    return 2;
+  }
+
+  // Anything that is not this machine must be a verified, authorised target on the project.
+  const key = local ? undefined : resolveKey(api);
+  let target: CliTarget | undefined;
+  const api$ = key ? client(api, key) : null;
+  if (!local) {
+    if (!api$) {
+      err(c.red('✖ No Fortis key found.'), c.grey('Running-app tests need a key so Fortis can confirm you may test this URL. Run: fortis login <key>'));
+      return 2;
+    }
+    try {
+      const res = await api$.targets(origin, mode);
+      target = res.targets[0];
+      if (!target) {
+        err(c.red(`✖ ${origin} is not a target on this project.`), c.grey('Add it under Project → Staging targets, verify the domain and authorise testing.'));
+        return 2;
+      }
+      if (target.blocker) {
+        err(c.red(`✖ ${target.blocker}`));
+        return 2;
+      }
+    } catch (e) {
+      err(c.red(`✖ ${(e as Error).message}`));
+      return 2;
+    }
+  }
+
+  let report: ZapReport;
+  const started = Date.now();
+  const importFile = str(flags['zap-report']);
+  if (importFile) {
+    report = JSON.parse(readFileSync(importFile, 'utf8')) as ZapReport;
+    const origins = reportOrigins(report);
+    if (origins.length && !origins.includes(origin)) {
+      err(c.red(`✖ That report is for ${origins.join(', ')}, not ${origin}.`));
+      return 2;
+    }
+  } else {
+    const docker = dockerAvailable();
+    if (!docker.ok) {
+      err(c.red(`✖ ${docker.reason}`));
+      err(c.grey('fortis test runs OWASP ZAP in Docker. Install it from https://docs.docker.com/get-docker/'));
+      err(c.grey(`Or run ZAP yourself and import the result: fortis test --target ${origin} --zap-report report.json`));
+      return 2;
+    }
+    const label = openapi ? 'API scan (active)' : mode === 'full' ? 'full scan (active)' : 'baseline (passive, no attacks)';
+    say(c.grey(`fortis ▸ OWASP ZAP ${label} · ${origin} · ${ZAP_IMAGE}`));
+    say(c.grey(`Crawling for up to ${minutes} min. Pausing the target in the dashboard stops the run.`));
+    try {
+      const run = await runZap(
+        { target: origin, mode, openapi, minutes, local },
+        {
+          onLine: (l) => {
+            if (!json && /^(PASS|WARN|FAIL|Total of|Stopping)/.test(l)) log(c.grey(`  ${l.slice(0, 160)}`));
+          },
+          shouldStop: api$ ? async () => (await api$.targets(origin, mode)).targets[0]?.blocker ?? 'the target was removed' : undefined,
+        },
+      );
+      if (run.stopped) {
+        err(c.yellow('! The run was stopped from the dashboard. Nothing was uploaded.'));
+        return 2;
+      }
+      report = run.report;
+    } catch (e) {
+      err(c.red(`✖ ${(e as Error).message}`));
+      return 2;
+    }
+  }
+
+  const findings: DastFinding[] = parseZapReport(report, origin);
+  const durationMs = Date.now() - started;
+  const blocking = findings.filter((f) => meetsThreshold(f.severity, failOn));
+
+  let uploaded: Awaited<ReturnType<ReturnType<typeof client>['upload']>> | null = null;
+  const notes: string[] = [];
+  if (api$ && target && !flags['no-upload']) {
+    try {
+      uploaded = await api$.upload({
+        scanId: randomUUID(),
+        trigger: process.env.CI ? 'ci' : 'manual',
+        kind: 'dast',
+        targetId: target.id,
+        dastMode: mode,
+        scope: 'full',
+        commit: currentCommit(root),
+        branch: currentBranch(root),
+        cliVersion: VERSION,
+        durationMs,
+        findings: findings.slice(0, MAX_FINDINGS_PER_SCAN).map(({ urls: _u, confidence: _c, cwe: _w, ...f }) => f),
+      });
+    } catch (e) {
+      notes.push(`Upload failed: ${(e as Error).message}`);
+    }
+  } else if (local) {
+    notes.push('Local run: results stay on this machine.');
+  }
+
+  if (json) {
+    log(JSON.stringify({ target: origin, mode, failOn, durationMs, findings, blocking: blocking.length, upload: uploaded, notes }, null, 2));
+  } else {
+    printDastReport(findings, { failOn, origin });
+    if (uploaded) {
+      log(c.grey(`Synced: ${uploaded.newCount} new · ${uploaded.fixedCount} fixed · ${uploaded.reopenedCount} reopened`));
+      log(c.grey(`→ ${uploaded.dashboardUrl}`));
+    }
+    for (const n of notes) log(c.yellow(`! ${n}`));
+  }
+  return blocking.length ? 1 : 0;
+}
+
 async function cmdInit(flags: Flags): Promise<number> {
   const root = repoRoot(process.cwd());
   if (!root) {
@@ -190,6 +352,8 @@ async function main(): Promise<number> {
   switch (cmd) {
     case 'scan':
       return cmdScan(flags);
+    case 'test':
+      return cmdTest(flags);
     case 'init':
       return cmdInit(flags);
     case 'login': {
