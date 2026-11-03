@@ -23,6 +23,7 @@ type Overview = {
     scans30d: number; prePush30d: number; ci30d: number; fixed30d: number; projects: number; scansAllTime: number;
     activeKeys: number; members: number; resolvedAllTime: number; evidenceEvents: number; blockedPrePush30d: number;
     oldestOpenCriticalDays: number | null;
+    targets?: number; targetsReady?: number; dast30d?: number; dastOpen?: number;
   };
   medianCriticalFixHours: number | null;
   recentActivity: { action: string; targetType: string | null; createdAt: string; actor: string | null }[];
@@ -215,7 +216,14 @@ function OverviewInner() {
             items={[
               { k: 'Write', title: 'Pre-push checks', value: t ? <CountUp value={t.prePush30d} /> : '–', hint: `${t?.blockedPrePush30d ?? 0} new issues caught on laptops` },
               { k: 'Push', title: 'CI scans', value: t ? <CountUp value={t.ci30d} /> : '–', hint: 'Full scans that also close fixed findings' },
-              { k: 'Deploy', title: 'Staging checks', value: 'Soon', hint: 'Access checks with your test users, on Fortis Plus', soon: true },
+              {
+                k: 'Deploy',
+                title: 'Staging tests',
+                value: t ? <CountUp value={t.dast30d ?? 0} /> : '–',
+                hint: t?.targets
+                  ? `OWASP ZAP runs · ${t.targetsReady ?? 0} of ${t.targets} target${t.targets === 1 ? '' : 's'} ready · ${t.dastOpen ?? 0} open`
+                  : 'Add a staging URL on a project to test the running app',
+              },
               { k: 'Prove', title: 'Evidence records', value: t ? <CountUp value={t.evidenceEvents} /> : '–', hint: 'Every detection, fix and decision, timestamped' },
             ]}
           />

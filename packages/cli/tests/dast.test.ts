@@ -97,6 +97,11 @@ describe('ZAP command', () => {
     expect(mac).toContain('http://host.docker.internal:3000');
   });
 
+  it('passes extra docker flags for private networks', () => {
+    const cmd = zapCommand({ ...base, mode: 'baseline', extraArgs: '--add-host staging.internal:10.0.0.5' });
+    expect(cmd.slice(0, 6)).toEqual(['run', '--rm', '--name', 'n', '--add-host', 'staging.internal:10.0.0.5']);
+  });
+
   it('recognises local hosts only', () => {
     expect(['localhost', '127.0.0.1', 'app.localhost'].every(isLocalHost)).toBe(true);
     expect(['staging.paywave.ng', '10.0.0.1', 'localhost.evil.com'].some(isLocalHost)).toBe(false);

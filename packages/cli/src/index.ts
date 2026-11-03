@@ -49,6 +49,7 @@ ${c.bold('Test options')}  ${c.grey('(needs Docker; the target must be verified 
 ${c.bold('Environment')}
   FORTIS_KEY       CLI key (preferred in CI)
   FORTIS_API_URL   API address (default: ${apiUrl()})
+  FORTIS_ZAP_DOCKER_ARGS  extra docker flags for fortis test (e.g. --add-host for private staging)
 `;
 
 type Flags = Record<string, string | boolean>;
@@ -241,7 +242,12 @@ async function cmdTest(flags: Flags): Promise<number> {
           onLine: (l) => {
             if (!json && /^(PASS|WARN|FAIL|Total of|Stopping)/.test(l)) log(c.grey(`  ${l.slice(0, 160)}`));
           },
-          shouldStop: api$ ? async () => (await api$.targets(origin, mode)).targets[0]?.blocker ?? 'the target was removed' : undefined,
+          shouldStop: api$
+            ? async () => {
+                const now = (await api$.targets(origin, mode)).targets[0];
+                return now ? now.blocker : 'the target was removed';
+              }
+            : undefined,
         },
       );
       if (run.stopped) {

@@ -40,6 +40,21 @@ Exit codes: `0` passed, `1` findings at or above the threshold, `2` usage or con
     FORTIS_KEY: ${{ secrets.FORTIS_KEY }}
 ```
 
+## Testing a running app (OWASP ZAP)
+
+`fortis test` runs [OWASP ZAP](https://www.zaproxy.org/) in Docker against a staging URL and syncs the alerts to the dashboard.
+
+```bash
+npx fortis test --target https://staging.yourapp.com            # baseline: passive, sends no attacks
+npx fortis test --target https://staging.yourapp.com --mode full # active scan (Fortis Plus)
+npx fortis test --target https://staging.yourapp.com --openapi https://staging.yourapp.com/openapi.json
+npx fortis test --target http://localhost:3000 --local          # your own machine, results stay local
+```
+
+Before Fortis will test a URL, an admin adds it under **Project → Staging targets**, proves control of the domain with a DNS TXT record (`_fortis-verify.<host>`), and signs the testing authorisation. Active scans are never allowed against production targets. Pausing a target in the dashboard stops a running test within about 20 seconds.
+
+Needs Docker (image `zaproxy/zap-stable`, override with `FORTIS_ZAP_IMAGE`). For staging on a private network pass extra docker flags with `FORTIS_ZAP_DOCKER_ARGS`, for example `--add-host staging.internal:10.0.0.5`. Without Docker, run ZAP yourself and import its JSON report with `--zap-report report.json`. The default `--fail-on` for tests is `high`.
+
 ## What leaves your machine
 
 Rules run locally. When your plan syncs findings, the CLI sends the rule ID, severity, file path,

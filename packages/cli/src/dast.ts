@@ -142,11 +142,12 @@ export function dockerAvailable(): { ok: true } | { ok: false; reason: string } 
 }
 
 /** The docker command line for a run. Exported for tests. */
-export function zapCommand(opts: { target: string; mode: DastMode; openapi?: string; minutes: number; name: string; local: boolean; platform?: string }) {
+export function zapCommand(opts: { target: string; mode: DastMode; openapi?: string; minutes: number; name: string; local: boolean; platform?: string; extraArgs?: string }) {
   const platform = opts.platform ?? process.platform;
   let target = opts.target;
   let openapi = opts.openapi;
-  const net: string[] = [];
+  // Extra docker flags for private networks, e.g. FORTIS_ZAP_DOCKER_ARGS="--add-host staging.internal:10.0.0.5".
+  const net: string[] = (opts.extraArgs ?? process.env.FORTIS_ZAP_DOCKER_ARGS ?? '').split(/\s+/).filter(Boolean);
   if (opts.local) {
     // Inside the container, "localhost" is the container. Reach the host instead.
     if (platform === 'linux') net.push('--network', 'host');

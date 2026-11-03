@@ -4,7 +4,7 @@ import { useState } from 'react';
 
 import { PLANS, RULE_CATALOG, type RulePack } from '@fortis/shared';
 
-import { Bank, Key, Layers, Search } from '@/components/icons';
+import { Bank, Key, Layers, Search, Target } from '@/components/icons';
 import { Words } from '@/components/motion';
 import { useSession } from '@/components/session';
 import { SeverityPill } from '@/components/ui';
@@ -84,6 +84,33 @@ export default function RulesPage() {
           </section>
         );
       })}
+
+      <section className="card reveal" style={{ ['--d' as string]: '460ms' }}>
+        <div className="card-head">
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            <span className="pack-ic"><Target /></span>
+            <div>
+              <h3>Running-app tests · OWASP ZAP</h3>
+              <span className="small">ZAP tests your deployed staging app from the outside. Findings show as ZAP-&lt;id&gt; with ZAP&apos;s own advice.</span>
+            </div>
+          </div>
+          <span className={`pill ${plan.dast !== 'none' ? 'p-ok' : 'p-mute'}`}>{plan.dast !== 'none' ? `Included in ${plan.name}` : 'Fortis Core and above'}</span>
+        </div>
+        <div className="rule-grid">
+          {[
+            { id: 'baseline', sev: 'medium', title: 'Baseline (passive)', text: 'Crawls the app and inspects every response: missing security headers, cookie flags, information leaks, mixed content, CSRF tokens. Sends no attacks, so it is safe on staging.', plan: 'Fortis Core' },
+            { id: 'full', sev: 'high', title: 'Full scan (active)', text: 'Adds attack simulation: SQL injection, cross-site scripting, path traversal, command injection and more. Never allowed against production targets.', plan: 'Fortis Plus' },
+            { id: 'api', sev: 'high', title: 'API scan (OpenAPI)', text: 'Pass --openapi with your spec and ZAP tests every operation directly, including ones a crawler cannot find. Counts as a full scan.', plan: 'Fortis Plus' },
+          ].map((m, i) => (
+            <article key={m.id} className="rule-card row-in" style={{ ['--i' as string]: i }}>
+              <div className="rule-top"><SeverityPill severity={m.sev} /><span className="mono muted">--mode {m.id === 'api' ? 'full --openapi' : m.id}</span></div>
+              <h4>{m.title}</h4>
+              <p>{m.text}</p>
+              <div className="rule-fix"><span>Plan</span>{m.plan}</div>
+            </article>
+          ))}
+        </div>
+      </section>
     </div>
   );
 }

@@ -13,7 +13,7 @@ import { dateTime, STATUS_LABEL, timeAgo } from '@/lib/format';
 import type { FindingRow, ProjectRow } from '@/lib/types';
 
 type FindingDetail = {
-  finding: FindingRow & { snippet: string | null; statusReason: string | null; projectName: string };
+  finding: FindingRow & { snippet: string | null; detail: string | null; statusReason: string | null; projectName: string };
   rule: { id: string; title: string; summary: string; fix: string } | null;
   events: { id: number; type: string; fromStatus: string | null; toStatus: string | null; reason: string | null; actor: string | null; createdAt: string }[];
 };
@@ -75,7 +75,8 @@ function FindingDrawer({ id, onClose, onChanged }: { id: string; onClose: () => 
           <>
             <dl className="kv">
               <dt>Project</dt><dd>{f.projectName}</dd>
-              <dt>Location</dt><dd className="mono">{f.file}{f.line ? `:${f.line}` : ''}</dd>
+              <dt>Source</dt><dd>{f.kind === 'dast' ? 'Running app · OWASP ZAP' : 'Code scan'}</dd>
+              <dt>{f.kind === 'dast' ? 'URL path' : 'Location'}</dt><dd className="mono">{f.file}{f.line ? `:${f.line}` : ''}</dd>
               <dt>First seen</dt><dd>{dateTime(f.firstSeenAt)}</dd>
               <dt>Last seen</dt><dd>{timeAgo(f.lastSeenAt)}</dd>
               {f.statusReason ? (<><dt>Reason</dt><dd>{f.statusReason}</dd></>) : null}
@@ -87,6 +88,11 @@ function FindingDrawer({ id, onClose, onChanged }: { id: string; onClose: () => 
                 <p>{data.rule.summary}</p>
                 <h4>How to fix it</h4>
                 <p>{data.rule.fix}</p>
+              </div>
+            ) : f.detail ? (
+              <div className="rule-box">
+                <h4>What ZAP found</h4>
+                <p className="detail-text">{f.detail}</p>
               </div>
             ) : null}
             <h4 className="eyebrow" style={{ color: 'var(--muted)' }}>Evidence trail</h4>

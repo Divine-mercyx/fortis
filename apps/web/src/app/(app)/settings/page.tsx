@@ -169,7 +169,8 @@ export default function SettingsPage() {
                   <li>{limit(p.maxProjects)} projects · {limit(p.maxSeats)} seats</li>
                   <li>{p.rulePacks.includes('fintech') ? 'Fintech rule pack' : 'Secrets and dependencies'}</li>
                   <li>{p.dashboard ? 'Findings dashboard' : 'Results stay local'}</li>
-                  {p.stagingChecks ? <li>Staging checks · release gates</li> : null}
+                  {p.dast !== 'none' ? <li>OWASP ZAP {p.dast === 'full' ? 'baseline + full scans' : 'baseline scans'} · {limit(p.maxTargets)} targets</li> : null}
+                  {p.releaseGates ? <li>Release gates</li> : null}
                 </ul>
               </div>
             );
