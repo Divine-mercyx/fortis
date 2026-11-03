@@ -31,3 +31,4 @@ jobs:
       - run: pnpm typecheck
       - run: pnpm test
       - run: pnpm --filter @fortis/web build
+      - run: pnpm --filter fortis-watchdog build

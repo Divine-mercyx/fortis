@@ -10,7 +10,8 @@ The marketing site lives in a separate repo (`fortis-website`).
 ```
 apps/api         Backend API (Fastify, PostgreSQL, Drizzle)
 apps/web         Dashboard (Next.js), styled like fortis.dev
-packages/shared  Plans, rule catalogue and request schemas shared by every app
+packages/cli     The CLI (npm: fortis-watchdog, command: fortis)
+packages/shared  Plans, rule catalogue, masking and request schemas shared by every app
 ```
 
 ## Getting started
@@ -70,6 +71,11 @@ Core and above upload findings to the dashboard. Until billing is built, set a p
 ```bash
 pnpm --filter @fortis/api exec tsx scripts/set-plan.ts <org-slug> core
 ```
+
+## CLI
+
+See `packages/cli/README.md`. Build it with `pnpm --filter fortis-watchdog build` (one bundled file in
+`dist/fortis.js`); set `FORTIS_DEFAULT_API_URL` at build time to change the default API address.
 
 ## Dashboard
 
