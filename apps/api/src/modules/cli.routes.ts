@@ -18,9 +18,11 @@ import { planLimits } from './orgs.routes';
 import { normaliseTargetUrl, presentTarget, targetStatus } from './targets.routes';
 
 /** Why a target can't be tested right now, or null when it can. */
-function dastBlocker(t: typeof targets.$inferSelect, plan: string, mode: 'baseline' | 'full') {
+function dastBlocker(t: typeof targets.$inferSelect, plan: string, mode: 'baseline' | 'full' | 'access') {
   const limits = planLimits(plan);
-  if (!planAllowsDast(limits, mode)) {
+  if (mode === 'access') {
+    if (!limits.stagingChecks) return `${limits.name} does not include access checks with test users. Upgrade to Fortis Plus.`;
+  } else if (!planAllowsDast(limits, mode)) {
     return mode === 'full' && limits.dast === 'baseline'
       ? `${limits.name} includes passive baseline tests. Upgrade to Fortis Plus for full active scans.`
       : `${limits.name} does not include running-app tests. Upgrade to Fortis Core.`;
@@ -29,6 +31,7 @@ function dastBlocker(t: typeof targets.$inferSelect, plan: string, mode: 'baseli
   if (status === 'paused') return 'Tests on this target are paused from the dashboard.';
   if (status === 'unverified') return 'Verify the domain with its DNS TXT record in the dashboard first.';
   if (status === 'unauthorized') return 'An admin must authorise testing for this target in the dashboard first.';
+  if (mode === 'access' && t.environment === 'production') return 'Access checks use test users, so they run on staging and development targets only.';
   if (mode === 'full' && t.environment === 'production') return 'Active scans are never run against production. Use baseline mode.';
   return null;
 }
@@ -51,6 +54,7 @@ export async function cliRoutes(app: FastifyInstance) {
         uploadFindings: limits.dashboard,
         releaseGates: limits.releaseGates,
         dast: limits.dast,
+        accessChecks: limits.stagingChecks,
         blockOn: 'critical',
       },
       rulesVersion: RULES_VERSION,
@@ -85,7 +89,7 @@ export async function cliRoutes(app: FastifyInstance) {
   app.get('/v1/cli/targets', { config: cliRateLimit }, async (req) => {
     const auth = await authenticateCli(req);
     const { url, mode } = parse(
-      z.object({ url: z.string().url().max(500).optional(), mode: z.enum(['baseline', 'full']).default('baseline') }),
+      z.object({ url: z.string().url().max(500).optional(), mode: z.enum(['baseline', 'full', 'access']).default('baseline') }),
       req.query,
     );
     const conditions = [eq(targets.projectId, auth.projectId), eq(targets.orgId, auth.orgId)];
@@ -107,21 +111,23 @@ export async function cliRoutes(app: FastifyInstance) {
       throw paymentRequired('Fortis Free keeps results on your machine. Upgrade to Fortis Core to upload findings to the dashboard.');
     }
     const input = parse(cliScanSchema, req.body);
-    if (input.kind === 'dast') {
+    if (input.kind !== 'code') {
       if (!input.targetId) throw badRequest('Running-app results need a targetId.', 'TARGET_REQUIRED');
+      const mode = input.kind === 'access' ? 'access' : (input.dastMode ?? 'baseline');
       const [target] = await db
         .select()
         .from(targets)
         .where(and(eq(targets.id, input.targetId), eq(targets.projectId, auth.projectId)))
         .limit(1);
       if (!target) throw notFound('Target not found for this project.');
-      const blocker = dastBlocker(target, auth.plan, input.dastMode ?? 'baseline');
+      const blocker = dastBlocker(target, auth.plan, mode);
       if (blocker) {
-        const planIssue = !planAllowsDast(planLimits(auth.plan), input.dastMode ?? 'baseline');
+        const limits = planLimits(auth.plan);
+        const planIssue = mode === 'access' ? !limits.stagingChecks : !planAllowsDast(limits, mode);
         throw planIssue ? paymentRequired(blocker) : forbidden(blocker, 'TARGET_NOT_READY');
       }
     } else if (input.targetId) {
-      throw badRequest('targetId is only used with kind "dast".');
+      throw badRequest('targetId is only used for running-app results.');
     }
     const result = await ingestScan(auth, input);
     return reply.code(result.duplicate ? 200 : 201).send({

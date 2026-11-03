@@ -49,7 +49,7 @@ export function client(api: string, key: string, fetchImpl: typeof fetch = fetch
 
   return {
     whoami: () => call<WhoAmI>('/v1/cli/whoami'),
-    targets: (url?: string, mode: 'baseline' | 'full' = 'baseline') =>
+    targets: (url?: string, mode: 'baseline' | 'full' | 'access' = 'baseline') =>
       call<{ plan: { id: string; dast: string }; targets: CliTarget[] }>(
         `/v1/cli/targets?mode=${mode}${url ? `&url=${encodeURIComponent(url)}` : ''}`,
       ),

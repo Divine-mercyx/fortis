@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { MAX_FINDINGS_PER_SCAN, RULE_CATALOG, SEVERITIES, type RulePack, type Severity } from '@fortis/shared';
 
 import { ApiError, client, toUpload, type CliTarget, type WhoAmI } from './api';
+import { ACCESS_CONFIG, checksFromOpenApi, readAccessConfig, runAccessChecks, writeAccessTemplate } from './access';
 import { BASELINE_FILE, readBaseline, splitByBaseline, writeBaseline } from './baseline';
 import { detectProvider, writeCi, type CiProvider } from './ci';
 import { scanHistory } from './history';
@@ -30,6 +31,8 @@ ${c.bold('Usage')}
   fortis logout [--api URL]                          remove the saved key
   fortis whoami                                      show the project and plan for your key
   fortis test --target <url> [options]               ZAP test of a running staging app
+  fortis access --target <url>                       can test user B read test user A's records? (BOLA)
+  fortis access init [--openapi URL]                 write ${ACCESS_CONFIG} (from your OpenAPI spec if given)
   fortis baseline                                    accept today's findings so only new ones block
   fortis ci init [--provider github|gitlab]          write a CI workflow (scan on PRs, test staging)
   fortis explain <RULE-ID>                           why a rule matters and how to fix it
@@ -58,6 +61,10 @@ ${c.bold('Test options')}  ${c.grey('(needs Docker; the target must be verified 
   logged in        set FORTIS_ZAP_AUTH to a test user's token ("Bearer …" is added if missing);
                    FORTIS_ZAP_AUTH_HEADER changes the header (e.g. Cookie). Sent to the target host only.
 
+${c.bold('Access checks')}  ${c.grey('(Fortis Plus; GET requests only, nothing is changed)')}
+  Create two ordinary customers on staging, give user A a loan/wallet/transfer, then set
+  FORTIS_USER_A_TOKEN and FORTIS_USER_B_TOKEN and run fortis access --target <url>.
+
 ${c.bold('Environment')}
   FORTIS_KEY       CLI key (preferred in CI)
   FORTIS_API_URL   API address (default: ${apiUrl()})
@@ -75,7 +82,7 @@ function parseArgs(argv: string[]): { cmd: string; args: string[]; flags: Flags 
     if (a.startsWith('--')) {
       const [k, v] = a.slice(2).split('=', 2) as [string, string | undefined];
       if (v !== undefined) flags[k] = v;
-      else if (['key', 'api', 'fail-on', 'target', 'mode', 'openapi', 'minutes', 'zap-report', 'sarif', 'since', 'provider', 'staging-branch', 'wait'].includes(k) && rest[i + 1] && !rest[i + 1]!.startsWith('--')) flags[k] = rest[++i]!;
+      else if (['key', 'api', 'fail-on', 'target', 'mode', 'openapi', 'minutes', 'zap-report', 'sarif', 'since', 'provider', 'staging-branch', 'wait', 'config'].includes(k) && rest[i + 1] && !rest[i + 1]!.startsWith('--')) flags[k] = rest[++i]!;
       else flags[k] = true;
     } else args.push(a);
   }
@@ -364,6 +371,146 @@ async function cmdTest(flags: Flags): Promise<number> {
   return blocking.length ? 1 : 0;
 }
 
+async function cmdAccess(args: string[], flags: Flags): Promise<number> {
+  const root = repoRoot(process.cwd()) ?? process.cwd();
+  const config = readProjectConfig(root);
+  const api = apiUrl(str(flags.api) ?? config.apiUrl);
+  const json = Boolean(flags.json);
+
+  if (args[0] === 'init') {
+    let checks: ReturnType<typeof checksFromOpenApi> = [];
+    const spec = str(flags.openapi);
+    if (spec) {
+      try {
+        const text = /^https?:/.test(spec) ? await (await fetch(spec, { signal: AbortSignal.timeout(20_000) })).text() : readFileSync(spec, 'utf8');
+        checks = checksFromOpenApi(JSON.parse(text));
+      } catch (e) {
+        err(c.red(`✖ Could not read the OpenAPI spec: ${(e as Error).message}`));
+        return 2;
+      }
+    }
+    if (existsSync(join(root, ACCESS_CONFIG)) && !flags.force) {
+      err(c.yellow(`! ${ACCESS_CONFIG} already exists. Use --force to overwrite it.`));
+      return 2;
+    }
+    writeAccessTemplate(root, str(flags.target) ?? config.target, checks);
+    log(c.green('✓'), `Wrote ${ACCESS_CONFIG}${spec ? ` with ${checks.length} resource(s) from your OpenAPI spec` : ' with example loan, wallet and transfer checks'}.`);
+    log(c.grey('Edit the paths to match your API. It holds no secrets; tokens come from FORTIS_USER_A_TOKEN and FORTIS_USER_B_TOKEN.'));
+    return 0;
+  }
+
+  let cfg;
+  try {
+    cfg = readAccessConfig(root, str(flags.config) ?? ACCESS_CONFIG);
+  } catch (e) {
+    err(c.red(`✖ ${(e as Error).message}`));
+    return 2;
+  }
+  if (!cfg) {
+    err(c.red(`✖ No ${ACCESS_CONFIG} yet.`), c.grey('Run: fortis access init  (add --openapi <url> to build it from your spec)'));
+    return 2;
+  }
+  const rawTarget = str(flags.target) ?? cfg.target ?? config.target;
+  let origin: string;
+  let hostname: string;
+  try {
+    const u = new URL(rawTarget ?? '');
+    origin = u.origin;
+    hostname = u.hostname;
+  } catch {
+    err(c.red('✖ Give a target: fortis access --target https://staging.yourapp.com'));
+    return 2;
+  }
+  const envA = cfg.users?.a?.tokenEnv ?? 'FORTIS_USER_A_TOKEN';
+  const envB = cfg.users?.b?.tokenEnv ?? 'FORTIS_USER_B_TOKEN';
+  const tokenA = process.env[envA]?.trim();
+  const tokenB = process.env[envB]?.trim();
+  if (!tokenA || !tokenB) {
+    err(c.red(`✖ Set ${envA} and ${envB} to the tokens of two different test customers on staging.`));
+    return 2;
+  }
+  if (tokenA === tokenB) {
+    err(c.red('✖ The two tokens are the same. Use two different customers.'));
+    return 2;
+  }
+
+  const local = Boolean(flags.local);
+  if (local && !isLocalHost(hostname)) {
+    err(c.red('✖ --local only tests this machine (localhost, 127.0.0.1, *.localhost).'));
+    return 2;
+  }
+  const key = local ? undefined : resolveKey(api);
+  const api$ = key ? client(api, key) : null;
+  let target: CliTarget | undefined;
+  if (!local) {
+    if (!api$) {
+      err(c.red('✖ No Fortis key found.'), c.grey('Access checks need a key so Fortis can confirm you may test this URL.'));
+      return 2;
+    }
+    try {
+      target = (await api$.targets(origin, 'access')).targets[0];
+      if (!target) {
+        err(c.red(`✖ ${origin} is not a target on this project.`), c.grey('Add it under Project → Staging targets, verify the domain and authorise testing.'));
+        return 2;
+      }
+      if (target.blocker) {
+        err(c.red(`✖ ${target.blocker}`));
+        return 2;
+      }
+    } catch (e) {
+      err(c.red(`✖ ${(e as Error).message}`));
+      return 2;
+    }
+  }
+
+  const started = Date.now();
+  if (!json) log(c.grey(`fortis ▸ access checks · ${origin} · ${cfg.checks.length} resource(s) · GET only`));
+  let res;
+  try {
+    res = await runAccessChecks({ origin, config: cfg, tokenA, tokenB });
+  } catch (e) {
+    err(c.red(`✖ ${(e as Error).message}`));
+    return 2;
+  }
+  // Tokens must never leave this machine in a finding.
+  const scrub = (t?: string) => (t ? t.split(tokenA).join('••••').split(tokenB).join('••••') : t);
+  const findings = res.findings.map((f) => ({ ...f, snippet: scrub(f.snippet), detail: scrub(f.detail) }));
+
+  let uploaded: Awaited<ReturnType<ReturnType<typeof client>['upload']>> | null = null;
+  if (api$ && target && !flags['no-upload']) {
+    try {
+      uploaded = await api$.upload({
+        scanId: randomUUID(), trigger: process.env.CI ? 'ci' : 'manual', kind: 'access', targetId: target.id, scope: 'full',
+        commit: currentCommit(root), branch: currentBranch(root), cliVersion: VERSION, durationMs: Date.now() - started,
+        findings: findings.map(({ evidence: _e, ...f }) => f),
+      });
+    } catch (e) {
+      res.notes.push(`Upload failed: ${(e as Error).message}`);
+    }
+  }
+  const failOn = (str(flags['fail-on']) ?? 'high') as Severity;
+  const blocking = findings.filter((f) => meetsThreshold(f.severity, failOn));
+  if (json) {
+    log(JSON.stringify({ target: origin, checked: res.checked, requests: res.requests, findings, notes: res.notes, upload: uploaded }, null, 2));
+  } else {
+    if (process.env.GITHUB_ACTIONS === 'true') for (const line of githubAnnotations(findings.map((f) => ({ ...f, file: undefined, title: `${f.title} (${f.file})`, message: f.detail })))) log(line);
+    log('');
+    if (!findings.length) log(c.green(c.bold('✓ No access leaks found')), c.grey(`· ${res.checked} record(s) checked with ${res.requests} GET requests`));
+    else {
+      log(c.bold(c.red(`✖ ${findings.length} ACCESS LEAK${findings.length === 1 ? '' : 'S'}`)), c.grey(`· ${res.checked} record(s) checked`));
+      log('');
+      for (const f of findings) {
+        log(`  ${c.bold(c.red('CRITICAL'))} ${c.white(c.bold(f.ruleId))}  ${f.title}`);
+        log(`  ${' '.repeat(8)} ${c.cyan(f.file)}  ${c.grey(`A ${f.evidence.status.a} · B ${f.evidence.status.b} · anonymous ${f.evidence.status.anonymous}`)}`);
+        log('');
+      }
+    }
+    if (uploaded) log(c.grey(`Synced: ${uploaded.newCount} new · ${uploaded.fixedCount} fixed → ${uploaded.dashboardUrl}`));
+    for (const n of res.notes) log(c.yellow(`! ${n}`));
+  }
+  return blocking.length ? 1 : 0;
+}
+
 async function resolvePacks(api: string, key: string | undefined): Promise<RulePack[]> {
   if (!key) return FREE_PACKS;
   try {
@@ -481,6 +628,8 @@ async function main(): Promise<number> {
       return cmdTest(flags);
     case 'baseline':
       return cmdBaseline(flags);
+    case 'access':
+      return cmdAccess(args, flags);
     case 'ci':
       return cmdCi(args, flags);
     case 'init':

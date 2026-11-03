@@ -170,6 +170,7 @@ export default function SettingsPage() {
                   <li>{p.rulePacks.includes('fintech') ? 'Fintech rule pack' : 'Secrets and dependencies'}</li>
                   <li>{p.dashboard ? 'Findings dashboard' : 'Results stay local'}</li>
                   {p.dast !== 'none' ? <li>OWASP ZAP {p.dast === 'full' ? 'baseline + full scans' : 'baseline scans'} · {limit(p.maxTargets)} targets</li> : null}
+                  {p.stagingChecks ? <li>Access checks with two test users</li> : null}
                   {p.releaseGates ? <li>Release gates</li> : null}
                 </ul>
               </div>

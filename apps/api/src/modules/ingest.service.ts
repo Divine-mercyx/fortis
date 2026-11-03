@@ -32,7 +32,8 @@ function fingerprintOf(ruleId: string, file: string, snippet: string | null, lin
  * closes open findings it no longer sees. Everything is written as finding events for the evidence trail.
  */
 export async function ingestScan(auth: CliAuth, input: CliScanInput): Promise<IngestResult> {
-  const isDast = input.kind === 'dast';
+  // Running-app results (ZAP and access checks) belong to a target; code results to the repo.
+  const isDast = input.kind !== 'code';
   const targetId = isDast ? (input.targetId ?? null) : null;
   return db.transaction(async (tx) => {
     const inserted = await tx
@@ -45,7 +46,7 @@ export async function ingestScan(auth: CliAuth, input: CliScanInput): Promise<In
         trigger: input.trigger,
         kind: input.kind,
         targetId,
-        dastMode: isDast ? (input.dastMode ?? 'baseline') : null,
+        dastMode: input.kind === 'dast' ? (input.dastMode ?? 'baseline') : null,
         scope: input.scope,
         commit: input.commit ?? null,
         branch: input.branch ?? null,
@@ -86,7 +87,7 @@ export async function ingestScan(auth: CliAuth, input: CliScanInput): Promise<In
       const snippet = f.snippet ? maskSnippet(f.snippet) : null;
       const base = f.fingerprint ?? fingerprintOf(f.ruleId, file, snippet, f.line);
       // DAST findings are per target, so the same alert on two environments stays two findings.
-      const fingerprint = isDast ? sha256(`dast|${targetId}|${base}`).slice(0, 40) : base;
+      const fingerprint = isDast ? sha256(`${input.kind}|${targetId}|${base}`).slice(0, 40) : base;
       if (incoming.has(fingerprint)) continue;
       incoming.set(fingerprint, {
         ruleId: f.ruleId,
@@ -181,7 +182,7 @@ export async function ingestScan(auth: CliAuth, input: CliScanInput): Promise<In
       if (isDast) {
         conditions.push(eq(findings.targetId, targetId!));
         // A passive baseline can't see what an active scan found, so it only closes baseline findings.
-        if ((input.dastMode ?? 'baseline') === 'baseline') {
+        if (input.kind === 'dast' && (input.dastMode ?? 'baseline') === 'baseline') {
           conditions.push(sql`${findings.lastScanId} in (select id from scans where dast_mode = 'baseline')`);
         }
       }

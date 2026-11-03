@@ -212,3 +212,34 @@ describe('running-app (DAST) uploads', () => {
     expect(one.json().targets[0].blocker).toMatch(/Fortis Plus/);
   });
 });
+
+describe('access-check uploads', () => {
+  const accessUpload = (key: string, targetId: string, findings: object[]) =>
+    app.inject({
+      method: 'POST', url: '/v1/cli/scans', headers: { authorization: `Bearer ${key}` },
+      payload: { scanId: randomUUID(), trigger: 'ci', kind: 'access', targetId, scope: 'full', cliVersion: '0.1.0', findings },
+    });
+  const bola = { ruleId: 'FX-BOLA-001', severity: 'critical', title: "User B can read user A's loan", file: 'GET /api/loans/{id}', detail: 'B got 200', fingerprint: 'access:bola:/api/loans/{id}' };
+
+  it('need Fortis Plus and a non-production target', async () => {
+    const { c, base, key } = await setup('core');
+    const id = await readyTarget(c, base);
+    expect((await accessUpload(key, id, [bola])).statusCode).toBe(402);
+    await setPlan(c.orgId, 'plus');
+    expect((await accessUpload(key, id, [bola])).statusCode).toBe(201);
+    const prod = await readyTarget(c, base, 'https://app.paywave.ng', 'production');
+    expect((await accessUpload(key, prod, [bola])).statusCode).toBe(403);
+  });
+
+  it('are not closed by a ZAP run on the same target', async () => {
+    const { c, base, key } = await setup('plus');
+    const id = await readyTarget(c, base);
+    await accessUpload(key, id, [bola]);
+    const zap = (await dastUpload(key, id, [], { dastMode: 'full' })).json();
+    expect(zap.fixedCount).toBe(0);
+    const list = (await c.req({ method: 'GET', url: `/v1/orgs/${c.orgId}/findings?kind=access&status=open` })).json();
+    expect(list.findings).toHaveLength(1);
+    expect(list.findings[0].title).toBe("User B can read user A's loan");
+    expect((await accessUpload(key, id, [])).json().fixedCount).toBe(1);
+  });
+});

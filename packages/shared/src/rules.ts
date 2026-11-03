@@ -97,6 +97,22 @@ export const RULE_CATALOG: readonly RuleMeta[] = [
     summary: 'A package has a known vulnerability in public advisory data.',
     fix: 'Upgrade to the fixed version shown in the advisory.',
   },
+  {
+    id: 'FX-BOLA-001',
+    pack: 'fintech',
+    title: "One customer can read another customer's records",
+    severity: 'critical',
+    summary: "Found by `fortis access` on staging: test user B asked for test user A's loan, wallet or transfer by ID and got it. This is broken object-level authorisation (BOLA/IDOR), the most common way fintech data leaks.",
+    fix: "Scope every lookup to the signed-in customer (WHERE id = $1 AND customer_id = $2) and return 404 when the record isn't theirs.",
+  },
+  {
+    id: 'FX-AUTH-001',
+    pack: 'fintech',
+    title: 'Customer records readable without logging in',
+    severity: 'critical',
+    summary: 'Found by `fortis access` on staging: a request with no login at all returned a customer record.',
+    fix: 'Put the route behind your authentication middleware and add a test that an anonymous request gets 401.',
+  },
 ];
 
 export function findRule(id: string): RuleMeta | undefined {

@@ -63,8 +63,8 @@ export const cliScanSchema = z.object({
   /** Client-generated UUID so retries don't create duplicate scans. */
   scanId: z.string().uuid(),
   trigger: z.enum(['pre-push', 'ci', 'manual']),
-  /** code: static checks of the repository. dast: OWASP ZAP against a verified staging target. */
-  kind: z.enum(['code', 'dast']).default('code'),
+  /** code: static checks of the repository. dast: ZAP against a verified staging target. access: two-user access checks. */
+  kind: z.enum(['code', 'dast', 'access']).default('code'),
   targetId: z.string().uuid().optional(),
   dastMode: z.enum(['baseline', 'full']).optional(),
   /** "changed" scans only cover changed files, so they never auto-close findings. */

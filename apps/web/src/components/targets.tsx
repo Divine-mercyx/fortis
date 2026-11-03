@@ -212,6 +212,7 @@ function TargetCard({ t, base, isAdmin, canPause, dast, onChange, onAuthorize }:
         <div className="target-body">
           <CodeLine cmd={`npx ${CLI_COMMAND} test --target ${t.url}`} />
           {fullOk ? <CodeLine cmd={`npx ${CLI_COMMAND} test --target ${t.url} --mode full`} /> : null}
+          {dast === 'full' && t.allowsActiveScan ? <CodeLine cmd={`npx ${CLI_COMMAND} access --target ${t.url}`} /> : null}
           <p className="small" style={{ margin: '10px 0 0' }}>
             {t.authorization ? <>Authorised by {t.authorization.signer} {timeAgo(t.authorization.at)}. </> : null}
             {t.lastRunAt ? <>Last test {timeAgo(t.lastRunAt)}. </> : 'No tests yet. '}

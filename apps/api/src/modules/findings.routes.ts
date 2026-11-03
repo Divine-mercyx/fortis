@@ -19,7 +19,7 @@ const listQuery = z.object({
   status: z.enum(FINDING_STATUSES).optional(),
   severity: z.enum(SEVERITIES).optional(),
   q: z.string().trim().max(100).optional(),
-  kind: z.enum(['code', 'dast']).optional(),
+  kind: z.enum(['code', 'dast', 'access']).optional(),
   limit: z.coerce.number().int().min(1).max(100).default(50),
   offset: z.coerce.number().int().min(0).max(100_000).default(0),
 });
