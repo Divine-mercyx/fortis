@@ -12,7 +12,7 @@ try {
   const keepAlive = keepAliveFromEnv(process.env, [self ? `${self}/health` : '', `${env.WEB_URL.replace(/\/+$/, '')}/api/health`]);
   if (keepAlive) {
     startKeepAlive({ ...keepAlive, log: (m) => app.log.warn(m) });
-    app.log.info(`keep-alive on (${keepAlive.hours ?? '8-20'} ${keepAlive.timeZone ?? 'Africa/Lagos'})`);
+    app.log.info(`keep-alive on (${keepAlive.hours ?? '9-21'} ${keepAlive.timeZone ?? 'Africa/Lagos'})`);
   }
 } catch (err) {
   app.log.error(err);

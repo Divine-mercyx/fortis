@@ -4,9 +4,9 @@
  *
  * Render's free plan has 750 instance hours a month per workspace, shared by every service. Two
  * services awake 24/7 would need about 1,490, so both get suspended mid-month. The default
- * window, 12 hours a day in Lagos time, keeps two services within the limit (2 × 12 × 31 = 744).
+ * window, 9am-9pm Lagos time (12 hours), keeps two services within the limit (2 × 12 × 31 = 744).
  *
- * Env: KEEPALIVE=off to disable · KEEPALIVE_HOURS="8-20" (start-end, 24h; "0-24" = always)
+ * Env: KEEPALIVE=off to disable · KEEPALIVE_HOURS="9-21" (start-end, 24h; "0-24" = always)
  *      KEEPALIVE_TZ="Africa/Lagos" · KEEPALIVE_URLS="https://a/health,https://b/api/health"
  */
 
@@ -20,9 +20,9 @@ export type KeepAliveOptions = {
   now?: () => Date;
 };
 
-export function parseHours(spec = '8-20'): [number, number] {
+export function parseHours(spec = '9-21'): [number, number] {
   const m = /^\s*(\d{1,2})\s*-\s*(\d{1,2})\s*$/.exec(spec);
-  if (!m) return [8, 20];
+  if (!m) return [9, 21];
   const start = Math.min(24, Number(m[1]));
   const end = Math.min(24, Number(m[2]));
   return [start, end];
