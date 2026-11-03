@@ -664,3 +664,7 @@ h1, h2, h3, h4 { color: var(--ink); margin: 0; font-weight: 800; letter-spacing:
   .dns > div { grid-template-columns: minmax(0, 1fr) auto; }
   .dns span { grid-column: 1 / -1; }
 }
+.rule-health { display: flex; justify-content: space-between; gap: 10px; flex-wrap: wrap; margin-top: 12px; padding-top: 10px; border-top: 1px dashed var(--line); font-size: 12px; font-weight: 600; color: var(--ink-2); }
+.rule-health.good span:last-child { color: var(--green); }
+.rule-health.warn span:last-child { color: #8A5A12; }
+.rule-health.bad span:last-child { color: var(--red); }

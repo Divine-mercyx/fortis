@@ -11,6 +11,8 @@ export type Detection = {
   line: number;
   /** The offending line, before masking. Masked before printing or upload. */
   snippet: string;
+  /** For git-history findings: the commit that introduced it. */
+  commit?: string;
 };
 
 /** Facts gathered from the whole repository, so a rule can see protection defined in another file. */

@@ -11,7 +11,8 @@
     "test": "vitest run",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "tsx src/db/migrate.ts",
-    "keys:rules": "tsx scripts/generate-rules-key.ts"
+    "keys:rules": "tsx scripts/generate-rules-key.ts",
+    "rule-health": "tsx scripts/rule-health.ts"
   },
   "dependencies": {
     "@fastify/cookie": "^11.1.5",

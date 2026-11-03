@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import useSWR from 'swr';
 
 import { PLANS, RULE_CATALOG, type RulePack } from '@fortis/shared';
 
@@ -9,6 +10,22 @@ import { Words } from '@/components/motion';
 import { useSession } from '@/components/session';
 import { SeverityPill } from '@/components/ui';
 import { InfoTip } from '@/components/widgets';
+import { fetcher } from '@/lib/api';
+
+type Health = { ruleId: string; total: number; open: number; triaged: number; falsePositive: number; falsePositiveRate: number | null };
+
+/** How your team triaged this rule's findings. */
+function HealthLine({ h }: { h?: Health }) {
+  if (!h) return <div className="rule-health muted">No findings in your workspace yet</div>;
+  const rate = h.falsePositiveRate;
+  const tone = rate === null ? '' : rate >= 0.3 ? 'bad' : rate >= 0.1 ? 'warn' : 'good';
+  return (
+    <div className={`rule-health ${tone}`}>
+      <span>{h.total} found · {h.open} open</span>
+      <span>{rate === null ? 'none triaged yet' : `${Math.round(rate * 100)}% marked false positive (${h.falsePositive} of ${h.triaged})`}</span>
+    </div>
+  );
+}
 
 const PACKS: { id: RulePack; name: string; icon: typeof Key; text: string }[] = [
   { id: 'fintech', name: 'Fintech rule pack', icon: Bank, text: 'Checks written for money-moving code: payment keys, transfers, wallets, webhooks, KYC data and OTPs.' },
@@ -28,6 +45,8 @@ export default function RulesPage() {
   const [q, setQ] = useState('');
   const plan = PLANS[(org.plan as keyof typeof PLANS) ?? 'free'] ?? PLANS.free;
   const match = (s: string) => s.toLowerCase().includes(q.trim().toLowerCase());
+  const { data: health } = useSWR<{ rules: Health[] }>(`/v1/orgs/${org.id}/rules/health`, fetcher);
+  const byRule = new Map((health?.rules ?? []).map((h) => [h.ruleId, h]));
 
   return (
     <div className="stack">
@@ -78,6 +97,7 @@ export default function RulesPage() {
                   <h4>{r.title}</h4>
                   <p>{r.summary}</p>
                   <div className="rule-fix"><span>Fix</span>{r.fix}</div>
+                  {health ? <HealthLine h={byRule.get(r.id)} /> : null}
                 </article>
               ))}
             </div>

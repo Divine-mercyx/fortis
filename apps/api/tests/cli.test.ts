@@ -190,3 +190,19 @@ describe('masking', () => {
     expect(maskSnippet(input)).toContain(expected);
   });
 });
+
+describe('rule health', () => {
+  it('reports the share of triaged findings marked false positive, per rule', async () => {
+    const { c, key } = await coreProject();
+    const res = await upload(key, scanPayload([liveKeyFinding, ownershipFinding, { ...ownershipFinding, file: 'src/routes/loans.ts' }]));
+    const ids = res.json().findings.map((f: { findingId: string }) => f.findingId);
+    const list = (await c.req({ method: 'GET', url: `/v1/orgs/${c.orgId}/findings` })).json().findings as { id: string; ruleId: string }[];
+    const own = list.filter((f) => f.ruleId === 'FX-OWN-001');
+    expect(ids).toHaveLength(3);
+    await c.req({ method: 'PATCH', url: `/v1/orgs/${c.orgId}/findings/${own[0]!.id}`, payload: { status: 'false_positive', reason: 'Staff-only route' } });
+    await c.req({ method: 'PATCH', url: `/v1/orgs/${c.orgId}/findings/${own[1]!.id}`, payload: { status: 'fixed' } });
+    const health = (await c.req({ method: 'GET', url: `/v1/orgs/${c.orgId}/rules/health` })).json().rules;
+    expect(health.find((r: { ruleId: string }) => r.ruleId === 'FX-OWN-001')).toMatchObject({ total: 2, triaged: 2, falsePositive: 1, falsePositiveRate: 0.5 });
+    expect(health.find((r: { ruleId: string }) => r.ruleId === 'FX-SEC-001')).toMatchObject({ open: 1, falsePositiveRate: null });
+  });
+});

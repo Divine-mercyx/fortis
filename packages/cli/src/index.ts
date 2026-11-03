@@ -5,7 +5,11 @@ import { join } from 'node:path';
 import { MAX_FINDINGS_PER_SCAN, RULE_CATALOG, SEVERITIES, type RulePack, type Severity } from '@fortis/shared';
 
 import { ApiError, client, toUpload, type CliTarget, type WhoAmI } from './api';
-import { dockerAvailable, isLocalHost, parseZapReport, reportOrigins, runZap, ZAP_IMAGE, type DastFinding, type ZapReport } from './dast';
+import { BASELINE_FILE, readBaseline, splitByBaseline, writeBaseline } from './baseline';
+import { detectProvider, writeCi, type CiProvider } from './ci';
+import { scanHistory } from './history';
+import { githubAnnotations, toSarif } from './sarif';
+import { dockerAvailable, isLocalHost, parseZapReport, reportOrigins, runZap, waitForTarget, ZAP_IMAGE, type DastFinding, type ZapAuth, type ZapReport } from './dast';
 import { PROJECT_CONFIG, readProjectConfig, removeKey, resolveKey, saveKey, writeProjectConfig } from './config';
 import { apiUrl, VERSION } from './env';
 import { currentBranch, currentCommit, repoRoot } from './git';
@@ -25,7 +29,9 @@ ${c.bold('Usage')}
   fortis login <key> [--api URL]                     save a CLI key on this machine
   fortis logout [--api URL]                          remove the saved key
   fortis whoami                                      show the project and plan for your key
-  fortis test --target <url> [options]               OWASP ZAP test of a running staging app
+  fortis test --target <url> [options]               ZAP test of a running staging app
+  fortis baseline                                    accept today's findings so only new ones block
+  fortis ci init [--provider github|gitlab]          write a CI workflow (scan on PRs, test staging)
   fortis explain <RULE-ID>                           why a rule matters and how to fix it
   fortis rules                                       list every rule
 
@@ -36,6 +42,9 @@ ${c.bold('Scan options')}
   --json           print machine-readable results
   --no-upload      keep results on this machine
   --offline        skip the network (no dependency check, no upload)
+  --history        also search all git history for secrets (deleted keys still need rotating)
+  --sarif <file>   write SARIF for GitHub code scanning, GitLab and IDEs
+  --no-baseline    block on every finding, ignoring ${BASELINE_FILE}
 
 ${c.bold('Test options')}  ${c.grey('(needs Docker; the target must be verified and authorised in the dashboard)')}
   --target <url>   staging URL to test (or set it once as "target" in .fortis.json)
@@ -45,6 +54,9 @@ ${c.bold('Test options')}  ${c.grey('(needs Docker; the target must be verified 
   --local          test localhost on this machine; results stay local
   --zap-report <f> import a ZAP JSON report you ran yourself instead of running Docker
   --fail-on <sev>  fail at this severity or above (default: high)
+  --wait <s>       wait up to s seconds for the target to come up (after a deploy)
+  logged in        set FORTIS_ZAP_AUTH to a test user's token ("Bearer …" is added if missing);
+                   FORTIS_ZAP_AUTH_HEADER changes the header (e.g. Cookie). Sent to the target host only.
 
 ${c.bold('Environment')}
   FORTIS_KEY       CLI key (preferred in CI)
@@ -63,7 +75,7 @@ function parseArgs(argv: string[]): { cmd: string; args: string[]; flags: Flags 
     if (a.startsWith('--')) {
       const [k, v] = a.slice(2).split('=', 2) as [string, string | undefined];
       if (v !== undefined) flags[k] = v;
-      else if (['key', 'api', 'fail-on', 'target', 'mode', 'openapi', 'minutes', 'zap-report'].includes(k) && rest[i + 1] && !rest[i + 1]!.startsWith('--')) flags[k] = rest[++i]!;
+      else if (['key', 'api', 'fail-on', 'target', 'mode', 'openapi', 'minutes', 'zap-report', 'sarif', 'since', 'provider', 'staging-branch', 'wait'].includes(k) && rest[i + 1] && !rest[i + 1]!.startsWith('--')) flags[k] = rest[++i]!;
       else flags[k] = true;
     } else args.push(a);
   }
@@ -109,6 +121,22 @@ async function cmdScan(flags: Flags): Promise<number> {
   const result = await runScan({ root, scope: prePush ? 'changed' : 'full', packs, ignore: config.ignore, offline });
   result.notes.unshift(...notes);
 
+  if (flags.history) {
+    const h = await scanHistory(root, { since: str(flags.since), ignore: config.ignore });
+    result.detections.push(...h.detections);
+    result.notes.push(`Searched ${h.commitsScanned} commits that added code: ${h.detections.length} found in history. Rotate every one, even if the file was deleted.`);
+  }
+
+  const baseline = flags['no-baseline'] ? null : readBaseline(root);
+  const { fresh, known } = splitByBaseline(result.detections, baseline);
+  if (known.length) result.notes.push(`${known.length} known finding(s) in ${BASELINE_FILE} are not shown and don't block. Fix them over time.`);
+
+  const sarifPath = str(flags.sarif);
+  if (sarifPath) writeFileSync(sarifPath, `${JSON.stringify(toSarif(result.detections), null, 2)}\n`);
+  if (process.env.GITHUB_ACTIONS === 'true' && !json) {
+    for (const line of githubAnnotations(fresh)) log(line);
+  }
+
   let uploaded: Awaited<ReturnType<ReturnType<typeof client>['upload']>> | null = null;
   const canUpload = Boolean(key && who?.entitlements.uploadFindings && !flags['no-upload'] && !offline);
   if (canUpload) {
@@ -123,8 +151,20 @@ async function cmdScan(flags: Flags): Promise<number> {
         rulesVersion: who?.rulesVersion,
         durationMs: result.durationMs,
         filesScanned: result.filesScanned,
-        findings: result.detections.slice(0, MAX_FINDINGS_PER_SCAN).map(toUpload),
+        findings: result.detections.filter((d) => !d.commit).slice(0, MAX_FINDINGS_PER_SCAN).map(toUpload),
       });
+      // History findings never auto-close (history doesn't change), so they go up as their own partial scan.
+      const historic = result.detections.filter((d) => d.commit);
+      if (historic.length) {
+        await client(api, key!).upload({
+          scanId: randomUUID(),
+          trigger: ci ? 'ci' : 'manual',
+          scope: 'changed',
+          cliVersion: VERSION,
+          rulesVersion: who?.rulesVersion,
+          findings: historic.slice(0, MAX_FINDINGS_PER_SCAN).map((d) => ({ ...toUpload(d), file: `${d.file} @ ${d.commit!.slice(0, 7)}` })),
+        });
+      }
     } catch (e) {
       result.notes.push(`Upload failed: ${(e as Error).message}`);
     }
@@ -132,11 +172,11 @@ async function cmdScan(flags: Flags): Promise<number> {
     result.notes.push(`${who.plan.name} keeps results on this machine. Upgrade to sync findings to the dashboard.`);
   }
 
-  const blocking = result.detections.filter((d) => meetsThreshold(d.severity, failOn));
+  const blocking = fresh.filter((d) => meetsThreshold(d.severity, failOn));
   if (json) {
-    log(JSON.stringify({ ...result, packs, failOn, blocking: blocking.length, upload: uploaded }, null, 2));
+    log(JSON.stringify({ ...result, packs, failOn, blocking: blocking.length, baselined: known.length, upload: uploaded }, null, 2));
   } else {
-    printReport(result, { failOn, prePush, packs });
+    printReport({ ...result, detections: fresh }, { failOn, prePush, packs });
     if (uploaded) {
       log(c.grey(`Synced to ${who?.project.name}: ${uploaded.newCount} new · ${uploaded.fixedCount} fixed · ${uploaded.reopenedCount} reopened`));
       log(c.grey(`→ ${uploaded.dashboardUrl}`));
@@ -214,6 +254,25 @@ async function cmdTest(flags: Flags): Promise<number> {
     }
   }
 
+  const waitSeconds = Number(str(flags.wait) ?? 0);
+  if (waitSeconds > 0 && !str(flags['zap-report'])) {
+    const up = await waitForTarget(origin, Math.min(waitSeconds, 3600), json ? undefined : (m) => log(c.grey(m)));
+    if (!up) {
+      err(c.red(`✖ ${origin} did not come up within ${waitSeconds}s.`));
+      return 2;
+    }
+  }
+
+  // Logged-in testing: a staging test user's credential from the environment (never a flag, so
+  // it stays out of shell history and process lists).
+  let auth: ZapAuth | undefined;
+  const authValue = process.env.FORTIS_ZAP_AUTH?.trim();
+  if (authValue) {
+    const header = process.env.FORTIS_ZAP_AUTH_HEADER?.trim() || 'Authorization';
+    const value = header.toLowerCase() === 'authorization' && !/^(bearer|basic|token)\s/i.test(authValue) ? `Bearer ${authValue}` : authValue;
+    auth = { header, value };
+  }
+
   let report: ZapReport;
   const started = Date.now();
   const importFile = str(flags['zap-report']);
@@ -234,10 +293,10 @@ async function cmdTest(flags: Flags): Promise<number> {
     }
     const label = openapi ? 'API scan (active)' : mode === 'full' ? 'full scan (active)' : 'baseline (passive, no attacks)';
     say(c.grey(`fortis ▸ OWASP ZAP ${label} · ${origin} · ${ZAP_IMAGE}`));
-    say(c.grey(`Crawling for up to ${minutes} min. Pausing the target in the dashboard stops the run.`));
+    say(c.grey(`Crawling for up to ${minutes} min${auth ? `, logged in via the ${auth.header} header` : ' as an anonymous visitor (set FORTIS_ZAP_AUTH to test behind login)'}. Pausing the target in the dashboard stops the run.`));
     try {
       const run = await runZap(
-        { target: origin, mode, openapi, minutes, local },
+        { target: origin, mode, openapi, minutes, local, auth },
         {
           onLine: (l) => {
             if (!json && /^(PASS|WARN|FAIL|Total of|Stopping)/.test(l)) log(c.grey(`  ${l.slice(0, 160)}`));
@@ -264,6 +323,9 @@ async function cmdTest(flags: Flags): Promise<number> {
   const findings: DastFinding[] = parseZapReport(report, origin);
   const durationMs = Date.now() - started;
   const blocking = findings.filter((f) => meetsThreshold(f.severity, failOn));
+  if (process.env.GITHUB_ACTIONS === 'true' && !json) {
+    for (const line of githubAnnotations(findings.filter((f) => f.severity !== 'info').map((f) => ({ ...f, file: undefined, title: `${f.title} at ${origin}${f.file}` })))) log(line);
+  }
 
   let uploaded: Awaited<ReturnType<ReturnType<typeof client>['upload']>> | null = null;
   const notes: string[] = [];
@@ -300,6 +362,63 @@ async function cmdTest(flags: Flags): Promise<number> {
     for (const n of notes) log(c.yellow(`! ${n}`));
   }
   return blocking.length ? 1 : 0;
+}
+
+async function resolvePacks(api: string, key: string | undefined): Promise<RulePack[]> {
+  if (!key) return FREE_PACKS;
+  try {
+    return await client(api, key).rulePacks();
+  } catch {
+    return FREE_PACKS;
+  }
+}
+
+async function cmdBaseline(flags: Flags): Promise<number> {
+  const root = repoRoot(process.cwd()) ?? process.cwd();
+  const config = readProjectConfig(root);
+  const api = apiUrl(str(flags.api) ?? config.apiUrl);
+  const packs = await resolvePacks(api, resolveKey(api));
+  const result = await runScan({ root, scope: 'full', packs, ignore: config.ignore, offline: Boolean(flags.offline) });
+  const n = writeBaseline(root, result.detections);
+  log(c.green('✓'), `Wrote ${BASELINE_FILE} with ${n} known finding(s) (${packs.join(', ')} rules).`);
+  log(c.grey('Commit it. From now on only new findings block pushes and CI; the known ones stay visible in the dashboard.'));
+  return 0;
+}
+
+async function cmdCi(args: string[], flags: Flags): Promise<number> {
+  if (args[0] !== 'init') {
+    err('Usage: fortis ci init [--provider github|gitlab] [--staging-branch staging] [--target URL] [--force]');
+    return 2;
+  }
+  const root = repoRoot(process.cwd());
+  if (!root) {
+    err(c.red('✖ Run fortis ci init inside a git repository.'));
+    return 2;
+  }
+  const provider = (str(flags.provider) ?? detectProvider(root)) as CiProvider;
+  if (!['github', 'gitlab'].includes(provider)) {
+    err(c.red('--provider must be github or gitlab'));
+    return 2;
+  }
+  const stagingBranch = str(flags['staging-branch']) ?? 'staging';
+  const res = writeCi(root, provider, { stagingBranch, target: str(flags.target) ?? readProjectConfig(root).target, force: Boolean(flags.force) });
+  if (!res.written) {
+    err(c.yellow(`! ${res.path} already exists. Use --force to overwrite it.`));
+    return 2;
+  }
+  log(c.green('✓'), `Wrote ${res.path}`);
+  log('');
+  if (provider === 'github') {
+    log(c.bold('Next, in GitHub → Settings → Secrets and variables → Actions:'));
+    log(`  secret   ${c.cyan('FORTIS_KEY')}           a CLI key from the Fortis dashboard`);
+    log(`  variable ${c.cyan('FORTIS_STAGING_URL')}   your verified staging URL (for the ZAP job)`);
+    log(`  secret   ${c.cyan('FORTIS_TEST_TOKEN')}    optional: a staging test user's token, to test behind login`);
+  } else {
+    log(c.bold('Next:'), `add ${c.cyan('include: [{ local: fortis.gitlab-ci.yml }]')} to .gitlab-ci.yml and set the CI/CD variables`);
+    log('  FORTIS_KEY (masked), FORTIS_STAGING_URL, FORTIS_TEST_TOKEN (optional, masked)');
+  }
+  log(c.grey(`Pull requests get a code scan; pushes to "${stagingBranch}" also get a ZAP test once the deploy is up.`));
+  return 0;
 }
 
 async function cmdInit(flags: Flags): Promise<number> {
@@ -360,6 +479,10 @@ async function main(): Promise<number> {
       return cmdScan(flags);
     case 'test':
       return cmdTest(flags);
+    case 'baseline':
+      return cmdBaseline(flags);
+    case 'ci':
+      return cmdCi(args, flags);
     case 'init':
       return cmdInit(flags);
     case 'login': {

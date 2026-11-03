@@ -142,7 +142,10 @@ export function dockerAvailable(): { ok: true } | { ok: false; reason: string } 
 }
 
 /** The docker command line for a run. Exported for tests. */
-export function zapCommand(opts: { target: string; mode: DastMode; openapi?: string; minutes: number; name: string; local: boolean; platform?: string; extraArgs?: string }) {
+/** A test user's credential, sent as one header on requests to the target host only. */
+export type ZapAuth = { header: string; value: string };
+
+export function zapCommand(opts: { target: string; mode: DastMode; openapi?: string; minutes: number; name: string; local: boolean; platform?: string; extraArgs?: string; auth?: ZapAuth }) {
   const platform = opts.platform ?? process.platform;
   let target = opts.target;
   let openapi = opts.openapi;
@@ -157,12 +160,17 @@ export function zapCommand(opts: { target: string; mode: DastMode; openapi?: str
       openapi = openapi && swap(openapi);
     }
   }
+  // ZAP's packaged scans add this header to every request for the site. The value is passed
+  // through the environment (-e NAME with no value), so it never appears in the process list.
+  const auth = opts.auth
+    ? ['-e', `ZAP_AUTH_HEADER=${opts.auth.header}`, '-e', 'ZAP_AUTH_HEADER_VALUE', '-e', `ZAP_AUTH_HEADER_SITE=${new URL(target).hostname}`]
+    : [];
   const script = openapi ? 'zap-api-scan.py' : opts.mode === 'full' ? 'zap-full-scan.py' : 'zap-baseline.py';
   const scriptArgs = openapi
     ? ['-t', openapi, '-f', 'openapi', '-O', target]
     : ['-t', target, '-m', String(opts.minutes)];
   return [
-    'run', '--rm', '--name', opts.name, ...net,
+    'run', '--rm', '--name', opts.name, ...net, ...auth,
     '-v', 'WORKDIR:/zap/wrk/:rw',
     ZAP_IMAGE, script, ...scriptArgs, '-J', 'report.json', '-I',
   ];
@@ -175,7 +183,7 @@ export type ZapRun = { report: ZapReport; exitCode: number; stopped: boolean };
  * reason (for example the target was paused in the dashboard) the container is stopped.
  */
 export async function runZap(
-  opts: { target: string; mode: DastMode; openapi?: string; minutes: number; local: boolean },
+  opts: { target: string; mode: DastMode; openapi?: string; minutes: number; local: boolean; auth?: ZapAuth },
   hooks: { onLine?: (line: string) => void; shouldStop?: () => Promise<string | null> } = {},
 ): Promise<ZapRun> {
   const work = mkdtempSync(join(tmpdir(), 'fortis-zap-'));
@@ -186,8 +194,10 @@ export async function runZap(
   let timer: NodeJS.Timeout | undefined;
   try {
     const exitCode = await new Promise<number>((resolve, reject) => {
-      const child = spawn('docker', args, { stdio: ['ignore', 'pipe', 'pipe'] });
-      const onData = (buf: Buffer) => buf.toString().split('\n').filter(Boolean).forEach((l) => hooks.onLine?.(l));
+      const env = opts.auth ? { ...process.env, ZAP_AUTH_HEADER_VALUE: opts.auth.value } : process.env;
+      const child = spawn('docker', args, { stdio: ['ignore', 'pipe', 'pipe'], env });
+      const scrub = (l: string) => (opts.auth ? l.split(opts.auth.value).join('••••') : l);
+      const onData = (buf: Buffer) => buf.toString().split('\n').filter(Boolean).forEach((l) => hooks.onLine?.(scrub(l)));
       child.stdout.on('data', onData);
       child.stderr.on('data', onData);
       child.on('error', reject);
@@ -208,9 +218,30 @@ export async function runZap(
       if (stopped) return { report: {}, exitCode, stopped };
       throw new Error(`ZAP exited with code ${exitCode} and wrote no report. Check that the target is reachable from this machine.`);
     }
-    return { report: JSON.parse(readFileSync(file, 'utf8')) as ZapReport, exitCode, stopped };
+    let raw = readFileSync(file, 'utf8');
+    // Never let the test user's credential reach the report, the terminal or the dashboard.
+    if (opts.auth) raw = raw.split(opts.auth.value).join('••••');
+    return { report: JSON.parse(raw) as ZapReport, exitCode, stopped };
   } finally {
     if (timer) clearInterval(timer);
     rmSync(work, { recursive: true, force: true });
   }
+}
+
+/** Waits until the target answers with anything below 500 (a deploy that's up), for up to `seconds`. */
+export async function waitForTarget(url: string, seconds: number, onWait?: (msg: string) => void, fetchImpl: typeof fetch = fetch): Promise<boolean> {
+  const deadline = Date.now() + seconds * 1000;
+  let last = '';
+  while (Date.now() < deadline) {
+    try {
+      const res = await fetchImpl(url, { method: 'GET', redirect: 'manual', signal: AbortSignal.timeout(15_000) });
+      if (res.status < 500) return true;
+      last = `HTTP ${res.status}`;
+    } catch (e) {
+      last = (e as Error).message;
+    }
+    onWait?.(`Waiting for ${url} (${last})…`);
+    await new Promise((r) => setTimeout(r, 10_000));
+  }
+  return false;
 }

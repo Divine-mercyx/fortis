@@ -24,10 +24,38 @@ const listQuery = z.object({
   offset: z.coerce.number().int().min(0).max(100_000).default(0),
 });
 
+export const ruleHealthSql = sql`
+  select rule_id as "ruleId",
+    count(*)::int as total,
+    count(*) filter (where status = 'open')::int as open,
+    count(*) filter (where status = 'fixed')::int as fixed,
+    count(*) filter (where status = 'accepted_risk')::int as "acceptedRisk",
+    count(*) filter (where status = 'false_positive')::int as "falsePositive"
+  from findings`;
+
+export type RuleHealthRow = { ruleId: string; total: number; open: number; fixed: number; acceptedRisk: number; falsePositive: number };
+
+/** Share of triaged findings (anything no longer open) that people marked false positive. */
+export function presentHealth(r: RuleHealthRow) {
+  const triaged = r.total - r.open;
+  return { ...r, triaged, falsePositiveRate: triaged ? Math.round((r.falsePositive / triaged) * 1000) / 1000 : null };
+}
+
 const severityOrder = sql`case ${findings.severity} when 'critical' then 4 when 'high' then 3 when 'medium' then 2 when 'low' then 1 else 0 end`;
 
 export async function findingsRoutes(app: FastifyInstance) {
   app.get('/v1/rules', async () => ({ rules: RULE_CATALOG }));
+
+  /**
+   * Rule health: how this team triaged each rule's findings. A high false-positive share means
+   * the rule is noisy for this codebase, which is what we tune next.
+   */
+  app.get('/v1/orgs/:orgId/rules/health', async (req) => {
+    const { orgId } = parse(orgParams, req.params);
+    await requireOrgRole(req, orgId, 'viewer');
+    const rows = await db.execute(sql`${ruleHealthSql} where org_id = ${orgId} group by rule_id order by rule_id`);
+    return { rules: (rows.rows as RuleHealthRow[]).map(presentHealth) };
+  });
 
   app.get('/v1/orgs/:orgId/findings', async (req) => {
     const { orgId } = parse(orgParams, req.params);
