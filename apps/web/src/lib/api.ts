@@ -17,7 +17,12 @@ export async function api<T = unknown>(path: string, init: { method?: string; bo
     body: init.body !== undefined ? JSON.stringify(init.body) : undefined,
   });
   const text = await res.text();
-  const data = text ? JSON.parse(text) : null;
+  let data: { error?: { code?: string; message?: string } } | null = null;
+  try {
+    data = text ? JSON.parse(text) : null;
+  } catch {
+    throw new ApiError(res.status || 502, 'BAD_RESPONSE', 'Fortis is not responding properly right now. Please try again in a minute.');
+  }
   if (!res.ok) {
     const err = data?.error ?? {};
     throw new ApiError(res.status, err.code ?? 'ERROR', err.message ?? 'Something went wrong. Please try again.');

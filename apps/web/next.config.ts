@@ -1,14 +1,9 @@
 import type { NextConfig } from 'next';
 
-const API_URL = process.env.API_URL ?? 'http://localhost:4000';
-
 const config: NextConfig = {
   transpilePackages: ['@fortis/shared'],
   poweredByHeader: false,
-  // The browser talks to /api on the dashboard's own origin, so the session cookie stays first-party.
-  async rewrites() {
-    return [{ source: '/api/:path*', destination: `${API_URL}/:path*` }];
-  },
+  // /api/* is proxied to the API by src/app/api/[...path]/route.ts, using API_URL at run time.
   async headers() {
     return [
       {

@@ -26,8 +26,8 @@ pnpm dev:api                             # http://localhost:4000
 pnpm dev:web                             # http://localhost:3000 (proxies /api to the API)
 ```
 
-The dashboard calls the API through its own `/api` path (see `apps/web/next.config.ts`), so the
-session cookie stays first-party. Set `API_URL` for the dashboard when the API runs elsewhere.
+The dashboard calls the API through its own `/api` path (`apps/web/src/app/api/[...path]/route.ts`), so the
+session cookie stays first-party. `API_URL` is read at run time, so changing it only needs a restart.
 
 Run the checks:
 
