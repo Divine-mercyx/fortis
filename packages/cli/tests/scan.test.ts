@@ -85,7 +85,22 @@ describe('runScan', () => {
   });
 });
 
+describe('test files', () => {
+  it('skips fintech checks in tests but still catches real secrets there', async () => {
+    const { dir } = repo({
+      'tests/device.test.ts': `await request(app).post('/api/v1/wallet/transfer').send({});\nconst k = '${PAYSTACK_LIVE}';\n`,
+    });
+    const r = await runScan({ root: dir, scope: 'full', packs: ['fintech', 'secrets'], offline: true });
+    expect(r.detections.map((d) => d.ruleId)).toEqual(['FX-SEC-001']);
+  });
+});
+
 describe('upload payload and hook', () => {
+  it('does not mask ordinary URL paths', () => {
+    const p = toUpload({ ruleId: 'FX-IDEM-001', severity: 'high', title: 't', file: 'a.ts', line: 1, snippet: "router.post('/api/v1/wallet/transfer-to-beneficiary', handler)" });
+    expect(p.snippet).toContain('/api/v1/wallet/transfer-to-beneficiary');
+  });
+
   it('masks the secret before anything leaves the machine', () => {
     const p = toUpload({ ruleId: 'FX-SEC-001', severity: 'critical', title: 'Live key', file: 'a.ts', line: 1, snippet: `const k = '${PAYSTACK_LIVE}'` });
     expect(p.snippet).not.toContain(PAYSTACK_LIVE);

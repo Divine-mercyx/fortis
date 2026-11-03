@@ -13,12 +13,25 @@ export type Detection = {
   snippet: string;
 };
 
+/** Facts gathered from the whole repository, so a rule can see protection defined in another file. */
+export type ProjectContext = {
+  /** Names of functions/middleware defined in files that implement idempotency keys. */
+  idempotencyHelpers: Set<string>;
+};
+
+export const emptyContext = (): ProjectContext => ({ idempotencyHelpers: new Set() });
+
+/** Test code, fixtures and mocks: fintech checks skip these (secret checks still run). */
+export const TEST_PATH = /(^|\/)(__tests__|__mocks__|tests?|spec|e2e|fixtures?|mocks?)\/|\.(test|spec)\.[cm]?[jt]sx?$/i;
+
 export type FileRule = {
   id: string;
   pack: RulePack;
   /** Only run on files whose path matches. */
   appliesTo: RegExp;
-  run: (file: SourceFile) => Detection[];
+  /** Skip test files, fixtures and mocks. */
+  skipTests?: boolean;
+  run: (file: SourceFile, ctx: ProjectContext) => Detection[];
 };
 
 export const JS_TS = /\.(c|m)?(j|t)sx?$/i;
@@ -30,6 +43,50 @@ export function isIgnored(file: SourceFile, line: number): boolean {
   const here = file.lines[line - 1] ?? '';
   const above = file.lines[line - 2] ?? '';
   return IGNORE_LINE.test(here) || IGNORE_NEXT.test(above);
+}
+
+/**
+ * The code of a statement with the text inside string literals blanked out, but template
+ * interpolations kept. "BVN must be 11 digits" becomes "", while `BVN ${bvn}` keeps "bvn".
+ */
+export function codeOnly(text: string): string {
+  let out = '';
+  let quote: string | null = null;
+  let depth = 0; // ${ … } nesting inside a template literal
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i]!;
+    if (quote) {
+      if (ch === '\\') { i++; continue; }
+      if (quote === '`' && ch === '$' && text[i + 1] === '{') { depth++; i++; out += ' '; continue; }
+      if (depth > 0) {
+        if (ch === '}') { depth--; out += ' '; continue; }
+        out += ch;
+        continue;
+      }
+      if (ch === quote) { quote = null; out += ' '; }
+      continue;
+    }
+    if (ch === '"' || ch === "'" || ch === '`') { quote = ch; out += ' '; continue; }
+    if (ch === '/' && text[i + 1] === '/') break;
+    out += ch;
+  }
+  return out;
+}
+
+/** The full call starting on `line` (1-based), following open brackets for up to 20 lines. */
+export function statementAt(file: SourceFile, line: number): string {
+  let text = '';
+  let balance = 0;
+  for (let i = line - 1; i < Math.min(file.lines.length, line + 19); i++) {
+    const l = file.lines[i]!;
+    text += `${l}\n`;
+    for (const ch of codeOnly(l)) {
+      if (ch === '(' || ch === '{' || ch === '[') balance++;
+      else if (ch === ')' || ch === '}' || ch === ']') balance--;
+    }
+    if (balance <= 0) break;
+  }
+  return text;
 }
 
 export function lineOf(text: string, index: number): number {

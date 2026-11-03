@@ -1,5 +1,5 @@
 import type { Detection, FileRule, SourceFile } from './types';
-import { isIgnored, JS_TS } from './types';
+import { codeOnly, isIgnored, JS_TS, statementAt } from './types';
 
 /*
  * Fintech rules for JavaScript and TypeScript. They are deliberately conservative pattern
@@ -23,6 +23,7 @@ export const ownershipRule: FileRule = {
   id: 'FX-OWN-001',
   pack: 'fintech',
   appliesTo: JS_TS,
+  skipTests: true,
   run(file) {
     const out: Detection[] = [];
     const byId =
@@ -47,6 +48,7 @@ export const webhookSignatureRule: FileRule = {
   id: 'FX-HOOK-001',
   pack: 'fintech',
   appliesTo: JS_TS,
+  skipTests: true,
   run(file) {
     const route = /\.(post|all|use)\s*\(\s*["'`][^"'`]*webhook[^"'`]*["'`]/i;
     const provider = /paystack|flutterwave|monnify|interswitch|remita|opay|kora/i;
@@ -67,6 +69,7 @@ export const balanceRaceRule: FileRule = {
   id: 'FX-TXN-001',
   pack: 'fintech',
   appliesTo: JS_TS,
+  skipTests: true,
   run(file) {
     const rmw = /\b([\w.]*balance)\s*=\s*\(?\s*(Number\()?\s*[\w.]*balance\)?\s*[-+]|\b[\w.]*balance\s*[-+]=/i;
     const safe = /\$transaction|\.transaction\s*\(|startTransaction|BEGIN\b|FOR UPDATE|\$inc\b|increment\s*\(|decrement\s*\(|sequelize\.transaction|knex\.transaction|withTransaction/i;
@@ -81,17 +84,22 @@ export const balanceRaceRule: FileRule = {
   },
 };
 
-/** FX-PII-002: BVN or NIN written to logs. */
+/** FX-PII-002: a BVN or NIN *value* written to logs (not just the word "BVN" in a message). */
+const LOG_CALL = /\b(console\.(log|info|warn|error|debug)|logger\.(log|info|warn|error|debug|trace)|log\.(info|warn|error|debug)|winston\.\w+|pino\.\w+)\s*\(/;
+const KYC_VALUE = /\b(bvn|nin|bvnNumber|ninNumber|bankVerificationNumber|nationalIdNumber|nationalId)\b/i;
+const MASKED = /mask|redact|last4|slice\(\s*-4\s*\)|\*\*\*/i;
+
 export const kycLoggingRule: FileRule = {
   id: 'FX-PII-002',
   pack: 'fintech',
   appliesTo: JS_TS,
+  skipTests: true,
   run(file) {
-    const logCall = /\b(console\.(log|info|warn|error|debug)|logger\.(log|info|warn|error|debug|trace)|log\.(info|warn|error|debug)|winston\.\w+|pino\.\w+)\s*\(/;
-    const kyc = /\b(bvn|nin|bvnNumber|ninNumber|bankVerificationNumber|nationalId)\b/i;
     const out: Detection[] = [];
     file.lines.forEach((text, i) => {
-      if (logCall.test(text) && kyc.test(text) && !/mask|redact|last4|slice\(-4\)/i.test(text) && !isIgnored(file, i + 1)) {
+      if (!LOG_CALL.test(text) || isIgnored(file, i + 1)) return;
+      const code = codeOnly(statementAt(file, i + 1));
+      if (KYC_VALUE.test(code) && !MASKED.test(code)) {
         out.push(hit(file, i + 1, 'FX-PII-002', 'high', 'BVN or NIN written to logs'));
       }
     });
@@ -99,11 +107,14 @@ export const kycLoggingRule: FileRule = {
   },
 };
 
-/** FX-OTP-001: OTPs generated with Math.random, or logged / returned. */
+/** FX-OTP-001: OTPs generated with Math.random, an OTP value logged or returned, or a hard-coded OTP. */
+const OTP_VALUE = /\b(otp|otpCode|oneTimePassword|passcode|verificationCode)\b/i;
+
 export const otpRule: FileRule = {
   id: 'FX-OTP-001',
   pack: 'fintech',
   appliesTo: JS_TS,
+  skipTests: true,
   run(file) {
     const out: Detection[] = [];
     file.lines.forEach((text, i) => {
@@ -111,9 +122,19 @@ export const otpRule: FileRule = {
       if (isIgnored(file, line)) return;
       if (/Math\.random\s*\(/.test(text) && /\b(otp|pin|token|code|passcode|verification)\b/i.test(window(file, line, 1, 1))) {
         out.push(hit(file, line, 'FX-OTP-001', 'high', 'OTP generated with Math.random'));
-      } else if (/\b(console\.\w+|logger\.\w+)\s*\(/.test(text) && /\botp\b/i.test(text)) {
-        out.push(hit(file, line, 'FX-OTP-001', 'high', 'OTP written to logs'));
-      } else if (/res\.(json|send)\s*\(/.test(text) && /\botp\s*[:,}]/i.test(text)) {
+        return;
+      }
+      if (LOG_CALL.test(text)) {
+        const stmt = statementAt(file, line);
+        const code = codeOnly(stmt);
+        if (OTP_VALUE.test(code) && !MASKED.test(code)) {
+          out.push(hit(file, line, 'FX-OTP-001', 'high', 'OTP written to logs'));
+        } else if (/\botp\b[^\n]{0,20}?\b\d{4,8}\b/i.test(stmt)) {
+          out.push(hit(file, line, 'FX-OTP-001', 'medium', 'Hard-coded OTP in source'));
+        }
+        return;
+      }
+      if (/res\.(json|send)\s*\(/.test(text) && /\botp\s*[:,}]/i.test(codeOnly(statementAt(file, line)))) {
         out.push(hit(file, line, 'FX-OTP-001', 'high', 'OTP returned in an API response'));
       }
     });
@@ -121,19 +142,25 @@ export const otpRule: FileRule = {
   },
 };
 
-/** FX-IDEM-001: a money-out route with no idempotency key handling anywhere in the file. */
+/**
+ * FX-IDEM-001: a money-out route with no idempotency protection: none in the file, no
+ * guard-style middleware on the route, and no helper from an idempotency module.
+ */
 export const idempotencyRule: FileRule = {
   id: 'FX-IDEM-001',
   pack: 'fintech',
   appliesTo: JS_TS,
-  run(file) {
+  skipTests: true,
+  run(file, ctx) {
     if (/idempoten/i.test(file.text)) return [];
     const route = /\.(post|put)\s*\(\s*["'`][^"'`]*(transfer|payout|withdraw|disburse|send-money|sendmoney)[^"'`]*["'`]/i;
     const out: Detection[] = [];
     file.lines.forEach((text, i) => {
-      if (route.test(text) && !isIgnored(file, i + 1)) {
-        out.push(hit(file, i + 1, 'FX-IDEM-001', 'high', 'Transfer without an idempotency key'));
-      }
+      if (!route.test(text) || isIgnored(file, i + 1)) return;
+      const stmt = statementAt(file, i + 1).slice(0, 600);
+      const names = codeOnly(stmt).match(/[A-Za-z_$][\w$]*/g) ?? [];
+      if (names.some((n) => /idempot|dedup|replay|paymentguard|withguard/i.test(n) || ctx.idempotencyHelpers.has(n))) return;
+      out.push(hit(file, i + 1, 'FX-IDEM-001', 'high', 'Transfer without an idempotency key'));
     });
     return out;
   },

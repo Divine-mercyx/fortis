@@ -2,7 +2,7 @@ import { SEVERITY_RANK, type RulePack, type Severity } from '@fortis/shared';
 
 import { scanDependencies } from './rules/dependencies';
 import { rulesFor } from './rules/index';
-import type { Detection } from './rules/types';
+import { JS_TS, TEST_PATH, type Detection, type ProjectContext, type SourceFile } from './rules/types';
 import { loadFiles } from './files';
 import { allFiles, changedFiles } from './git';
 
@@ -29,13 +29,16 @@ export async function runScan(opts: ScanOptions): Promise<ScanResult> {
   const paths = opts.scope === 'changed' ? changedFiles(opts.root) : allFiles(opts.root);
   const files = loadFiles(opts.root, paths, opts.ignore);
   const rules = rulesFor(opts.packs);
+  // Repository-wide facts (e.g. idempotency middleware defined elsewhere), even for pre-push scans.
+  const ctx = buildContext(opts.scope === 'full' ? files : loadFiles(opts.root, allFiles(opts.root), opts.ignore));
 
   const seen = new Set<string>();
   const detections: Detection[] = [];
   for (const file of files) {
     for (const rule of rules) {
       if (!rule.appliesTo.test(file.path)) continue;
-      for (const d of rule.run(file)) {
+      if (rule.skipTests && TEST_PATH.test(file.path)) continue;
+      for (const d of rule.run(file, ctx)) {
         const key = `${d.ruleId}|${d.file}|${d.line}`;
         if (seen.has(key)) continue;
         seen.add(key);
@@ -58,6 +61,18 @@ export async function runScan(opts: ScanOptions): Promise<ScanResult> {
 
   detections.sort((a, b) => SEVERITY_RANK[b.severity] - SEVERITY_RANK[a.severity] || a.file.localeCompare(b.file) || a.line - b.line);
   return { detections, filesScanned: files.length, packagesChecked, durationMs: Date.now() - started, notes };
+}
+
+/** Names exported from modules that implement idempotency keys, e.g. withPaymentGuard. */
+export function buildContext(files: SourceFile[]): ProjectContext {
+  const idempotencyHelpers = new Set<string>();
+  for (const f of files) {
+    if (!JS_TS.test(f.path) || TEST_PATH.test(f.path) || !/idempoten/i.test(f.text)) continue;
+    for (const m of f.text.matchAll(/\b(?:export\s+)?(?:async\s+)?function\s+([A-Za-z_$][\w$]*)|\bexport\s+(?:const|let)\s+([A-Za-z_$][\w$]*)/g)) {
+      idempotencyHelpers.add((m[1] ?? m[2])!);
+    }
+  }
+  return { idempotencyHelpers };
 }
 
 export const meetsThreshold = (sev: Severity, failOn: Severity) => SEVERITY_RANK[sev] >= SEVERITY_RANK[failOn];

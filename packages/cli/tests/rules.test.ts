@@ -2,10 +2,11 @@ import { describe, expect, it } from 'vitest';
 
 import { FINTECH_RULES } from '../src/rules/fintech';
 import { genericSecretRule, paymentKeyRule } from '../src/rules/secrets';
-import type { FileRule, SourceFile } from '../src/rules/types';
+import { emptyContext, type FileRule, type SourceFile } from '../src/rules/types';
+import { buildContext } from '../src/scan';
 
 const file = (path: string, text: string): SourceFile => ({ path, text, lines: text.split('\n') });
-const run = (rule: FileRule, path: string, text: string) => rule.run(file(path, text));
+const run = (rule: FileRule, path: string, text: string, ctx = emptyContext()) => rule.run(file(path, text), ctx);
 const rule = (id: string) => FINTECH_RULES.find((r) => r.id === id)!;
 
 // Fake keys are assembled at runtime so secret scanners don't flag this test file.
@@ -86,5 +87,33 @@ describe('FX-PII-002, FX-OTP-001 and FX-IDEM-001', () => {
   it('flags money-out routes without idempotency handling', () => {
     expect(run(rule('FX-IDEM-001'), 'src/routes.ts', "router.post('/v1/transfers', createTransfer);")).toHaveLength(1);
     expect(run(rule('FX-IDEM-001'), 'src/routes.ts', "router.post('/v1/transfers', requireIdempotencyKey, createTransfer);")).toHaveLength(0);
+  });
+});
+
+describe('false positives seen on a real fintech backend', () => {
+  it('does not treat the word BVN in a message as a logged BVN', () => {
+    expect(run(rule('FX-PII-002'), 'scripts/a.ts', "console.error('BVN must be 11 digits');")).toHaveLength(0);
+    expect(run(rule('FX-PII-002'), 'src/kyc.ts', 'console.log(`[KYC] Prembly BVN+face ${tag}:`);')).toHaveLength(0);
+    const multi = "console.warn('[KYC] Prembly BVN+face rejected', {\n  faceStatus: faceData.status,\n  confidence,\n});";
+    expect(run(rule('FX-PII-002'), 'src/kyc.ts', multi)).toHaveLength(0);
+  });
+  it('still flags a BVN value, including inside a multi-line log call', () => {
+    expect(run(rule('FX-PII-002'), 'scripts/a.ts', 'console.log(`BVN: ${BVN}`);')).toHaveLength(1);
+    expect(run(rule('FX-PII-002'), 'src/kyc.ts', "logger.warn('rejected', {\n  status,\n  bvn: customer.bvn,\n});")).toHaveLength(1);
+  });
+  it('does not treat the word OTP in a message as a logged OTP', () => {
+    expect(run(rule('FX-OTP-001'), 'src/auth.ts', 'console.log(`[auth:login] reviewer_bypass customer #${customer.id} — no OTP sent`);')).toHaveLength(0);
+    expect(run(rule('FX-OTP-001'), 'src/otp.ts', 'console.error(`[otp] delivery failed purpose=${purpose} channel=${delivery.channel}: ${detail}`);')).toHaveLength(0);
+  });
+  it('still flags a logged OTP value and a hard-coded OTP', () => {
+    expect(run(rule('FX-OTP-001'), 'src/otp.ts', 'console.log(`sent ${otp} to ${phone}`);')[0]?.title).toBe('OTP written to logs');
+    expect(run(rule('FX-OTP-001'), 'scripts/seed.ts', "console.log('  2. OTP: 482901 (no SMS when bypass is on)');")[0]).toMatchObject({ severity: 'medium', title: 'Hard-coded OTP in source' });
+  });
+  it('recognises idempotency middleware defined in another file', () => {
+    const guard = file('src/services/payment-guard.service.ts', "function idempotencyKey(req) { return req.headers['idempotency-key']; }\nexport function withPaymentGuard(route) { return async () => {}; }");
+    const ctx = buildContext([guard]);
+    const route = "router.post('/transfer', validateBody(schema), requireTxnAuth, withPaymentGuard('wallet.transfer'), async (req, res) => {});";
+    expect(run(rule('FX-IDEM-001'), 'src/modules/wallet/wallet.routes.ts', route, ctx)).toHaveLength(0);
+    expect(run(rule('FX-IDEM-001'), 'src/modules/wallet/wallet.routes.ts', "router.post('/transfer', async (req, res) => {});", ctx)).toHaveLength(1);
   });
 });
