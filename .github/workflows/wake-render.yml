@@ -1,0 +1,30 @@
+# Wakes the free Render services at the start of the working day. Once awake, the services
+# ping each other every 10 minutes until the keep-alive window ends (see
+# packages/shared/src/keepalive.ts). One run a day, so it costs almost no Actions minutes.
+name: Wake Render services
+
+on:
+  schedule:
+    # 06:47 and 07:17 UTC = 07:47 and 08:17 in Lagos (the second run covers a delayed first).
+    - cron: '47 6 * * *'
+    - cron: '17 7 * * *'
+  workflow_dispatch:
+
+jobs:
+  wake:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Wake dashboard and API
+        env:
+          WEB_URL: ${{ vars.FORTIS_WEB_URL || 'https://fortis-web.onrender.com' }}
+          API_URL: ${{ vars.FORTIS_API_URL || 'https://fortis-api-prqr.onrender.com' }}
+        run: |
+          for url in "$API_URL/health" "$WEB_URL/api/health"; do
+            for i in 1 2 3 4 5 6; do
+              code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 90 "$url" || true)
+              echo "$url -> $code"
+              [ "$code" = "200" ] && break
+              sleep 20
+            done
+          done

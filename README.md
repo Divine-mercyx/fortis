@@ -98,3 +98,18 @@ The CLI package name shown in the dashboard is set in `apps/web/src/lib/cli.ts`.
 2. Generate a rule-signing key with `pnpm --filter @fortis/api keys:rules` and store the private key as `RULES_SIGNING_PRIVATE_KEY`.
 3. Set `WEB_ORIGINS` and `WEB_URL` to the dashboard address, and `NODE_ENV=production`.
 4. Run `pnpm db:migrate`, then `pnpm --filter @fortis/api start`.
+
+### Keeping free Render services awake
+
+Render's free plan puts a service to sleep after 15 minutes without traffic, and the first request after that waits 30–60 seconds. Both services ping each other's health URLs every 10 minutes during a daily window. This switches on automatically on Render, because Render sets `RENDER`. The dashboard's `/api/health` passes through to the API's `/health`, which also queries the database, so the pings keep Supabase active too.
+
+| Variable | Default | |
+|---|---|---|
+| `KEEPALIVE` | on when on Render | `off` disables it |
+| `KEEPALIVE_HOURS` | `8-20` | daily window, 24-hour clock; `0-24` = always |
+| `KEEPALIVE_TZ` | `Africa/Lagos` | |
+| `KEEPALIVE_URLS` | this service + the other one | comma-separated override |
+
+**The free-hours budget.** Render gives 750 free instance hours a month per workspace, shared by all services. Two services awake 24/7 need about 1,490, so both would be suspended mid-month. The default 12-hour window keeps two services at 744 hours. For always-on, upgrade just the API to a paid instance and set `KEEPALIVE_HOURS=0-24` on it.
+
+Once both services have slept overnight, nothing inside them is running to wake them up. `.github/workflows/wake-render.yml` makes one request each morning to start them. Set the repository variables `FORTIS_WEB_URL` and `FORTIS_API_URL` if your URLs differ from the defaults.

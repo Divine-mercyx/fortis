@@ -98,7 +98,16 @@ describe('fortis ci init', () => {
     expect(writeCi(root, 'github', { stagingBranch: 'staging' }).written).toBe(false);
   });
 
-  it('produces YAML that parses', () => {
+  const hasPyYaml = (() => {
+    try {
+      execFileSync('python3', ['-c', 'import yaml'], { stdio: 'ignore' });
+      return true;
+    } catch {
+      return false;
+    }
+  })();
+
+  it.skipIf(!hasPyYaml)('produces YAML that parses', () => {
     for (const y of [githubWorkflow({ stagingBranch: 'staging' }), gitlabJobs({ stagingBranch: 'dev' })]) {
       const out = execFileSync('python3', ['-c', 'import sys,yaml,json; print(json.dumps(sorted(map(str, yaml.safe_load(sys.stdin).keys()))))'], { input: y, encoding: 'utf8' });
       expect(JSON.parse(out).length).toBeGreaterThan(1);

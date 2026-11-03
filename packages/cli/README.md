@@ -55,6 +55,63 @@ Before Fortis will test a URL, an admin adds it under **Project → Staging targ
 
 Needs Docker (image `zaproxy/zap-stable`, override with `FORTIS_ZAP_IMAGE`). For staging on a private network pass extra docker flags with `FORTIS_ZAP_DOCKER_ARGS`, for example `--add-host staging.internal:10.0.0.5`. Without Docker, run ZAP yourself and import its JSON report with `--zap-report report.json`. The default `--fail-on` for tests is `high`.
 
+## CI in one command
+
+```bash
+npx fortis ci init                    # GitHub Actions (or --provider gitlab)
+```
+
+This writes `.github/workflows/fortis.yml`:
+
+- **Every pull request and push** gets a full scan.
+  - Findings appear as annotations on the pull request.
+  - A SARIF file goes to GitHub code scanning (free on public repositories).
+- **Every push to `staging`** (change it with `--staging-branch`) also gets a ZAP test, once the new deploy is answering.
+
+Set the `FORTIS_KEY` secret and the `FORTIS_STAGING_URL` variable in the repository settings. Add `--sarif fortis.sarif` to any scan to write SARIF yourself.
+
+## Adopting Fortis in an existing codebase
+
+```bash
+npx fortis baseline                   # records today's findings in .fortis-baseline.json
+```
+
+Commit the file. From then on, only **new** findings block pushes and CI. The known ones stay in the dashboard so you can work through them. Pass `--no-baseline` to see everything.
+
+## Secrets in git history
+
+```bash
+npx fortis scan --history
+```
+
+This searches every commit on every branch. A key that was committed and later deleted can still be read by anyone who can clone the repository, so it must be rotated. Each secret is reported once, at the commit that introduced it.
+
+## Testing behind login
+
+Set `FORTIS_ZAP_AUTH` to a staging test user's token before `fortis test`, and ZAP will crawl and test the pages and APIs behind login. Without it, ZAP only sees what an anonymous visitor sees. `FORTIS_ZAP_AUTH_HEADER` changes the header, for example to `Cookie`. The token:
+
+- is sent to the target host only;
+- is passed to Docker through the environment, never on the command line;
+- is scrubbed from all output.
+
+## Access checks: can one customer see another's data?
+
+```bash
+npx fortis access init --openapi https://staging.yourapp.com/openapi.json   # or edit the example
+FORTIS_USER_A_TOKEN=… FORTIS_USER_B_TOKEN=… npx fortis access --target https://staging.yourapp.com
+```
+
+Set it up with two ordinary test customers on staging, and give customer A at least one loan, wallet or transfer. For each resource, Fortis then:
+
+1. finds A's records;
+2. requests each one as customer B, and again with no login at all.
+
+If either request gets A's record back, that's **FX-BOLA-001** or **FX-AUTH-001**: broken access control, the most common way fintech data leaks. Only GET requests are sent, so nothing is created or changed. Access checks need Fortis Plus and a verified, authorised, non-production target.
+
+## Accuracy
+
+Every rule is measured against a labelled benchmark in `bench/cases`. A line marked `@hit` must be flagged, and a flag on any other line is a false positive. `pnpm bench` prints precision and recall per rule. The test suite fails if any rule drops below its recorded floor. When a rule is wrong on real code, we add that code to the benchmark first, then fix the rule.
+
 ## What leaves your machine
 
 Rules run locally. When your plan syncs findings, the CLI sends the rule ID, severity, file path,
