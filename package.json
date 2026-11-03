@@ -1,0 +1,15 @@
+{
+  "name": "fortis",
+  "private": true,
+  "packageManager": "pnpm@10.28.0",
+  "engines": { "node": ">=22" },
+  "scripts": {
+    "dev:api": "pnpm --filter @fortis/api dev",
+    "dev:web": "pnpm --filter @fortis/web dev",
+    "build": "pnpm -r build",
+    "typecheck": "pnpm -r typecheck",
+    "test": "pnpm -r test",
+    "db:generate": "pnpm --filter @fortis/api db:generate",
+    "db:migrate": "pnpm --filter @fortis/api db:migrate"
+  }
+}
