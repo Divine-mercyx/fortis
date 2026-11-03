@@ -1,0 +1,2 @@
+steps:
+  - run: git clone https://x:{{GH_TOKEN}}@github.com/acme/private.git # @hit

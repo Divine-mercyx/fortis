@@ -1,0 +1,34 @@
+{
+  "FX-HOOK-001": {
+    "precision": 1,
+    "recall": 1
+  },
+  "FX-IDEM-001": {
+    "precision": 1,
+    "recall": 1
+  },
+  "FX-OTP-001": {
+    "precision": 1,
+    "recall": 1
+  },
+  "FX-OWN-001": {
+    "precision": 1,
+    "recall": 0.857
+  },
+  "FX-PII-002": {
+    "precision": 1,
+    "recall": 1
+  },
+  "FX-SEC-001": {
+    "precision": 1,
+    "recall": 1
+  },
+  "FX-TXN-001": {
+    "precision": 1,
+    "recall": 1
+  },
+  "SEC-GEN-001": {
+    "precision": 1,
+    "recall": 1
+  }
+}

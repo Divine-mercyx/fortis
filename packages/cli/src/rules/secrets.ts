@@ -1,7 +1,7 @@
 import type { Detection, FileRule, SourceFile } from './types';
 import { isIgnored } from './types';
 
-const ANY_TEXT = /\.(c|m)?(j|t)sx?$|\.(json|ya?ml|env|toml|ini|properties|py|rb|php|go|java|kt|cs|sh|tf|txt|md|xml|gradle)$|(^|\/)\.env(\.|$)|(^|\/)Dockerfile$/i;
+const ANY_TEXT = /\.(c|m)?(j|t)sx?$|\.(json|ya?ml|env|toml|ini|properties|py|rb|php|go|java|kt|cs|sh|tf|txt|md|xml|gradle|pem|key|plist)$|(^|\/)id_(rsa|ecdsa|ed25519)$|(^|\/)\.env(\.|$)|(^|\/)Dockerfile$/i;
 
 type Pattern = { re: RegExp; ruleId: string; severity: Detection['severity']; title: string };
 
@@ -37,6 +37,11 @@ function entropy(s: string): number {
 }
 
 const PLACEHOLDER = /^(x+|\*+|<.*>|\$\{.*\}|your[_-]|changeme|example|placeholder|dummy|test|sample|redacted)/i;
+/** Routes, URLs without credentials and dashed-word labels are not secrets. */
+const NOT_SECRET = /^\/|^https?:\/\/[^@\s]+$|^[a-z]+(?:[-_./][a-z]+)+$/;
+
+/** Firebase config files hold client keys that ship inside every app build; they are public by design. */
+const FIREBASE_CONFIG = /(^|\/)(google-services\.json|GoogleService-Info\.plist)$/i;
 
 function scan(file: SourceFile, patterns: Pattern[]): Detection[] {
   const out: Detection[] = [];
@@ -44,6 +49,10 @@ function scan(file: SourceFile, patterns: Pattern[]): Detection[] {
     for (const p of patterns) {
       p.re.lastIndex = 0;
       if (p.re.test(text) && !isIgnored(file, i + 1)) {
+        if (p.title === 'Google API key in code' && FIREBASE_CONFIG.test(file.path)) {
+          out.push({ ruleId: p.ruleId, severity: 'low', title: 'Firebase client key (public by design: restrict it to your app in Google Cloud)', file: file.path, line: i + 1, snippet: text.trim() });
+          continue;
+        }
         out.push({ ruleId: p.ruleId, severity: p.severity, title: p.title, file: file.path, line: i + 1, snippet: text.trim() });
       }
     }
@@ -69,7 +78,7 @@ export const genericSecretRule: FileRule = {
       ASSIGNMENT.lastIndex = 0;
       for (const m of text.matchAll(ASSIGNMENT)) {
         const value = m[2]!;
-        if (PLACEHOLDER.test(value) || entropy(value) < 3.5) continue;
+        if (PLACEHOLDER.test(value) || NOT_SECRET.test(value) || entropy(value) < 3.5) continue;
         if (PAYMENT_KEYS.some((p) => { p.re.lastIndex = 0; return p.re.test(value); })) continue;
         if (isIgnored(file, i + 1)) continue;
         if (out.some((d) => d.line === i + 1)) continue;

@@ -39,7 +39,8 @@
     "typecheck": "tsc -p tsconfig.json",
     "test": "vitest run",
     "fortis": "tsx src/index.ts",
-    "prepublishOnly": "node build.mjs"
+    "prepublishOnly": "node build.mjs",
+    "bench": "tsx bench/run.ts"
   },
   "devDependencies": {
     "@fortis/shared": "workspace:*",

@@ -29,9 +29,12 @@ export const ownershipRule: FileRule = {
     const byId =
       /\.(findById|findByPk|findUnique|findOne|findFirst|get|getById|load)\s*\(\s*(\{\s*(where\s*:\s*\{\s*)?(_?id|uuid)\s*:\s*)?(Number\(|parseInt\()?\s*(req|request|ctx\.request|ctx)\.(params|query|body)\b/;
     const sqlById = /(select|update|delete)\b[^;]*\bwhere\b[^;]*\bid\s*=\s*(\$\d|\?|:id)/i;
+    // NestJS: `@Param('id') id` in the handler signature, then a lookup by that bare id.
+    const nestById = /\.(findUnique|findFirst|findOne|findById|findByPk|findOneBy)\s*\(\s*(\{\s*(where\s*:\s*)?\{\s*id\s*\}|\{\s*id\s*\}|id\s*[,)])/;
     file.lines.forEach((text, i) => {
       const line = i + 1;
-      const looksById = byId.test(text) || (sqlById.test(text) && /req\.(params|query|body)/.test(window(file, line, 2, 3)));
+      const nest = nestById.test(text) && /@Param\(\s*["'`]id["'`]\s*\)\s*id\b/.test(window(file, line, 8, 0));
+      const looksById = nest || byId.test(text) || (sqlById.test(text) && /req\.(params|query|body)/.test(window(file, line, 2, 3)));
       if (!looksById) return;
       const context = window(file, line, 3, 6);
       if (!MONEY.test(`${file.path}\n${context}`)) return;
@@ -73,7 +76,10 @@ export const balanceRaceRule: FileRule = {
   run(file) {
     const rmw = /\b([\w.]*balance)\s*=\s*\(?\s*(Number\()?\s*[\w.]*balance\)?\s*[-+]|\b[\w.]*balance\s*[-+]=/i;
     const safe = /\$transaction|\.transaction\s*\(|startTransaction|BEGIN\b|FOR UPDATE|\$inc\b|increment\s*\(|decrement\s*\(|sequelize\.transaction|knex\.transaction|withTransaction/i;
-    if (safe.test(file.text)) return [];
+    // Only a balance that is written back to storage can race.
+    const persists = /\.save\s*\(|\.(updateOne|updateMany|findOneAndUpdate|findByIdAndUpdate|upsert)\s*\(|\.update\s*\(\s*\{|\.query\s*\(|\.execute\s*\(|\binsert\s+into\b|\bupdate\s+\w+\s+set\b|\bprisma\.|\bknex\b|getRepository|\.repository\b/i;
+    // UI components compute running balances for display; they cannot race on stored money.
+    if (/\.[jt]sx$/i.test(file.path) || safe.test(file.text) || !persists.test(file.text)) return [];
     const out: Detection[] = [];
     file.lines.forEach((text, i) => {
       if (rmw.test(text) && !isIgnored(file, i + 1)) {
@@ -89,6 +95,17 @@ const LOG_CALL = /\b(console\.(log|info|warn|error|debug)|logger\.(log|info|warn
 const KYC_VALUE = /\b(bvn|nin|bvnNumber|ninNumber|bankVerificationNumber|nationalIdNumber|nationalId)\b/i;
 const MASKED = /mask|redact|last4|slice\(\s*-4\s*\)|\*\*\*/i;
 
+/** `Boolean(c.bvn)`, `!!c.bvn` and `c.bvn != null` log whether a value exists, not the value. */
+function withoutPresenceChecks(code: string): string {
+  return code
+    .replace(/\bBoolean\s*\([^)]*\)/g, ' ')
+    .replace(/!!\s*[\w.?]+/g, ' ')
+    .replace(/[\w.?]+\s*(?:!==?|===?)\s*(?:null|undefined)\b/g, ' ')
+    .replace(/[\w.?]+\.length\b/g, ' ')
+    // `p.bvn ? 'set' : 'missing'` (string branches are already blanked by codeOnly)
+    .replace(/[\w.?]+\s*\?(?![.?])(?=\s*[ :]*\s*(?:[ :]|$))/g, ' ');
+}
+
 export const kycLoggingRule: FileRule = {
   id: 'FX-PII-002',
   pack: 'fintech',
@@ -98,7 +115,7 @@ export const kycLoggingRule: FileRule = {
     const out: Detection[] = [];
     file.lines.forEach((text, i) => {
       if (!LOG_CALL.test(text) || isIgnored(file, i + 1)) return;
-      const code = codeOnly(statementAt(file, i + 1));
+      const code = withoutPresenceChecks(codeOnly(statementAt(file, i + 1)));
       if (KYC_VALUE.test(code) && !MASKED.test(code)) {
         out.push(hit(file, i + 1, 'FX-PII-002', 'high', 'BVN or NIN written to logs'));
       }
@@ -153,10 +170,13 @@ export const idempotencyRule: FileRule = {
   skipTests: true,
   run(file, ctx) {
     if (/idempoten/i.test(file.text)) return [];
-    const route = /\.(post|put)\s*\(\s*["'`][^"'`]*(transfer|payout|withdraw|disburse|send-money|sendmoney)[^"'`]*["'`]/i;
+    // A route is registered with a path literal ("/..." or ":id"); outbound calls like axios.post(`${BASE}/...`) are not routes.
+    const route = /\.(post|put)\s*\(\s*["'`][/:][^"'`$]*(transfer|payout|withdraw|disburse|send-money|sendmoney)[^"'`]*["'`]/i;
     const out: Detection[] = [];
     file.lines.forEach((text, i) => {
       if (!route.test(text) || isIgnored(file, i + 1)) return;
+      // Read-only helpers next to money routes (fee quotes, name enquiry) move no money.
+      if (/["'`][^"'`]*\/(quote|quotes|fees?|preview|estimate|validate|verify|lookup|name-?enquiry|resolve)["'`/?]/i.test(text)) return;
       const stmt = statementAt(file, i + 1).slice(0, 600);
       const names = codeOnly(stmt).match(/[A-Za-z_$][\w$]*/g) ?? [];
       if (names.some((n) => /idempot|dedup|replay|paymentguard|withguard/i.test(n) || ctx.idempotencyHelpers.has(n))) return;

@@ -22,7 +22,7 @@ export type ProjectContext = {
 export const emptyContext = (): ProjectContext => ({ idempotencyHelpers: new Set() });
 
 /** Test code, fixtures and mocks: fintech checks skip these (secret checks still run). */
-export const TEST_PATH = /(^|\/)(__tests__|__mocks__|tests?|spec|e2e|fixtures?|mocks?)\/|\.(test|spec)\.[cm]?[jt]sx?$/i;
+export const TEST_PATH = /(^|\/)(__tests__|__mocks__|tests?|spec|e2e|fixtures?|mocks?)\/|\.(test|spec|mock|mocks|fixture|stories)\.[cm]?[jt]sx?$/i;
 
 export type FileRule = {
   id: string;
@@ -67,7 +67,21 @@ export function codeOnly(text: string): string {
       continue;
     }
     if (ch === '"' || ch === "'" || ch === '`') { quote = ch; out += ' '; continue; }
-    if (ch === '/' && text[i + 1] === '/') break;
+    // Comments end at the line break (or */), not at the end of a multi-line statement.
+    if (ch === '/' && text[i + 1] === '/') {
+      const nl = text.indexOf('\n', i);
+      if (nl === -1) break;
+      i = nl;
+      out += '\n';
+      continue;
+    }
+    if (ch === '/' && text[i + 1] === '*') {
+      const end = text.indexOf('*/', i + 2);
+      if (end === -1) break;
+      i = end + 1;
+      out += ' ';
+      continue;
+    }
     out += ch;
   }
   return out;
