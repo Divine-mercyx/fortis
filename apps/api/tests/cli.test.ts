@@ -145,6 +145,15 @@ describe('scan upload', () => {
   });
 });
 
+describe('dependency findings', () => {
+  it('keep the package-specific title from the CLI', async () => {
+    const { key } = await coreProject();
+    await upload(key, scanPayload([{ ruleId: 'DEP-OSV', severity: 'critical', title: 'proxy-addr@2.0.7: IP spoofing via IPv4-mapped IPv6', file: 'package-lock.json', line: 0, snippet: 'proxy-addr@2.0.7 · GHSA-jqcg-44mw-7w3h' }]));
+    const { rows } = await pool.query('select title from findings');
+    expect(rows[0].title).toBe('proxy-addr@2.0.7: IP spoofing via IPv4-mapped IPv6');
+  });
+});
+
 describe('findings API', () => {
   it('lists by severity, changes status with a reason, and records the change', async () => {
     const { c, key } = await coreProject();

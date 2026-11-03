@@ -83,7 +83,8 @@ export async function ingestScan(auth: CliAuth, input: CliScanInput): Promise<In
       incoming.set(fingerprint, {
         ruleId: f.ruleId,
         severity: f.severity,
-        title: findRule(f.ruleId)?.title ?? f.title,
+        // Dependency findings keep the CLI's specific title (package, version and advisory).
+        title: f.ruleId === 'DEP-OSV' ? f.title : (findRule(f.ruleId)?.title ?? f.title),
         file,
         line: f.line ?? null,
         snippet,
