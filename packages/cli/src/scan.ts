@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import { SEVERITY_RANK, type RulePack, type Severity } from '@fortis/shared';
 
 import { scanDependencies } from './rules/dependencies';
+import { SUPPORTED_LOCKFILES } from './rules/lockfiles';
 import { rulesFor } from './rules/index';
 import { findLockfiles } from './rules/lockfiles';
 import { JS_TS, TEST_PATH, type Detection, type ProjectContext, type SourceFile } from './rules/types';
@@ -78,7 +79,7 @@ export async function runScan(opts: ScanOptions): Promise<ScanResult> {
     const missing = missingLockfileNote(opts.root);
     if (missing) notes.push(missing);
   }
-  const lockTouched = opts.scope === 'full' || paths.includes('package-lock.json');
+  const lockTouched = opts.scope === 'full' || paths.some((f) => (SUPPORTED_LOCKFILES as readonly string[]).includes(f));
   if (opts.packs.includes('dependencies') && lockTouched) {
     if (opts.offline) {
       notes.push('Dependency check skipped (--offline).');
@@ -122,12 +123,12 @@ export function buildContext(files: SourceFile[]): ProjectContext {
 
 export const meetsThreshold = (sev: Severity, failOn: Severity) => SEVERITY_RANK[sev] >= SEVERITY_RANK[failOn];
 
-/** The dependency check reads package-lock.json only; say so instead of reporting a clean result. */
+/** When there is no lockfile we can read, say so instead of reporting a clean result. */
 export function missingLockfileNote(root: string): string | null {
   const has = (f: string) => existsSync(join(root, f));
-  if (has('package-lock.json') || !has('package.json')) return null;
-  const other = ['pnpm-lock.yaml', 'yarn.lock', 'bun.lockb'].find(has);
+  if (SUPPORTED_LOCKFILES.some(has) || !has('package.json')) return null;
+  const other = ['bun.lock', 'bun.lockb'].find(has);
   return other
-    ? `Dependency check skipped: ${other} is not supported yet (package-lock.json only).`
-    : 'Dependency check skipped: no package-lock.json. Run npm install to create one.';
+    ? `Dependency check skipped: ${other} is not supported yet (npm, pnpm and yarn lockfiles are).`
+    : 'Dependency check skipped: no lockfile. Run npm, pnpm or yarn install to create one.';
 }

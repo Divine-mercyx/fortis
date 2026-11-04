@@ -1,171 +1,110 @@
-import { describe, expect, it } from 'vitest';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
-import { cycloneDx, findLockfiles, fromPurl, missingLockfiles, parseLockfile } from '../src/rules/lockfiles';
+import { afterAll, describe, expect, it } from 'vitest';
 
-const names = (file: string, text: string) => parseLockfile(file, text).packages.map((p) => `${p.name}@${p.version}${p.dev ? ' dev' : ''}`);
+import { scanDependencies } from '../src/rules/dependencies';
+import { parsePnpmLock, readLockfile, splitPnpmKey } from '../src/rules/lockfiles';
 
-describe('lockfile formats', () => {
-  it('package-lock.json: installed packages only, not the project or its workspaces', () => {
-    const text = JSON.stringify({
-      packages: {
-        '': { version: '1.0.0' },
-        'apps/web': { version: '0.1.0' },
-        'node_modules/axios': { version: '0.21.1' },
-        'node_modules/a/node_modules/b': { version: '2.0.0', dev: true },
-        'node_modules/web': { version: '0.1.0', link: true },
-      },
+/*
+ * Fixtures are real lockfiles generated from the same package.json by npm 10, pnpm 10
+ * (lockfile v9), pnpm 8 (v6), yarn 1.22 and yarn 4.5: prod deps lodash, react, react-dom
+ * (peer dep on react), @babel/code-frame; dev deps minimist, @types/node.
+ */
+const FIXTURES = join(__dirname, 'fixtures', 'lockfiles');
+const FORMATS = ['npm', 'pnpm9', 'pnpm8', 'yarn1', 'berry'] as const;
+
+const summary = (dir: string) => {
+  const lock = readLockfile(join(FIXTURES, dir))!;
+  const list = (dev: boolean) => lock.packages.filter((p) => p.dev === dev).map((p) => `${p.name}@${p.version}`).sort();
+  return { file: lock.file, prod: list(false), dev: list(true) };
+};
+
+describe('lockfile readers', () => {
+  const reference = summary('npm');
+
+  it('npm reference: 17 production packages, 2 dev-only', () => {
+    expect(reference.prod).toHaveLength(17);
+    expect(reference.prod).toContain('lodash@4.17.15');
+    expect(reference.prod).toContain('js-tokens@4.0.0'); // transitive, reached from two places
+    expect(reference.dev).toEqual(['@types/node@20.0.0', 'minimist@1.2.5']);
+  });
+
+  for (const f of FORMATS.slice(1)) {
+    it(`${f} gives exactly the same packages and dev split as npm`, () => {
+      const s = summary(f);
+      expect(s.prod).toEqual(reference.prod);
+      expect(s.dev).toEqual(reference.dev);
     });
-    const parsed = parseLockfile('package-lock.json', text);
-    expect(parsed.packages.map((p) => `${p.name}@${p.version}${p.dev ? ' dev' : ''}`)).toEqual(['axios@0.21.1', 'b@2.0.0 dev']);
-    expect(parsed.packages[0]!.ecosystem).toBe('npm');
+  }
+
+  it('points findings at the line of the package in the lockfile', () => {
+    for (const f of ['pnpm9', 'pnpm8', 'yarn1', 'berry']) {
+      const lodash = readLockfile(join(FIXTURES, f))!.packages.find((p) => p.name === 'lodash')!;
+      expect(lodash.line, f).toBeGreaterThan(1);
+    }
   });
 
-  it('yarn.lock: classic and Berry', () => {
-    const classic = `# yarn lockfile v1\n\n"@babel/core@^7.0.0", "@babel/core@^7.1.0":\n  version "7.1.2"\n  resolved "https://x"\n\nleft-pad@^1.3.0:\n  version "1.3.0"\n`;
-    expect(names('yarn.lock', classic)).toEqual(['@babel/core@7.1.2', 'left-pad@1.3.0']);
-    const berry = `__metadata:\n  version: 8\n\n"axios@npm:^1.0.0":\n  version: 1.6.0\n\n"my-app@workspace:.":\n  version: 0.0.0-use.local\n`;
-    expect(names('yarn.lock', berry)).toEqual(['axios@1.6.0']);
-  });
-
-  it('pnpm-lock.yaml: v9, v6 and old-style keys', () => {
-    const v9 = `lockfileVersion: '9.0'\n\nimporters:\n  .:\n    dependencies:\n\npackages:\n\n  '@babel/core@7.1.2':\n    resolution: {integrity: x}\n\n  next@15.0.0(react@19.0.0):\n    resolution: {integrity: y}\n\nsnapshots:\n\n  ignored@9.9.9:\n    dependencies:\n`;
-    expect(names('pnpm-lock.yaml', v9)).toEqual(['@babel/core@7.1.2', 'next@15.0.0']);
-    const v6 = `packages:\n\n  /axios@1.6.0:\n    resolution: {integrity: x}\n    dev: true\n`;
-    expect(names('pnpm-lock.yaml', v6)).toEqual(['axios@1.6.0 dev']);
-    const v5 = `packages:\n\n  /@scope/name/1.2.3_peer@1:\n    dev: false\n  /left-pad/1.3.0:\n    dev: false\n`;
-    expect(names('pnpm-lock.yaml', v5)).toEqual(['@scope/name@1.2.3', 'left-pad@1.3.0']);
-  });
-
-  it('composer.lock: dev section marked, branch installs skipped', () => {
-    const text = JSON.stringify({
-      packages: [{ name: 'guzzlehttp/guzzle', version: '7.4.0' }, { name: 'acme/fork', version: 'dev-main' }],
-      'packages-dev': [{ name: 'phpunit/phpunit', version: 'v10.0.0' }, { name: 'acme/next', version: '1.x-dev' }],
-    });
-    const parsed = parseLockfile('composer.lock', text);
-    expect(parsed.packages.map((p) => `${p.name} ${p.dev}`)).toEqual(['guzzlehttp/guzzle false', 'phpunit/phpunit true']);
-    expect(parsed.packages[0]!.ecosystem).toBe('Packagist');
-    expect(parsed.skipped).toBe(2);
-  });
-
-  it('poetry.lock and uv.lock: packages, without the project itself', () => {
-    const poetry = `[[package]]\nname = "Django"\nversion = "3.2.0"\ndescription = "x"\n\n[package.dependencies]\nsqlparse = ">=0.2"\n\n[[package]]\nname = "pytest_cov"\nversion = "4.0.0"\ncategory = "dev"\n\n[metadata]\nlock-version = "2.0"\n`;
-    expect(names('poetry.lock', poetry)).toEqual(['django@3.2.0', 'pytest-cov@4.0.0 dev']);
-    const uv = `version = 1\n\n[[package]]\nname = "my-app"\nversion = "0.1.0"\nsource = { virtual = "." }\n\n[[package]]\nname = "flask"\nversion = "2.0.0"\nsource = { registry = "https://pypi.org/simple" }\n`;
-    expect(names('apps/api/uv.lock', uv)).toEqual(['flask@2.0.0']);
-  });
-
-  it('Pipfile.lock', () => {
-    const text = JSON.stringify({ default: { django: { version: '==3.2.0' }, git: {} }, develop: { pytest: { version: '==7.0.0' } } });
-    const parsed = parseLockfile('Pipfile.lock', text);
-    expect(parsed.packages.map((p) => `${p.name}@${p.version} ${p.dev}`)).toEqual(['django@3.2.0 false', 'pytest@7.0.0 true']);
-    expect(parsed.skipped).toBe(1);
-  });
-
-  it('requirements.txt: pinned lines only, counting the rest', () => {
-    const text = [
-      '# comment', '-r base.txt', '--index-url https://pypi.org/simple', 'Django==3.2.0', 'requests[socks]==2.25.0 ; python_version > "3.8"',
-      'flask>=2.0', 'gunicorn', 'celery==5.2.0 \\', '    --hash=sha256:abc', 'git+https://github.com/acme/thing.git', '',
+  it('reads pnpm v5 keys (/name/version_peers)', () => {
+    const v5 = [
+      'lockfileVersion: 5.4',
+      '',
+      'packages:',
+      '',
+      '  /lodash/4.17.15:',
+      '    resolution: {integrity: sha512-x}',
+      '    dev: false',
+      '',
+      '  /@babel/core/7.0.0_react@18.2.0:',
+      '    resolution: {integrity: sha512-y}',
+      '    dev: true',
+      '',
     ].join('\n');
-    const parsed = parseLockfile('requirements.txt', text);
-    expect(parsed.packages.map((p) => `${p.name}@${p.version}`)).toEqual(['django@3.2.0', 'requests@2.25.0', 'celery@5.2.0']);
-    expect(parsed.skipped).toBe(2);
-    expect(parseLockfile('requirements-dev.txt', 'pytest==7.0.0').packages[0]!.dev).toBe(true);
-  });
-
-  it('gradle.lockfile: test-only configurations count as dev', () => {
-    const text = `# This is a Gradle generated file\norg.apache.logging.log4j:log4j-core:2.14.1=compileClasspath,runtimeClasspath\norg.junit.jupiter:junit-jupiter:5.9.0=testCompileClasspath,testRuntimeClasspath\nempty=annotationProcessor\n`;
-    expect(names('gradle.lockfile', text)).toEqual(['org.apache.logging.log4j:log4j-core@2.14.1', 'org.junit.jupiter:junit-jupiter@5.9.0 dev']);
-  });
-
-  it('pom.xml: resolves same-file versions and counts what a parent or BOM decides', () => {
-    const text = `<project>
-      <parent><groupId>org.springframework.boot</groupId><artifactId>spring-boot-starter-parent</artifactId><version>3.0.0</version></parent>
-      <properties><log4j.version>2.14.1</log4j.version></properties>
-      <dependencyManagement><dependencies>
-        <dependency><groupId>com.acme</groupId><artifactId>managed</artifactId><version>1.2.3</version></dependency>
-        <dependency><groupId>org.springframework.cloud</groupId><artifactId>spring-cloud-dependencies</artifactId><version>2022.0.0</version><type>pom</type><scope>import</scope></dependency>
-      </dependencies></dependencyManagement>
-      <dependencies>
-        <dependency><groupId>org.apache.logging.log4j</groupId><artifactId>log4j-core</artifactId><version>\${log4j.version}</version></dependency>
-        <dependency><groupId>com.acme</groupId><artifactId>managed</artifactId></dependency>
-        <dependency><groupId>org.springframework.boot</groupId><artifactId>spring-boot-starter-web</artifactId><exclusions><exclusion><groupId>x</groupId><artifactId>y</artifactId></exclusion></exclusions></dependency>
-        <dependency><groupId>com.acme</groupId><artifactId>sibling</artifactId><version>\${project.version}</version></dependency>
-        <dependency><groupId>junit</groupId><artifactId>junit</artifactId><version>4.13</version><scope>test</scope></dependency>
-        <!-- <dependency><groupId>old</groupId><artifactId>gone</artifactId><version>1.0</version></dependency> -->
-      </dependencies>
-      <build><plugins><plugin><dependencies><dependency><groupId>plugin</groupId><artifactId>only</artifactId><version>1.0</version></dependency></dependencies></plugin></plugins></build>
-    </project>`;
-    const parsed = parseLockfile('pom.xml', text);
-    expect(parsed.packages.map((p) => `${p.name}@${p.version}${p.dev ? ' dev' : ''}`)).toEqual([
-      'org.apache.logging.log4j:log4j-core@2.14.1',
-      'com.acme:managed@1.2.3',
-      'junit:junit@4.13 dev',
+    expect(parsePnpmLock(v5)).toEqual([
+      { name: 'lodash', version: '4.17.15', dev: false, line: 5 },
+      { name: '@babel/core', version: '7.0.0', dev: true, line: 9 },
     ]);
-    expect(parsed.skipped).toBe(2);
-  });
-
-  it('go.mod: single and block requires, without the replace block', () => {
-    const text = `module example.com/app\n\ngo 1.22\n\nrequire github.com/acme/one v1.0.0\n\nrequire (\n\tgolang.org/x/text v0.3.5\n\tgithub.com/acme/old v2.0.0+incompatible // indirect\n)\n\nreplace (\n\tgithub.com/x/y v1.0.0 => github.com/z/y v1.1.0\n)\n`;
-    expect(names('go.mod', text)).toEqual(['github.com/acme/one@v1.0.0', 'golang.org/x/text@v0.3.5', 'github.com/acme/old@v2.0.0']);
-  });
-
-  it('packages.lock.json: one entry per version across frameworks, without project references', () => {
-    const text = JSON.stringify({ version: 1, dependencies: { 'net8.0': { 'Newtonsoft.Json': { type: 'Direct', resolved: '12.0.1' }, Shared: { type: 'Project' } }, 'net6.0': { 'Newtonsoft.Json': { type: 'Direct', resolved: '12.0.1' } } } });
-    expect(names('packages.lock.json', text)).toEqual(['Newtonsoft.Json@12.0.1']);
-  });
-
-  it('Gemfile.lock: top-level gems, without their nested requirements', () => {
-    const text = `GIT\n  remote: https://x\n  specs:\n    private-gem (0.1.0)\n\nGEM\n  remote: https://rubygems.org/\n  specs:\n    rack (2.2.3)\n    nokogiri (1.16.0-x86_64-linux)\n      racc (~> 1.4)\n\nPLATFORMS\n  ruby\n`;
-    expect(names('Gemfile.lock', text)).toEqual(['rack@2.2.3', 'nokogiri@1.16.0']);
-  });
-
-  it('throws on malformed JSON, so the caller can report it', () => {
-    expect(() => parseLockfile('composer.lock', '{ not json')).toThrow();
+    expect(splitPnpmKey('/@scope/pkg@1.2.3(react@18.2.0)', false)).toEqual(['@scope/pkg', '1.2.3']);
   });
 });
 
-describe('SBOM', () => {
-  it('maps package URLs to OSV names', () => {
-    expect(fromPurl('pkg:maven/org.apache.logging.log4j/log4j-core@2.14.1?type=jar')).toMatchObject({ name: 'org.apache.logging.log4j:log4j-core', version: '2.14.1', ecosystem: 'Maven' });
-    expect(fromPurl('pkg:npm/%40scope/name@1.0.0')).toMatchObject({ name: '@scope/name', ecosystem: 'npm' });
-    expect(fromPurl('pkg:composer/guzzlehttp/guzzle@7.4.0')).toMatchObject({ name: 'guzzlehttp/guzzle', ecosystem: 'Packagist' });
-    expect(fromPurl('pkg:pypi/Django_Rest@3.0')).toMatchObject({ name: 'django-rest', ecosystem: 'PyPI' });
-    expect(fromPurl('pkg:golang/golang.org/x/text@v0.3.5')).toMatchObject({ name: 'golang.org/x/text', ecosystem: 'Go' });
-    expect(fromPurl('pkg:generic/thing@1.0')).toBeNull();
-  });
+describe('dependency check on pnpm and yarn projects', () => {
+  const dirs: string[] = [];
+  afterAll(() => dirs.forEach((d) => rmSync(d, { recursive: true, force: true })));
 
-  it('reads CycloneDX components, including nested ones', () => {
-    const parsed = cycloneDx(JSON.stringify({
-      bomFormat: 'CycloneDX',
-      components: [
-        { purl: 'pkg:maven/a/b@1.0', components: [{ purl: 'pkg:maven/c/d@2.0', scope: 'excluded' }] },
-        { name: 'no-purl' },
-      ],
-    }));
-    expect(parsed.packages.map((p) => `${p.name} ${p.dev}`)).toEqual(['a:b false', 'c:d true']);
-    expect(parsed.skipped).toBe(1);
-  });
+  // OSV stub: lodash@4.17.15 is vulnerable, everything else is clean.
+  const osv: typeof fetch = async (url, init) => {
+    const u = String(url);
+    if (u.endsWith('/v1/querybatch')) {
+      const body = JSON.parse(String(init?.body)) as { queries: { package: { name: string }; version: string }[] };
+      return new Response(JSON.stringify({ results: body.queries.map((q) => (q.package.name === 'lodash' && q.version === '4.17.15' ? { vulns: [{ id: 'GHSA-p6mc-m468-83gw' }] } : {})) }));
+    }
+    return new Response(JSON.stringify({ id: 'GHSA-p6mc-m468-83gw', summary: 'Prototype Pollution in lodash', aliases: ['CVE-2020-8203'], database_specific: { severity: 'HIGH' } }));
+  };
 
-  it('rejects files that are not CycloneDX', () => {
-    expect(() => cycloneDx('{"spdxVersion":"SPDX-2.3"}')).toThrow(/CycloneDX/);
-  });
-});
+  for (const f of ['pnpm9', 'yarn1', 'berry'] as const) {
+    it(`${f}: finds the vulnerable package and reports the lockfile it came from`, async () => {
+      const r = await scanDependencies(join(FIXTURES, f), { fetchImpl: osv });
+      expect(r.error).toBeUndefined();
+      expect(r.checked).toBe(17); // dev-only packages are not checked by default
+      expect(r.detections).toHaveLength(1);
+      expect(r.detections[0]).toMatchObject({
+        ruleId: 'DEP-OSV',
+        severity: 'high',
+        file: f === 'pnpm9' ? 'pnpm-lock.yaml' : 'yarn.lock',
+        snippet: 'lodash@4.17.15 · CVE-2020-8203',
+      });
+      expect(r.detections[0]!.line).toBeGreaterThan(1);
+    });
+  }
 
-describe('finding lockfiles', () => {
-  it('looks in every folder, but not vendored code, tests or ignored paths', () => {
-    expect(findLockfiles([
-      'package-lock.json', 'apps/api/composer.lock', 'services/pay/pom.xml', 'node_modules/x/package-lock.json', 'vendor/y/composer.lock',
-      'tests/fixtures/poetry.lock', 'legacy/go.mod', 'README.md',
-    ], ['legacy/**'])).toEqual(['package-lock.json', 'apps/api/composer.lock', 'services/pay/pom.xml']);
-  });
-
-  it('prefers a real Python lock over requirements files in the same project', () => {
-    expect(findLockfiles(['api/poetry.lock', 'api/requirements.txt', 'api/requirements/dev.txt', 'worker/requirements.txt'])).toEqual(['api/poetry.lock', 'worker/requirements.txt']);
-  });
-
-  it('says when a project has no lockfile for an ecosystem it uses', () => {
-    const notes = missingLockfiles(['build.gradle', 'composer.json', 'composer.lock', 'tests/package.json'], [], new Set(['Packagist']));
-    expect(notes).toHaveLength(1);
-    expect(notes[0]).toContain('build.gradle');
+  it('treats every package as production when the graph walk finds no roots', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'fortis-lock-'));
+    dirs.push(dir);
+    // A workspace root with no dependencies of its own.
+    writeFileSync(join(dir, 'package.json'), '{"private":true,"workspaces":["apps/*"]}');
+    writeFileSync(join(dir, 'yarn.lock'), '# yarn lockfile v1\n\nlodash@^4.17.0:\n  version "4.17.15"\n');
+    expect(readLockfile(dir)!.packages).toEqual([{ name: 'lodash', version: '4.17.15', dev: false, line: 3 }]);
   });
 });

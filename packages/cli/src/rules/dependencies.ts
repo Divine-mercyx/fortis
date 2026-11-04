@@ -1,80 +1,15 @@
-import { existsSync, readFileSync } from 'node:fs';
-import { join, relative, resolve } from 'node:path';
-
 import type { Severity } from '@fortis/shared';
 
-import { cycloneDx, ecosystemOf, findLockfiles, isPomXml, missingLockfiles, parseLockfile, type Ecosystem, type Locked } from './lockfiles';
+import { readLockfile } from './lockfiles';
 import type { Detection } from './types';
 
 /*
- * DEP-OSV: known vulnerabilities in packages of any supported language, from the OSV database
- * (osv.dev). Reads lockfiles (and an SBOM if given), asks OSV which versions are affected, then
- * fetches severity for the advisories found. Needs network access; skipped with --offline.
+ * DEP-OSV: known vulnerabilities in npm packages, from the OSV database (osv.dev).
+ * Reads the lockfile (npm, pnpm or yarn; see lockfiles.ts), asks OSV which versions are affected, then fetches severity
+ * for the advisories found. Needs network access; skipped with --offline.
  */
 
-/** Whatever the check could not see. `incomplete` stops a full scan closing findings it didn't look for. */
-type LockRead = { packages: (Locked & { file: string })[]; notes: string[]; incomplete: boolean };
-
 const SEVERITY: Record<string, Severity> = { CRITICAL: 'critical', HIGH: 'high', MODERATE: 'medium', MEDIUM: 'medium', LOW: 'low' };
-
-/** One scan's advisory lookups. Past this, findings still appear but without a looked-up severity. */
-const MAX_ADVISORIES = 500;
-const ADVISORY_CONCURRENCY = 8;
-
-type OsvVuln = { id: string; summary?: string; aliases?: string[]; database_specific?: { severity?: string } };
-
-export function readPackages(root: string, files: string[], opts: { sbom?: string; allPaths?: string[]; ignore?: string[] } = {}): LockRead {
-  const notes: string[] = [];
-  const packages: LockRead['packages'] = [];
-  let incomplete = false;
-  let sbomRead = false;
-  const seen = new Set<Ecosystem>();
-
-  if (opts.sbom) {
-    const abs = resolve(root, opts.sbom);
-    const file = relative(root, abs).replace(/\\/g, '/');
-    try {
-      const sbom = cycloneDx(readFileSync(abs, 'utf8'));
-      packages.push(...sbom.packages.map((p) => ({ ...p, file })));
-      for (const p of sbom.packages) seen.add(p.ecosystem);
-      sbomRead = true;
-    } catch (e) {
-      notes.push(`Could not read the SBOM ${file}: ${(e as Error).message}.`);
-      incomplete = true;
-    }
-  }
-
-  let pomFiles = 0;
-  let pomChecked = 0;
-  let pomSkipped = 0;
-  let skippedElsewhere = 0;
-  for (const file of findLockfiles(files, opts.ignore)) {
-    if (sbomRead && isPomXml(file)) continue; // the SBOM already has this, and more
-    const abs = join(root, file);
-    if (!existsSync(abs)) continue;
-    try {
-      const parsed = parseLockfile(file, readFileSync(abs, 'utf8'));
-      packages.push(...parsed.packages.map((p) => ({ ...p, file })));
-      seen.add(ecosystemOf(file));
-      if (isPomXml(file)) {
-        pomFiles++;
-        pomChecked += parsed.packages.length;
-        pomSkipped += parsed.skipped;
-      } else {
-        skippedElsewhere += parsed.skipped;
-      }
-    } catch (e) {
-      notes.push(`Could not read ${file}: ${(e as Error).message}.`);
-      incomplete = true;
-    }
-  }
-
-  if (pomFiles) {
-    const declared = pomChecked + pomSkipped;
-    const versions = pomSkipped ? `; the other ${pomSkipped} get their version from a parent POM or BOM` : '';
-    notes.push(`pom.xml: checked ${pomChecked} of ${declared} declared dependencies${versions}. Transitive dependencies aren't covered: generate a CycloneDX SBOM and pass --sbom for those.`);
-  }
-  if (skippedElsewhere) notes.push(`${skippedElsewhere === 1 ? '1 dependency has' : `${skippedElsewhere} dependencies have`} no exact version (unpinned or installed from a branch), so ${skippedElsewhere === 1 ? "it wasn't" : "they weren't"} checked.`);
 
   if (opts.allPaths) {
     const missing = missingLockfiles(opts.allPaths, opts.ignore ?? [], seen);
@@ -100,14 +35,9 @@ export async function scanDependencies(
 ): Promise<{ detections: Detection[]; checked: number; error?: string; notes: string[]; incomplete: boolean }> {
   const fetchImpl = opts.fetchImpl ?? fetch;
   const base = opts.osvUrl ?? 'https://api.osv.dev';
-  const read = readPackages(root, files, opts);
-  const { notes } = read;
-  const located = read.packages.filter((p) => opts.includeDev || !p.dev);
-  if (!located.length) return { detections: [], checked: 0, notes, incomplete: read.incomplete };
-
-  // The same version in several lockfiles is one question for OSV, and one finding per lockfile.
-  const keyOf = (p: Locked) => `${p.ecosystem}|${p.name}|${p.version}`;
-  const pkgs = [...new Map(located.map((p) => [keyOf(p), p])).values()];
+  const lock = readLockfile(root);
+  const pkgs = (lock?.packages ?? []).filter((p) => opts.includeDev || !p.dev);
+  if (!pkgs.length) return { detections: [], checked: 0 };
 
   try {
     const hits: { pkg: Locked; ids: string[] }[] = [];
@@ -155,13 +85,16 @@ export async function scanDependencies(
         ruleId: 'DEP-OSV',
         severity,
         title: `${pkg.name}@${pkg.version}: ${top?.summary ?? 'known vulnerability'}${vulnIds.length > 1 ? ` (+${vulnIds.length - 1} more)` : ''}`.slice(0, 200),
-        file: where.file,
-        line: 0,
+        file: lock!.file,
+        line: pkg.line,
         snippet: `${pkg.name}@${pkg.version} · ${ref}`,
       });
     }
     return { detections, checked: pkgs.length, notes, incomplete: read.incomplete };
   } catch (e) {
-    return { detections: [], checked: 0, error: (e as Error).message, notes, incomplete: true };
+    const msg = (e as Error).message;
+    // Node's fetch says only "fetch failed" when the host can't be reached (offline, proxy, firewall).
+    const error = /fetch failed|ENOTFOUND|ECONNREFUSED|ETIMEDOUT|aborted|timeout/i.test(msg) ? `could not reach ${new URL(base).host} (${msg})` : msg;
+    return { detections: [], checked: 0, error };
   }
 }

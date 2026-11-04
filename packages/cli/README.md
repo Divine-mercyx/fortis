@@ -34,14 +34,11 @@ To verify where a binary came from, run `gh attestation verify fortis-linux-x64.
 
 ## What it checks
 
-| Pack | Rules | Languages | Plan |
-|---|---|---|---|
-| Secrets | Private keys, AWS, GitHub, Slack, Google and Fortis keys; random-looking hard-coded secrets, including unquoted values in `.env`, `.properties` and YAML files | Any | Free |
-| Dependencies | Known vulnerabilities, from [OSV](https://osv.dev) | See below | Free |
-| Fintech: payment keys | Paystack / Flutterwave / Monnify secret keys | Any | Core and above |
-| Fintech: code rules | Money records read without an ownership check; webhooks without a signature check; balance updates outside a transaction; BVN/NIN in logs; weak or leaked OTPs; transfers without an idempotency key | JavaScript and TypeScript only, so far | Core and above |
-
-`fortis test` and `fortis access` test a running app over HTTP, so they work whatever the backend is written in.
+| Pack | Rules | Plan |
+|---|---|---|
+| Secrets | Private keys, AWS, GitHub, Slack, Google and Fortis keys; random-looking hard-coded secrets | Free |
+| Dependencies | Known vulnerabilities in `package-lock.json`, `pnpm-lock.yaml` or `yarn.lock`, from [OSV](https://osv.dev) | Free |
+| Fintech | Paystack / Flutterwave / Monnify secret keys; money records read without an ownership check; webhooks without a signature check; balance updates outside a transaction; BVN/NIN in logs; weak or leaked OTPs; transfers without an idempotency key | Core and above |
 
 Run `fortis rules` for the list and `fortis explain FX-OWN-001` for why a rule matters and how to fix it.
 
