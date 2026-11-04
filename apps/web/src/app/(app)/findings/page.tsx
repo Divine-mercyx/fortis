@@ -4,7 +4,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { Suspense, useEffect, useState } from 'react';
 import useSWR from 'swr';
 
-import { controlsFor, FRAMEWORKS } from '@fortis/shared';
+import { controlsFor, fixFor, FRAMEWORKS } from '@fortis/shared';
 
 import { Alert, Check, Search, Shield } from '@/components/icons';
 import { Words } from '@/components/motion';
@@ -92,7 +92,7 @@ function FindingDrawer({ id, onClose, onChanged }: { id: string; onClose: () => 
                 <h4>Why it matters</h4>
                 <p>{data.rule.summary}</p>
                 <h4>How to fix it</h4>
-                <p>{data.rule.fix}</p>
+                <p>{fixFor(data.rule, data.finding.file)}</p>
               </div>
             ) : f.detail ? (
               <div className="rule-box">

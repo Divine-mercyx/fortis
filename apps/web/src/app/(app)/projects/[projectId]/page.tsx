@@ -11,7 +11,7 @@ import { useSession } from '@/components/session';
 import { StagingTargets } from '@/components/targets';
 import { CodeLine, CopyButton, Empty, FormError, Modal, SeverityPill, Skeleton, StatusTag, useToast } from '@/components/ui';
 import { api, ApiError, fetcher } from '@/lib/api';
-import { CLI_COMMAND, CLI_INSTALL_URL, CLI_PACKAGE } from '@/lib/cli';
+import { CLI_COMMAND, CLI_INSTALL_URL, CLI_PACKAGE, CLI_PYTHON_PACKAGE } from '@/lib/cli';
 import { timeAgo } from '@/lib/format';
 import type { FindingRow, ScanRow } from '@/lib/types';
 
@@ -20,17 +20,24 @@ type Token = { id: string; name: string; prefix: string; createdAt: string; last
 
 /** npm for JavaScript projects; a standalone binary for every other stack, which may have no Node. */
 function InstallCommands({ initArgs = '' }: { initArgs?: string }) {
-  const [stack, setStack] = useState<'js' | 'other'>('js');
+  const [stack, setStack] = useState<'js' | 'python' | 'other'>('js');
   return (
     <>
       <div className="seg" role="group" aria-label="What your project is written in" style={{ marginBottom: 10 }}>
         <button type="button" className={stack === 'js' ? 'on' : ''} aria-pressed={stack === 'js'} onClick={() => setStack('js')}>JavaScript / TypeScript</button>
-        <button type="button" className={stack === 'other' ? 'on' : ''} aria-pressed={stack === 'other'} onClick={() => setStack('other')}>Java, PHP, Python, Go, others</button>
+        <button type="button" className={stack === 'python' ? 'on' : ''} aria-pressed={stack === 'python'} onClick={() => setStack('python')}>Python</button>
+        <button type="button" className={stack === 'other' ? 'on' : ''} aria-pressed={stack === 'other'} onClick={() => setStack('other')}>Java, PHP, Go, others</button>
       </div>
       {stack === 'js' ? (
         <>
           <CodeLine cmd={`npm i -D ${CLI_PACKAGE}`} />
           <CodeLine cmd={`npx ${CLI_COMMAND} init${initArgs}`} />
+        </>
+      ) : stack === 'python' ? (
+        <>
+          <CodeLine cmd={`pip install ${CLI_PYTHON_PACKAGE}`} />
+          <CodeLine cmd={`${CLI_COMMAND} init${initArgs}`} />
+          <p className="small" style={{ marginBottom: 0 }}>Needs no Node.js. The fintech rules cover Django, Django REST, Flask and FastAPI. Install it in your project&apos;s virtual environment or globally; the git hook finds it either way.</p>
         </>
       ) : (
         <>
@@ -39,7 +46,7 @@ function InstallCommands({ initArgs = '' }: { initArgs?: string }) {
           <CodeLine cmd={`irm ${CLI_INSTALL_URL}/install.ps1 | iex`} />
           <p className="small" style={{ margin: '8px 0' }}>Then, in your repository:</p>
           <CodeLine cmd={`${CLI_COMMAND} init${initArgs}`} />
-          <p className="small" style={{ marginBottom: 0 }}>In every language, Fortis checks for leaked secrets and vulnerable dependencies. The fintech code rules cover JavaScript and TypeScript so far.</p>
+          <p className="small" style={{ marginBottom: 0 }}>In every language, Fortis checks for leaked secrets and vulnerable dependencies. The fintech code rules cover JavaScript, TypeScript and Python so far.</p>
         </>
       )}
     </>

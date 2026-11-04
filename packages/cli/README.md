@@ -12,6 +12,15 @@ npx fortis init --key fts_…   # from the Fortis dashboard → Projects → New
 git push                       # the pre-push hook checks what you're pushing
 ```
 
+**Python project:** this needs no Node.
+
+```bash
+pip install fortis-watchdog      # or: pipx install fortis-watchdog, uv tool install fortis-watchdog
+fortis init --key fts_…
+```
+
+Install it in your project's `.venv` or `venv`, or globally. The hook finds it either way, even when the virtual environment isn't active. It also finds it through `uv run` and `poetry run`. If you use [pre-commit](https://pre-commit.com), `fortis init` prints the config to add.
+
 **Any other language.** This is a standalone binary and needs no Node:
 
 ```bash
@@ -38,7 +47,7 @@ To verify where a binary came from, run `gh attestation verify fortis-linux-x64.
 |---|---|---|---|
 | Secrets | Paystack / Flutterwave / Monnify secret keys; private keys, AWS, GitHub, Slack, Google and Fortis keys; random-looking hard-coded secrets, including unquoted values in `.env`, `.properties` and YAML files | Any | Free |
 | Dependencies | Known vulnerabilities, from [OSV](https://osv.dev) | See below | Free |
-| Fintech | Money records read without an ownership check; webhooks without a signature check; balance updates outside a transaction; BVN/NIN in logs; weak or leaked OTPs; transfers without an idempotency key | JavaScript and TypeScript only, so far | Core and above |
+| Fintech | Money records read without an ownership check; webhooks without a signature check; balance updates outside a transaction; BVN/NIN in logs; weak or leaked OTPs; transfers without an idempotency key | JavaScript, TypeScript and Python (Django, Django REST, Flask, FastAPI) | Core and above |
 
 `fortis test` and `fortis access` test a running app over HTTP, so they work whatever the backend is written in.
 
@@ -50,13 +59,15 @@ Run `fortis rules` for the list and `fortis explain FX-OWN-001` for why a rule m
 |---|---|
 | JavaScript | `package-lock.json`, `npm-shrinkwrap.json`, `yarn.lock`, `pnpm-lock.yaml` |
 | PHP | `composer.lock` |
-| Python | `poetry.lock`, `uv.lock`, `Pipfile.lock`, or a pinned `requirements.txt` |
+| Python | `uv.lock`, `poetry.lock`, `pdm.lock`, `pylock.toml`, `Pipfile.lock`, or pinned requirements files |
 | Java / Kotlin | `gradle.lockfile`, `pom.xml`, or an SBOM |
 | Go | `go.mod` |
 | .NET | `packages.lock.json` |
 | Ruby | `Gemfile.lock` |
 
-Files are found in any folder of the repository. Dev and test dependencies are left out wherever they can be told apart (`uv.lock` and yarn workspaces can't, so those are all checked). Findings point at the package's line in the file. If a project has no lockfile, the scan says so.
+Files are found in any folder of the repository. Dev and test dependencies are left out wherever they can be told apart (yarn workspaces can't, so those are all checked). Findings point at the package's line in the file. If a project has no lockfile, the scan says so.
+
+**A hand-written `requirements.txt` lists only direct dependencies,** so the scan says what it couldn't cover. Use a lockfile, compile it with `pip-compile` or `uv pip compile`, or pass an SBOM from [`cyclonedx-py`](https://github.com/CycloneDX/cyclonedx-python). `fortis ci init` adds that step for you on GitHub Actions.
 
 **Maven needs an SBOM for full coverage.** `pom.xml` lists only direct dependencies, and a parent POM or BOM often decides their versions, so Fortis reports how many it could check. To cover everything, including transitive dependencies, have Maven list them and pass the result to Fortis. `fortis ci init` adds this step for you on GitHub Actions.
 
@@ -124,7 +135,7 @@ This writes `.github/workflows/fortis.yml`, which needs no Node in your project:
   - Findings appear as annotations on the pull request.
   - A SARIF file goes to GitHub code scanning (free on public repositories).
 - **Every push to `staging`** (change it with `--staging-branch`) also gets a ZAP test, once the new deploy is answering.
-- **Maven projects** also get a step that lists every dependency as an SBOM.
+- **Maven projects, and Python projects with a hand-written `requirements.txt`,** also get a step that lists every dependency as an SBOM.
 
 Set the `FORTIS_KEY` secret and the `FORTIS_STAGING_URL` variable in the repository settings. Add `--sarif fortis.sarif` to any scan to write SARIF yourself.
 
@@ -164,7 +175,7 @@ Set it up with two ordinary test customers on staging, and give customer A at le
 1. finds A's records;
 2. requests each one as customer B, and again with no login at all.
 
-If either request gets A's record back, that's **FX-BOLA-001** or **FX-AUTH-001**: broken access control, the most common way fintech data leaks. Only GET requests are sent, so nothing is created or changed. Access checks need Fortis Plus and a verified, authorised, non-production target.
+Django session logins work too: set `"header": "Cookie"` in `.fortis-access.json` and use `sessionid=…` as each user's token. If either request gets A's record back, that's **FX-BOLA-001** or **FX-AUTH-001**: broken access control, the most common way fintech data leaks. Only GET requests are sent, so nothing is created or changed. Access checks need Fortis Plus and a verified, authorised, non-production target.
 
 ## Accuracy
 
@@ -209,7 +220,8 @@ Then on npmjs.com: package → Settings → Trusted publishing → GitHub Action
 - tests, and builds and smoke-tests a binary on each platform;
 - publishes a GitHub Release with the binaries, install scripts, checksums and build attestations;
 - pushes the Docker image to `ghcr.io`;
-- publishes to npm with provenance. Versions with a pre-release suffix go to the `beta` tag.
+- publishes to npm with provenance. Versions with a pre-release suffix go to the `beta` tag;
+- builds, tests and publishes the wheels to PyPI (TestPyPI on a fork). `packages/python/build_wheel.py` makes one by hand.
 
 To build a binary for your own machine, run `pnpm --filter fortis-watchdog build:binary`. The result goes in `dist-sea/`. A tag on a fork runs everything except npm, which makes a safe dry run; set `FORTIS_REPO` to install from it.
 
@@ -229,6 +241,7 @@ Keys are read from `FORTIS_KEY`, then from `~/.config/fortis/credentials.json` (
 ## Changelog
 
 **0.1.0-beta.9**
+- Python is fully supported: `pip install fortis-watchdog`, the fintech rules for Django, Django REST, Flask and FastAPI, and dev packages told apart in uv and Poetry lockfiles.
 - The dependency check now covers PHP, Python, Java, Go, .NET and Ruby as well as JavaScript, in any folder of the repository, and reads CycloneDX SBOMs with `--sbom`.
 - Standalone binaries, a Docker image and a GitHub Action, so non-JavaScript teams don't need Node. `fortis ci init` uses them.
 - More secrets are caught in non-JavaScript code and config files, including unquoted values in `.env`, `.properties` and YAML.

@@ -18,6 +18,8 @@ export type RuleMeta = {
   severity: Severity;
   summary: string;
   fix: string;
+  /** The fix in Python's terms, where `fix` is written for JavaScript. */
+  fixPython?: string;
 };
 
 /**
@@ -41,6 +43,7 @@ export const RULE_CATALOG: readonly RuleMeta[] = [
     severity: 'critical',
     summary: 'A transfer, wallet or account is loaded by ID without scoping it to the signed-in user.',
     fix: 'Filter the query by the signed-in user, for example { _id: id, ownerId: req.user.id }, and return 404 otherwise.',
+    fixPython: 'Filter by the signed-in user, for example get_object_or_404(Wallet, pk=pk, user=request.user), or override get_queryset in Django REST.',
   },
   {
     id: 'FX-HOOK-001',
@@ -49,6 +52,7 @@ export const RULE_CATALOG: readonly RuleMeta[] = [
     severity: 'critical',
     summary: 'A webhook credits value without verifying the provider signature header.',
     fix: "Verify the provider's HMAC signature (for example x-paystack-signature) against the raw body before acting.",
+    fixPython: "Compute the HMAC of the raw body and compare it to the provider's signature header with hmac.compare_digest before acting.",
   },
   {
     id: 'FX-TXN-001',
@@ -57,6 +61,7 @@ export const RULE_CATALOG: readonly RuleMeta[] = [
     severity: 'high',
     summary: 'A debit or credit reads and writes a balance in separate steps, open to race conditions.',
     fix: 'Use a single atomic update or a database transaction with a row lock.',
+    fixPython: 'Use update(balance=F("balance") - amount), or lock the row first with select_for_update() (with_for_update() in SQLAlchemy). transaction.atomic alone is not enough.',
   },
   {
     id: 'FX-PII-002',
@@ -79,8 +84,9 @@ export const RULE_CATALOG: readonly RuleMeta[] = [
     pack: 'fintech',
     title: 'Weak or leaked one-time passcode',
     severity: 'high',
-    summary: 'An OTP is logged, returned in a response, generated with Math.random or has no attempt limit.',
+    summary: 'An OTP is logged, returned in a response, generated with a predictable random function or has no attempt limit.',
     fix: 'Generate with crypto.randomInt, never log or return it, and limit attempts.',
+    fixPython: 'Generate with secrets.randbelow, never log or return it, and limit attempts.',
   },
   {
     id: 'SEC-GEN-001',
@@ -115,6 +121,11 @@ export const RULE_CATALOG: readonly RuleMeta[] = [
     fix: 'Put the route behind your authentication middleware and add a test that an anonymous request gets 401.',
   },
 ];
+
+/** The fix for a finding, in the language of the file it's in. */
+export function fixFor(rule: RuleMeta, file: string): string {
+  return /\.py$/i.test(file) && rule.fixPython ? rule.fixPython : rule.fix;
+}
 
 export function findRule(id: string): RuleMeta | undefined {
   return RULE_CATALOG.find((r) => r.id === id);

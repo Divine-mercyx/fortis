@@ -1,6 +1,8 @@
 /** npm package and command for the CLI. Change here once the npm name is final. */
 export const CLI_PACKAGE = 'fortis-watchdog';
 export const CLI_COMMAND = 'fortis';
+/** The same name on PyPI, for Python projects. */
+export const CLI_PYTHON_PACKAGE = 'fortis-watchdog';
 /** Standalone binaries, for projects that don't use Node. */
 export const CLI_INSTALL_URL = 'https://github.com/Divine-mercyx/fortis/releases/latest/download';
 /** The CLI release the docs and generated CI files point at. */

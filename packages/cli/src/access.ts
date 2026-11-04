@@ -62,13 +62,15 @@ export function checksFromOpenApi(spec: { paths?: Record<string, Record<string, 
   const paths = Object.entries(spec.paths ?? {}).filter(([, ops]) => ops && typeof ops === 'object' && 'get' in ops).map(([p]) => p);
   const out: AccessCheck[] = [];
   for (const p of paths) {
-    const m = /^(.*)\/\{([^}/]+)\}$/.exec(p);
+    // Django REST ends its paths in a slash: /api/wallets/{id}/ and /api/wallets/.
+    const m = /^(.*)\/\{([^}/]+)\}(\/?)$/.exec(p);
     if (!m || m[1]!.includes('{')) continue;
-    const list = m[1]!;
-    if (!paths.includes(list)) continue;
-    const word = list.split('/').filter(Boolean).pop() ?? 'record';
+    const slash = m[3]!;
+    const list = [`${m[1]!}${slash}`, m[1]!, `${m[1]!}/`].find((candidate) => paths.includes(candidate));
+    if (!list) continue;
+    const word = m[1]!.split('/').filter(Boolean).pop() ?? 'record';
     const name = word.replace(/[-_]/g, ' ').replace(/s$/, '').replace(/^\w/, (ch) => ch.toUpperCase());
-    out.push({ name, list, get: `${list}/{id}` });
+    out.push({ name, list, get: `${m[1]!}/{id}${slash}` });
   }
   return out;
 }
@@ -128,7 +130,7 @@ function sameRecord(a: string, other: string, id: string): boolean {
     const o = JSON.parse(other) as unknown;
     const s = JSON.stringify(o);
     // An error body that merely echoes the ID back ("loan 123 not found") is not a leak.
-    if (/"(error|errors|message)"\s*:/i.test(s) && s.length < 400) return false;
+    if (/"(error|errors|message|detail)"\s*:/i.test(s) && s.length < 400) return false;
     return s.includes(`"${id}"`) || s.includes(`:${id},`) || s.includes(`:${id}}`);
   } catch {
     return false;
