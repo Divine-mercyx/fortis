@@ -1,0 +1,15 @@
+{
+ "name": "lock-sample",
+ "version": "1.0.0",
+ "private": true,
+ "dependencies": {
+  "@babel/code-frame": "7.22.13",
+  "lodash": "4.17.15",
+  "react": "18.2.0",
+  "react-dom": "18.2.0"
+ },
+ "devDependencies": {
+  "@types/node": "20.0.0",
+  "minimist": "1.2.5"
+ }
+}

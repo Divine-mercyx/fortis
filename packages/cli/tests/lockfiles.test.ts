@@ -1,4 +1,10 @@
-import { describe, expect, it } from 'vitest';
+import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+
+import { afterAll, describe, expect, it } from 'vitest';
+
+import { scanDependencies } from '../src/rules/dependencies';
 
 import { cycloneDx, findLockfiles, fromPurl, missingLockfiles, parseLockfile } from '../src/rules/lockfiles';
 
@@ -228,5 +234,116 @@ describe('finding lockfiles', () => {
     const notes = missingLockfiles(['build.gradle', 'composer.json', 'composer.lock', 'tests/package.json'], [], new Set(['Packagist']));
     expect(notes).toHaveLength(1);
     expect(notes[0]).toContain('build.gradle');
+  });
+});
+
+/*
+ * Real lockfiles generated from the same package.json by npm 10, pnpm 10 (v9), pnpm 8 (v6),
+ * yarn 1.22 and yarn 4.5. Production: lodash, react, react-dom (peer dep on react) and
+ * @babel/code-frame. Dev: minimist and @types/node.
+ */
+describe('real lockfiles', () => {
+  const FIXTURES = join(__dirname, 'fixtures', 'lockfiles');
+  const read = (dir: string) => {
+    const file = findLockfiles(readdirSync(join(FIXTURES, dir)))[0]!;
+    const sibling = (name: string) => readFileSync(join(FIXTURES, dir, name), 'utf8');
+    return { file, packages: parseLockfile(file, readFileSync(join(FIXTURES, dir, file), 'utf8'), sibling).packages };
+  };
+  const split = (dir: string) => {
+    const { packages } = read(dir);
+    const list = (dev: boolean) => packages.filter((p) => p.dev === dev).map((p) => `${p.name}@${p.version}`).sort();
+    return { prod: list(false), dev: list(true) };
+  };
+  const reference = split('npm');
+
+  it('npm is the reference: 17 production packages, 2 dev-only', () => {
+    expect(reference.prod).toHaveLength(17);
+    expect(reference.prod).toContain('lodash@4.17.15');
+    expect(reference.prod).toContain('js-tokens@4.0.0'); // transitive, reached from two places
+    expect(reference.dev).toEqual(['@types/node@20.0.0', 'minimist@1.2.5']);
+  });
+
+  it.each(['pnpm9', 'pnpm8', 'yarn1', 'berry'])('%s gives exactly the same packages and dev split as npm', (dir) => {
+    expect(split(dir)).toEqual(reference);
+  });
+
+  it.each(['pnpm9', 'pnpm8', 'yarn1', 'berry'])('%s says which line each package is on', (dir) => {
+    expect(read(dir).packages.find((p) => p.name === 'lodash')!.line).toBeGreaterThan(1);
+  });
+
+  // OSV stand-in: lodash@4.17.15 is vulnerable, everything else is clean.
+  const osv: typeof fetch = async (url, init) => {
+    if (!String(url).endsWith('/v1/querybatch')) return new Response(JSON.stringify({ id: 'GHSA-p6mc-m468-83gw', summary: 'Prototype Pollution in lodash', aliases: ['CVE-2020-8203'], database_specific: { severity: 'HIGH' } }));
+    const { queries } = JSON.parse(String(init!.body)) as { queries: { package: { name: string }; version: string }[] };
+    return new Response(JSON.stringify({ results: queries.map((q) => (q.package.name === 'lodash' && q.version === '4.17.15' ? { vulns: [{ id: 'GHSA-p6mc-m468-83gw' }] } : {})) }));
+  };
+
+  it.each(['pnpm9', 'yarn1', 'berry'])('%s: finds the vulnerable package, at its line, without checking dev packages', async (dir) => {
+    const { file } = read(dir);
+    const r = await scanDependencies(join(FIXTURES, dir), [file], { fetchImpl: osv });
+    expect(r.error).toBeUndefined();
+    expect(r.checked).toBe(17);
+    expect(r.detections).toHaveLength(1);
+    expect(r.detections[0]).toMatchObject({ ruleId: 'DEP-OSV', severity: 'high', file, snippet: 'lodash@4.17.15 · CVE-2020-8203' });
+    expect(r.detections[0]!.line).toBeGreaterThan(1);
+  });
+});
+
+describe('yarn dev packages', () => {
+  const dirs: string[] = [];
+  afterAll(() => dirs.forEach((d) => rmSync(d, { recursive: true, force: true })));
+  const LOCK = '# yarn lockfile v1\n\nlodash@^4.17.0:\n  version "4.17.15"\n\nminimist@^1.2.0:\n  version "1.2.5"\n';
+  const devOf = (manifest: unknown) => {
+    const sibling = () => (manifest === null ? null : JSON.stringify(manifest));
+    return Object.fromEntries(parseLockfile('yarn.lock', LOCK, sibling).packages.map((p) => [p.name, p.dev]));
+  };
+
+  it('marks what production never reaches', () => {
+    expect(devOf({ dependencies: { lodash: '^4.17.0' }, devDependencies: { minimist: '^1.2.0' } })).toEqual({ lodash: false, minimist: true });
+  });
+
+  it('counts everything as production when it cannot tell, so nothing is hidden', () => {
+    const allProd = { lodash: false, minimist: false };
+    expect(devOf(null)).toEqual(allProd); // no package.json
+    expect(devOf({ private: true })).toEqual(allProd); // no run-time dependencies listed
+    expect(devOf({ dependencies: { other: '^1.0.0' } })).toEqual(allProd); // roots not in the lockfile
+    expect(devOf({ workspaces: ['apps/*'], dependencies: { lodash: '^4.17.0' } })).toEqual(allProd); // packages have their own deps
+  });
+
+  it('reads the package.json next to the lockfile, in any folder', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'fortis-yarn-'));
+    dirs.push(dir);
+    writeFileSync(join(dir, 'yarn.lock'), LOCK);
+    writeFileSync(join(dir, 'package.json'), JSON.stringify({ dependencies: { lodash: '^4.17.0' } }));
+    const asked: string[] = [];
+    const osv: typeof fetch = async (_url, init) => {
+      const { queries } = JSON.parse(String(init!.body)) as { queries: { package: { name: string } }[] };
+      asked.push(...queries.map((q) => q.package.name));
+      return new Response(JSON.stringify({ results: queries.map(() => ({})) }));
+    };
+    await scanDependencies(dir, ['yarn.lock'], { fetchImpl: osv });
+    expect(asked).toEqual(['lodash']);
+  });
+});
+
+describe('other lockfile details', () => {
+  it('reads npm-shrinkwrap.json like package-lock.json', () => {
+    expect(findLockfiles(['npm-shrinkwrap.json'])).toEqual(['npm-shrinkwrap.json']);
+    expect(parseLockfile('npm-shrinkwrap.json', JSON.stringify({ packages: { 'node_modules/a': { version: '1.0.0' } } })).packages[0]).toMatchObject({ name: 'a', ecosystem: 'npm' });
+  });
+
+  it('reports an aliased npm package under its real name, which is the one OSV knows', () => {
+    const text = JSON.stringify({ packages: { 'node_modules/my-alias': { name: 'lodash', version: '4.17.15' } } });
+    expect(parseLockfile('package-lock.json', text).packages[0]).toMatchObject({ name: 'lodash', version: '4.17.15' });
+  });
+
+  it.each([
+    ['requirements.txt', '# deps\ndjango==3.2.0\n', 2],
+    ['poetry.lock', '# header\n\n[[package]]\nname = "django"\nversion = "3.2.0"\n', 3],
+    ['gradle.lockfile', '# generated\na:b:1.0=runtimeClasspath\n', 2],
+    ['go.mod', 'module x\n\nrequire a.b/c v1.0.0\n', 3],
+    ['Gemfile.lock', 'GEM\n  remote: x\n  specs:\n    rack (2.2.3)\n', 4],
+  ])('%s says which line a package is on', (file, text, line) => {
+    expect(parseLockfile(file, text).packages[0]!.line).toBe(line);
   });
 });

@@ -1,5 +1,5 @@
 import { globToRegExp } from '../files';
-import { TEST_PATH } from './types';
+import { lineOf, TEST_PATH } from './types';
 
 /*
  * Reads the exact package versions a project uses, for any language. Each format gets a small
@@ -7,15 +7,16 @@ import { TEST_PATH } from './types';
  */
 
 export type Ecosystem = 'npm' | 'Packagist' | 'PyPI' | 'Maven' | 'Go' | 'NuGet' | 'RubyGems' | 'crates.io';
-export type Locked = { name: string; version: string; ecosystem: Ecosystem; dev: boolean };
+/** `line` is where the package sits in its file, or 0 where a reader can't tell (JSON formats). */
+export type Locked = { name: string; version: string; ecosystem: Ecosystem; dev: boolean; line: number };
 /** `skipped` counts declared packages with no exact version to check. */
 export type Parsed = { packages: Locked[]; skipped: number };
 
-const pkg = (ecosystem: Ecosystem, name: string, version: string, dev = false): Locked => ({ name, version, ecosystem, dev });
+const pkg = (ecosystem: Ecosystem, name: string, version: string, dev = false, line = 0): Locked => ({ name, version, ecosystem, dev, line });
 
 function npmLock(text: string): Parsed {
   const lock = JSON.parse(text) as {
-    packages?: Record<string, { version?: string; dev?: boolean; link?: boolean }>;
+    packages?: Record<string, { name?: string; version?: string; dev?: boolean; link?: boolean }>;
     dependencies?: Record<string, { version: string; dev?: boolean }>;
   };
   const packages: Locked[] = [];
@@ -24,7 +25,7 @@ function npmLock(text: string): Parsed {
       // Keys without node_modules/ are the project and its workspaces, not installed packages.
       const at = path.lastIndexOf('node_modules/');
       if (at === -1 || !meta.version || meta.link) continue;
-      packages.push(pkg('npm', path.slice(at + 'node_modules/'.length), meta.version, Boolean(meta.dev)));
+      packages.push(pkg('npm', meta.name ?? path.slice(at + 'node_modules/'.length), meta.version, Boolean(meta.dev)));
     }
   } else if (lock.dependencies) {
     for (const [name, meta] of Object.entries(lock.dependencies)) packages.push(pkg('npm', name, meta.version, Boolean(meta.dev)));
@@ -32,28 +33,96 @@ function npmLock(text: string): Parsed {
   return { packages, skipped: 0 };
 }
 
-/** Yarn classic and Berry: an unindented `"name@range", "name@range2":` line, then its version. */
-function yarnLock(text: string): Parsed {
-  const packages: Locked[] = [];
-  let name: string | null = null;
-  for (const line of text.split(/\r?\n/)) {
-    if (line && !/^[\s#]/.test(line) && line.endsWith(':')) {
-      const first = line.slice(0, -1).split(',')[0]!.trim().replace(/^"|"$/g, '');
-      const at = first.indexOf('@', 1);
-      name = at > 0 && !first.includes('@workspace:') ? first.slice(0, at) : null;
-      continue;
-    }
-    const m = name && /^\s+version:?\s+"?([^"\s]+)"?\s*$/.exec(line);
-    if (m) {
-      packages.push(pkg('npm', name!, m[1]!));
-      name = null;
-    }
-  }
-  return { packages, skipped: 0 };
-}
-
 const unquote = (s: string) => s.trim().replace(/^['"]|['"]$/g, '');
 const withoutPeers = (id: string) => id.replace(/\(.*$/, '');
+
+/** `name@range` → name; an alias `foo@npm:bar@^1` → bar. */
+function yarnDescriptorName(descriptor: string): string {
+  const at = descriptor.indexOf('@', 1);
+  if (at === -1) return descriptor;
+  return /^npm:(@?[^@]+)@/.exec(descriptor.slice(at + 1))?.[1] ?? descriptor.slice(0, at);
+}
+
+/**
+ * Yarn classic and Berry: an unindented `"name@range", "name@range2":` line, then its fields.
+ * The lockfile doesn't mark dev packages, so walk from package.json's run-time dependencies.
+ * Without that file, or in a workspace root whose packages have their own, everything counts
+ * as production: leaving a package out hides its vulnerabilities.
+ */
+function yarnLock(text: string, _file: string, sibling: Sibling): Parsed {
+  const berry = /^__metadata:/m.test(text);
+  type Node = Locked & { edges: string[] };
+  const nodes = new Map<string, Node>();
+  const byDescriptor = new Map<string, string>();
+
+  let descriptors: string[] = [];
+  let headLine = 0;
+  let version = '';
+  let resolution = '';
+  let edges: string[] = [];
+  let inDeps = false;
+  const finish = () => {
+    if (descriptors.length && /^\d/.test(version) && !/@(workspace|link|portal|file):/.test(`${descriptors.join()} ${resolution}`)) {
+      const name = yarnDescriptorName(berry && resolution ? resolution : descriptors[0]!);
+      const id = `${name}@${version}#${headLine}`;
+      nodes.set(id, { ...pkg('npm', name, version, false, headLine), edges });
+      for (const d of descriptors) byDescriptor.set(d, id);
+    }
+    descriptors = [];
+    version = resolution = '';
+    edges = [];
+    inDeps = false;
+  };
+  text.split(/\r?\n/).forEach((line, i) => {
+    if (line && !/^[\s#]/.test(line) && line.endsWith(':')) {
+      finish();
+      if (!line.startsWith('__metadata')) {
+        descriptors = line.slice(0, -1).split(/,\s*/).map(unquote);
+        headLine = i + 1;
+      }
+      return;
+    }
+    const child = inDeps ? /^ {4}("[^"]+"|[^\s:]+):? +(.+)$/.exec(line) : null;
+    if (child) {
+      edges.push(`${unquote(child[1]!)}@${unquote(child[2]!)}`);
+      return;
+    }
+    if (/^ {2}\S/.test(line)) {
+      inDeps = /^ {2}(dependencies|optionalDependencies):\s*$/.test(line);
+      const f = /^ {2}(version|resolution):? +"?([^"]*)"?\s*$/.exec(line);
+      if (f?.[1] === 'version') version = f[2]!;
+      if (f?.[1] === 'resolution') resolution = f[2]!;
+    }
+  });
+  finish();
+
+  let manifest: { dependencies?: Record<string, string>; optionalDependencies?: Record<string, string>; peerDependencies?: Record<string, string>; workspaces?: unknown } = {};
+  try {
+    manifest = JSON.parse(sibling('package.json') ?? '{}');
+  } catch {
+    /* no usable package.json: everything stays production */
+  }
+  const resolveDescriptor = (d: string) => {
+    const at = d.indexOf('@', 1);
+    return byDescriptor.get(d) ?? (at > 0 ? byDescriptor.get(`${d.slice(0, at)}@npm:${d.slice(at + 1)}`) : undefined);
+  };
+  const roots = Object.entries({ ...manifest.dependencies, ...manifest.optionalDependencies, ...manifest.peerDependencies }).map(([n, r]) => resolveDescriptor(`${n}@${r}`));
+  const stack = roots.filter((r): r is string => Boolean(r));
+  if (stack.length && !manifest.workspaces) {
+    const production = new Set<string>();
+    while (stack.length) {
+      const id = stack.pop()!;
+      if (production.has(id)) continue;
+      production.add(id);
+      for (const edge of nodes.get(id)?.edges ?? []) {
+        const next = resolveDescriptor(edge);
+        if (next) stack.push(next);
+      }
+    }
+    for (const [id, node] of nodes) node.dev = !production.has(id);
+  }
+  return { packages: [...nodes.values()].map(({ edges: _edges, ...p }) => p), skipped: 0 };
+}
 
 /** A dependency's snapshot key. The version may instead be a link, or an alias's real `name@version`. */
 function pnpmRef(name: string, version: string): string | null {
@@ -124,7 +193,7 @@ function pnpmLock(text: string): Parsed {
   const packages: Locked[] = [];
   let inPackages = false;
   let last: Locked | null = null;
-  for (const line of text.split(/\r?\n/)) {
+  for (const [i, line] of text.split(/\r?\n/).entries()) {
     if (/^\S/.test(line)) {
       inPackages = line.startsWith('packages:');
       last = null;
@@ -137,8 +206,8 @@ function pnpmLock(text: string): Parsed {
       const oldStyle = /^(@[^/@]+\/[^/@]+|[^/@]+)\/(\d[^/]*)$/.exec(id);
       const at = id.lastIndexOf('@');
       if (id.includes(':')) last = null; // file:, git and tarball installs
-      else if (oldStyle) last = pkg('npm', oldStyle[1]!, oldStyle[2]!.replace(/_.*$/, ''));
-      else if (at > 0) last = pkg('npm', id.slice(0, at), id.slice(at + 1));
+      else if (oldStyle) last = pkg('npm', oldStyle[1]!, oldStyle[2]!.replace(/_.*$/, ''), false, i + 1);
+      else if (at > 0) last = pkg('npm', id.slice(0, at), id.slice(at + 1), false, i + 1);
       else last = null;
       if (last) packages.push(last);
     } else if (last && /^ {4}dev: true\s*$/.test(line)) {
@@ -171,13 +240,15 @@ const pypiName = (name: string) => name.toLowerCase().replace(/[-_.]+/g, '-');
 /** poetry.lock and uv.lock: `[[package]]` tables. uv lists the project itself with an editable or virtual source. */
 function tomlPythonLock(text: string): Parsed {
   const packages: Locked[] = [];
-  for (const block of text.split(/^\[\[package\]\]\s*$/m).slice(1)) {
+  const heads = [...text.matchAll(/^\[\[package\]\]\s*$/gm)];
+  heads.forEach((head, i) => {
+    const block = text.slice(head.index + head[0].length, heads[i + 1]?.index ?? text.length);
     const table = block.split(/^\[\[?(?!package\.)/m)[0]!;
     const name = /^name\s*=\s*"([^"]+)"/m.exec(table)?.[1];
     const version = /^version\s*=\s*"([^"]+)"/m.exec(table)?.[1];
-    if (!name || !version || /^source\s*=\s*\{\s*(editable|virtual)\b/m.test(table)) continue;
-    packages.push(pkg('PyPI', pypiName(name), version, /^category\s*=\s*"dev"/m.test(table)));
-  }
+    if (!name || !version || /^source\s*=\s*\{\s*(editable|virtual)\b/m.test(table)) return;
+    packages.push(pkg('PyPI', pypiName(name), version, /^category\s*=\s*"dev"/m.test(table), lineOf(text, head.index)));
+  });
   return { packages, skipped: 0 };
 }
 
@@ -200,12 +271,12 @@ function requirementsTxt(text: string, file: string): Parsed {
   const dev = /dev|test/i.test(file.slice(file.lastIndexOf('/') + 1));
   const packages: Locked[] = [];
   let skipped = 0;
-  for (const raw of text.split(/\r?\n/)) {
+  for (const [i, raw] of text.split(/\r?\n/).entries()) {
     const line = raw.replace(/\s#.*$/, '').trim();
     // Options, includes, comments and the `--hash` lines that continue a requirement.
     if (!line || line.startsWith('#') || line.startsWith('-') || line.startsWith('\\')) continue;
     const m = /^([A-Za-z0-9][A-Za-z0-9._-]*)(?:\[[^\]]*\])?\s*===?\s*([^\s;,\\]+)\s*(?:[;\\].*)?$/.exec(line);
-    if (m) packages.push(pkg('PyPI', pypiName(m[1]!), m[2]!, dev));
+    if (m) packages.push(pkg('PyPI', pypiName(m[1]!), m[2]!, dev, i + 1));
     else if (/^[A-Za-z0-9]/.test(line) && !line.includes('://')) skipped++;
   }
   return { packages, skipped };
@@ -214,11 +285,11 @@ function requirementsTxt(text: string, file: string): Parsed {
 /** `group:name:version=compileClasspath,runtimeClasspath`. */
 function gradleLock(text: string): Parsed {
   const packages: Locked[] = [];
-  for (const line of text.split(/\r?\n/)) {
+  for (const [i, line] of text.split(/\r?\n/).entries()) {
     const m = /^([^:#\s]+):([^:\s]+):([^=\s]+)=(.*)$/.exec(line.trim());
     if (!m) continue;
     const dev = m[4]!.split(',').every((conf) => /^test/i.test(conf.trim()));
-    packages.push(pkg('Maven', `${m[1]}:${m[2]}`, m[3]!, dev));
+    packages.push(pkg('Maven', `${m[1]}:${m[2]}`, m[3]!, dev, i + 1));
   }
   return { packages, skipped: 0 };
 }
@@ -262,12 +333,12 @@ function pomXml(text: string): Parsed {
 function goMod(text: string): Parsed {
   const packages: Locked[] = [];
   let inRequire = false;
-  for (const raw of text.split(/\r?\n/)) {
+  for (const [i, raw] of text.split(/\r?\n/).entries()) {
     const line = raw.replace(/\/\/.*$/, '').trim();
     if (/^require\s*\($/.test(line)) { inRequire = true; continue; }
     if (line === ')') { inRequire = false; continue; }
     const m = (inRequire ? /^(\S+)\s+(v\S+)$/ : /^require\s+(\S+)\s+(v\S+)$/).exec(line);
-    if (m) packages.push(pkg('Go', m[1]!, m[2]!.replace(/\+incompatible$/, '')));
+    if (m) packages.push(pkg('Go', m[1]!, m[2]!.replace(/\+incompatible$/, ''), false, i + 1));
   }
   return { packages, skipped: 0 };
 }
@@ -287,10 +358,10 @@ function nugetLock(text: string): Parsed {
 function gemfileLock(text: string): Parsed {
   const packages: Locked[] = [];
   let inGem = false;
-  for (const line of text.split(/\r?\n/)) {
+  for (const [i, line] of text.split(/\r?\n/).entries()) {
     if (/^\S/.test(line)) inGem = line === 'GEM';
     const m = inGem ? /^ {4}(\S+) \(([^)-]+)(?:-[^)]*)?\)$/.exec(line) : null;
-    if (m) packages.push(pkg('RubyGems', m[1]!, m[2]!));
+    if (m) packages.push(pkg('RubyGems', m[1]!, m[2]!, false, i + 1));
   }
   return { packages, skipped: 0 };
 }
@@ -332,12 +403,14 @@ export function cycloneDx(text: string): Parsed {
   return { packages, skipped };
 }
 
-type Format = { match: RegExp; ecosystem: Ecosystem; parse: (text: string, file: string) => Parsed };
+/** Reads a file next to the lockfile, such as its package.json. */
+export type Sibling = (name: string) => string | null;
+type Format = { match: RegExp; ecosystem: Ecosystem; parse: (text: string, file: string, sibling: Sibling) => Parsed };
 
 const REQUIREMENTS = /(^|\/)requirements[-_.\w]*\.txt$|(^|\/)requirements\/[-_.\w]+\.txt$/;
 
 const FORMATS: Format[] = [
-  { match: /(^|\/)package-lock\.json$/, ecosystem: 'npm', parse: npmLock },
+  { match: /(^|\/)(package-lock|npm-shrinkwrap)\.json$/, ecosystem: 'npm', parse: npmLock },
   { match: /(^|\/)yarn\.lock$/, ecosystem: 'npm', parse: yarnLock },
   { match: /(^|\/)pnpm-lock\.yaml$/, ecosystem: 'npm', parse: pnpmLock },
   { match: /(^|\/)composer\.lock$/, ecosystem: 'Packagist', parse: composerLock },
@@ -385,11 +458,16 @@ const formatOf = (file: string) => {
   return format;
 };
 
-export const parseLockfile = (file: string, text: string): Parsed => formatOf(file).parse(text, file);
+export const parseLockfile = (file: string, text: string, sibling: Sibling = () => null): Parsed => formatOf(file).parse(text, file, sibling);
 export const ecosystemOf = (file: string): Ecosystem => formatOf(file).ecosystem;
 
 /** Ecosystems the project plainly uses but gave no versions for, so nothing was checked. */
 export function missingLockfiles(paths: string[], ignore: string[], found: ReadonlySet<Ecosystem>): string[] {
   const files = relevant(paths, ignore);
-  return MANIFESTS.filter((m) => !found.has(m.ecosystem) && files.some((p) => m.match.test(p))).map((m) => `${m.label} found but no lockfile, so those dependencies weren't checked: ${m.hint}.`);
+  const bun = files.find((p) => /(^|\/)bun\.lockb?$/.test(p));
+  return MANIFESTS.filter((m) => !found.has(m.ecosystem) && files.some((p) => m.match.test(p))).map((m) =>
+    m.ecosystem === 'npm' && bun
+      ? `${bun.slice(bun.lastIndexOf('/') + 1)} is not supported yet, so those dependencies weren't checked: use npm, pnpm or yarn lockfiles, or pass --sbom.`
+      : `${m.label} found but no lockfile, so those dependencies weren't checked: ${m.hint}.`,
+  );
 }

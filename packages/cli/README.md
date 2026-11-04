@@ -36,10 +36,9 @@ To verify where a binary came from, run `gh attestation verify fortis-linux-x64.
 
 | Pack | Rules | Languages | Plan |
 |---|---|---|---|
-| Secrets | Private keys, AWS, GitHub, Slack, Google and Fortis keys; random-looking hard-coded secrets, including unquoted values in `.env`, `.properties` and YAML files | Any | Free |
+| Secrets | Paystack / Flutterwave / Monnify secret keys; private keys, AWS, GitHub, Slack, Google and Fortis keys; random-looking hard-coded secrets, including unquoted values in `.env`, `.properties` and YAML files | Any | Free |
 | Dependencies | Known vulnerabilities, from [OSV](https://osv.dev) | See below | Free |
-| Fintech: payment keys | Paystack / Flutterwave / Monnify secret keys | Any | Core and above |
-| Fintech: code rules | Money records read without an ownership check; webhooks without a signature check; balance updates outside a transaction; BVN/NIN in logs; weak or leaked OTPs; transfers without an idempotency key | JavaScript and TypeScript only, so far | Core and above |
+| Fintech | Money records read without an ownership check; webhooks without a signature check; balance updates outside a transaction; BVN/NIN in logs; weak or leaked OTPs; transfers without an idempotency key | JavaScript and TypeScript only, so far | Core and above |
 
 `fortis test` and `fortis access` test a running app over HTTP, so they work whatever the backend is written in.
 
@@ -49,7 +48,7 @@ Run `fortis rules` for the list and `fortis explain FX-OWN-001` for why a rule m
 
 | Language | Files |
 |---|---|
-| JavaScript | `package-lock.json`, `yarn.lock`, `pnpm-lock.yaml` |
+| JavaScript | `package-lock.json`, `npm-shrinkwrap.json`, `yarn.lock`, `pnpm-lock.yaml` |
 | PHP | `composer.lock` |
 | Python | `poetry.lock`, `uv.lock`, `Pipfile.lock`, or a pinned `requirements.txt` |
 | Java / Kotlin | `gradle.lockfile`, `pom.xml`, or an SBOM |
@@ -57,7 +56,7 @@ Run `fortis rules` for the list and `fortis explain FX-OWN-001` for why a rule m
 | .NET | `packages.lock.json` |
 | Ruby | `Gemfile.lock` |
 
-Files are found in any folder of the repository. Dev and test dependencies are left out where the file shows them (`yarn.lock` and `uv.lock` don't, so those are checked too). If a project has no lockfile, the scan says so.
+Files are found in any folder of the repository. Dev and test dependencies are left out wherever they can be told apart (`uv.lock` and yarn workspaces can't, so those are all checked). Findings point at the package's line in the file. If a project has no lockfile, the scan says so.
 
 **Maven needs an SBOM for full coverage.** `pom.xml` lists only direct dependencies, and a parent POM or BOM often decides their versions, so Fortis reports how many it could check. To cover everything, including transitive dependencies, have Maven list them and pass the result to Fortis. `fortis ci init` adds this step for you on GitHub Actions.
 
@@ -88,9 +87,9 @@ If the dependency check can't finish (OSV is down, or a lockfile can't be read),
 ## In CI
 
 ```yaml
-- uses: Divine-mercyx/fortis@cli-v0.1.0-beta.6
+- uses: Divine-mercyx/fortis@cli-v0.1.0-beta.8
   with:
-    version: 0.1.0-beta.6
+    version: 0.1.0-beta.8
 - run: fortis scan --ci
   env:
     FORTIS_KEY: ${{ secrets.FORTIS_KEY }}

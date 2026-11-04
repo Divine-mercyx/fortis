@@ -6,7 +6,7 @@ import { controlsFor, FRAMEWORKS, RULE_CATALOG, TARGET_AUTHORIZATION_TEXT, type 
 
 import { Search } from '@/components/icons';
 import { CodeLine, CopyButton, SeverityPill } from '@/components/ui';
-import { API_BASE, CLI_COMMAND, CLI_PACKAGE, CLI_VERSION } from '@/lib/cli';
+import { API_BASE, CLI_COMMAND, CLI_INSTALL_URL, CLI_PACKAGE, CLI_VERSION } from '@/lib/cli';
 
 /* ---------- Stack and CI choices: every command on the page follows them ---------- */
 
@@ -19,25 +19,25 @@ const STACKS: Record<StackId, { label: string; install: string; run: string; not
     label: 'Node.js · pnpm',
     install: `pnpm add -D ${CLI_PACKAGE}`,
     run: `pnpm exec ${CLI_COMMAND}`,
-    note: 'The dependency check reads package-lock.json, so it does not run on pnpm-lock.yaml yet. Every other check works.',
+    note: 'Every check works, including the dependency check on pnpm-lock.yaml (lockfile v5, v6 and v9, workspaces included).',
   },
   yarn: {
     label: 'Node.js · Yarn',
     install: `yarn add -D ${CLI_PACKAGE}`,
     run: `yarn ${CLI_COMMAND}`,
-    note: 'The dependency check reads package-lock.json, so it does not run on yarn.lock yet. With Yarn Plug’n’Play, install the CLI globally so the git hook can find it.',
+    note: 'Every check works, including the dependency check on yarn.lock (Yarn 1 and Yarn 2+). With Yarn Plug’n’Play, install the CLI globally so the git hook can find it.',
   },
   bun: {
     label: 'Node.js · Bun',
     install: `bun add -d ${CLI_PACKAGE}`,
     run: `bunx ${CLI_COMMAND}`,
-    note: 'The dependency check reads package-lock.json, so it does not run on bun.lockb yet. Every other check works.',
+    note: 'The dependency check reads npm, pnpm and yarn lockfiles, so it does not run on bun.lock / bun.lockb yet. Every other check works.',
   },
   other: {
     label: 'Other languages (Python, Go, Java, PHP…)',
-    install: `npm i -g ${CLI_PACKAGE}`,
+    install: `curl -fsSL ${CLI_INSTALL_URL}/install.sh | sh`,
     run: CLI_COMMAND,
-    note: 'Install Node.js 18+ to run the CLI. Secret scanning, staging tests (ZAP) and access checks work for any language. The fintech code rules read JavaScript and TypeScript today, and the dependency check reads npm lockfiles.',
+    note: `A standalone binary: no Node.js needed. On Windows, in PowerShell: irm ${CLI_INSTALL_URL}/install.ps1 | iex. Secrets, dependencies, staging tests (ZAP) and access checks work for your language. The fintech code rules read JavaScript and TypeScript so far, and the scan tells you which files they skipped.`,
   },
 };
 
@@ -139,11 +139,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - name: Install Fortis
+        uses: Divine-mercyx/fortis@cli-v${CLI_VERSION}
         with:
-          node-version: 22
+          version: ${CLI_VERSION}
       - name: Fortis scan
-        run: npx --yes ${pkg} scan --ci --sarif fortis.sarif
+        run: fortis scan --ci --sarif fortis.sarif
         env:
           FORTIS_KEY: \${{ secrets.FORTIS_KEY }}
       - name: Upload to GitHub code scanning
@@ -161,11 +162,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - name: Install Fortis
+        uses: Divine-mercyx/fortis@cli-v${CLI_VERSION}
         with:
-          node-version: 22
+          version: ${CLI_VERSION}
       - name: Fortis test
-        run: npx --yes ${pkg} test --target \${{ vars.FORTIS_STAGING_URL }} --wait 600
+        run: fortis test --target \${{ vars.FORTIS_STAGING_URL }} --wait 600
         env:
           FORTIS_KEY: \${{ secrets.FORTIS_KEY }}
           FORTIS_ZAP_AUTH: \${{ secrets.FORTIS_TEST_TOKEN }}`;
@@ -175,9 +177,9 @@ const GITLAB_YML = `# fortis.gitlab-ci.yml  (written by: fortis ci init --provid
 
 fortis-scan:
   stage: test
-  image: node:22
+  image: ghcr.io/divine-mercyx/fortis:${CLI_VERSION}
   script:
-    - npx --yes ${pkg} scan --ci --sarif fortis.sarif
+    - fortis scan --ci --sarif fortis.sarif
   artifacts:
     when: always
     paths: [fortis.sarif]
@@ -218,7 +220,7 @@ const ACCESS_JSON = `{
 
 const PACK_LABEL: Record<RulePack, string> = { fintech: 'Fintech', secrets: 'Secrets', dependencies: 'Dependencies' };
 const RULE_LANG: Record<string, string> = {
-  'FX-SEC-001': 'Any file', 'SEC-GEN-001': 'Any file', 'DEP-OSV': 'package-lock.json (pnpm and yarn lockfiles not yet)',
+  'FX-SEC-001': 'Any file', 'SEC-GEN-001': 'Any file', 'DEP-OSV': 'Lockfiles for JavaScript, PHP, Python, Java, Go, .NET and Ruby',
   'FX-BOLA-001': 'Any language (running app)', 'FX-AUTH-001': 'Any language (running app)',
 };
 
@@ -345,7 +347,7 @@ export default function DocsPage() {
 
         <Section id="requirements" title="Requirements">
           <ul className="doc-list">
-            <li><b>Node.js 18.17 or newer</b> to run the CLI, whatever language your project uses.</li>
+            <li><b>Node.js 18.17 or newer</b> if you install from npm. The standalone binary needs no Node.</li>
             <li><b>git</b>, for the pre-push hook and changed-file scans.</li>
             <li><b>Docker</b>, only for <C>fortis test</C> (ZAP runs in the official <C>zaproxy/zap-stable</C> image).</li>
             <li>A <b>Fortis key</b> for the fintech rules, dashboard sync, staging tests and access checks. Secrets and dependency checks run without one.</li>
@@ -369,7 +371,7 @@ export default function DocsPage() {
           <p>Check it works:</p>
           <CodeLine cmd={run('--version')} />
           {stack !== 'other' ? (
-            <p className="small">You can also run it without installing: <C>npx {CLI_PACKAGE}@{CLI_VERSION} scan</C>. CI templates do this so builds are reproducible.</p>
+            <p className="small">You can also run it without installing: <C>npx {CLI_PACKAGE}@{CLI_VERSION} scan</C>.</p>
           ) : null}
         </Section>
 

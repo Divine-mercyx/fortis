@@ -3,10 +3,11 @@ import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'nod
 import { tmpdir } from 'node:os';
 import { delimiter, dirname, join } from 'node:path';
 
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { toUpload } from '../src/api';
 import { installHook } from '../src/hook';
+import { printReport } from '../src/report';
 import { runScan } from '../src/scan';
 
 const PAYSTACK_LIVE = ['sk', 'live', 'a1B2c3D4e5F6g7H8i9J0k1L2m3N4'].join('_');
@@ -64,6 +65,9 @@ describe('runScan', () => {
       expect(locked.notes.join()).not.toContain('no lockfile');
       expect(locked.incompleteChecks).toEqual([]);
     }
+    const bun = await scan({ 'package.json': '{}', 'bun.lockb': 'x' });
+    expect(bun.notes.join()).toContain('bun.lockb is not supported yet');
+    expect(bun.incompleteChecks).toEqual(['dependencies']);
     expect((await scan({ 'main.go': 'package main\n' })).notes.join()).not.toContain('no lockfile');
   });
 
@@ -148,6 +152,27 @@ describe('runScan', () => {
     expect(r.detections).toEqual([]);
     expect(r.incompleteChecks).toEqual(['dependencies']);
     expect(r.notes.join()).toContain('OSV responded 503');
+  });
+
+  it('says plainly when OSV cannot be reached', async () => {
+    const { dir } = repo({ 'requirements.txt': 'django==3.2.0\n' });
+    const offline: typeof fetch = async () => { throw new TypeError('fetch failed'); };
+    const r = await runScan({ root: dir, scope: 'full', packs: ['dependencies'], fetchImpl: offline });
+    expect(r.notes.join()).toContain('could not reach api.osv.dev');
+    expect(r.incompleteChecks).toEqual(['dependencies']);
+  });
+
+  it('does not call it a full pass when the dependency check did not finish', () => {
+    const shown = (incompleteChecks: 'dependencies'[]) => {
+      const write = vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
+      printReport({ detections: [], filesScanned: 1, packagesChecked: 0, durationMs: 1, notes: [], incompleteChecks }, { failOn: 'critical', prePush: false, packs: ['dependencies'] });
+      const out = write.mock.calls.map((c) => String(c[0])).join('');
+      write.mockRestore();
+      return out;
+    };
+    expect(shown([])).toContain('All checks passed');
+    expect(shown(['dependencies'])).toContain('did not finish');
+    expect(shown(['dependencies'])).not.toContain('All checks passed');
   });
 
   it('survives a malformed lockfile and still checks the others', async () => {

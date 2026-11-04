@@ -1,5 +1,5 @@
 import { existsSync, readFileSync } from 'node:fs';
-import { join, relative, resolve } from 'node:path';
+import { dirname, join, relative, resolve } from 'node:path';
 
 import type { Severity } from '@fortis/shared';
 
@@ -53,7 +53,14 @@ export function readPackages(root: string, files: string[], opts: { sbom?: strin
     const abs = join(root, file);
     if (!existsSync(abs)) continue;
     try {
-      const parsed = parseLockfile(file, readFileSync(abs, 'utf8'));
+      const sibling = (name: string) => {
+        try {
+          return readFileSync(join(dirname(abs), name), 'utf8');
+        } catch {
+          return null;
+        }
+      };
+      const parsed = parseLockfile(file, readFileSync(abs, 'utf8'), sibling);
       packages.push(...parsed.packages.map((p) => ({ ...p, file })));
       seen.add(ecosystemOf(file));
       if (isPomXml(file)) {
@@ -156,12 +163,15 @@ export async function scanDependencies(
         severity,
         title: `${pkg.name}@${pkg.version}: ${top?.summary ?? 'known vulnerability'}${vulnIds.length > 1 ? ` (+${vulnIds.length - 1} more)` : ''}`.slice(0, 200),
         file: where.file,
-        line: 0,
+        line: where.line,
         snippet: `${pkg.name}@${pkg.version} · ${ref}`,
       });
     }
     return { detections, checked: pkgs.length, notes, incomplete: read.incomplete };
   } catch (e) {
-    return { detections: [], checked: 0, error: (e as Error).message, notes, incomplete: true };
+    const msg = (e as Error).message;
+    // Node's fetch says only "fetch failed" when the host can't be reached (offline, proxy, firewall).
+    const error = /fetch failed|ENOTFOUND|ECONNREFUSED|ETIMEDOUT|aborted|timeout/i.test(msg) ? `could not reach ${new URL(base).host} (${msg})` : msg;
+    return { detections: [], checked: 0, error, notes, incomplete: true };
   }
 }
