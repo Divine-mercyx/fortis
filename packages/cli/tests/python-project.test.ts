@@ -1,5 +1,5 @@
 import { execFileSync, spawnSync } from 'node:child_process';
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { delimiter, dirname, join } from 'node:path';
 
@@ -151,6 +151,26 @@ def debit(wallet, amount):
     const r = await runScan({ root: dir, scope: 'full', packs: ['fintech'], offline: true });
     expect(r.detections.map((d) => `${d.ruleId}@${d.file}:${d.line}`)).toEqual(['FX-OWN-001@app/views.py:2', 'FX-TXN-001@app/views.py:6']);
     expect(r.notes.join()).not.toContain('Fintech code rules');
+  });
+
+  // Every labelled Python case, as one project through the real scan: right findings, right lines, nothing else.
+  it('reports exactly the labelled findings across Django, Flask and FastAPI', async () => {
+    const cases = join(__dirname, '..', 'bench', 'cases');
+    const files: Record<string, string> = {};
+    const expected: string[] = [];
+    for (const rule of ['FX-OWN-001', 'FX-TXN-001', 'FX-PII-002', 'FX-OTP-001']) {
+      for (const name of readdirSync(join(cases, rule)).filter((n) => n.endsWith('.py'))) {
+        const path = `app/${rule}/${name}`;
+        const text = readFileSync(join(cases, rule, name), 'utf8');
+        files[path] = text;
+        text.split(/\r?\n/).forEach((line, i) => {
+          if (line.includes('@hit')) expected.push(`${rule}@${path}:${i + 1}`);
+        });
+      }
+    }
+    const r = await runScan({ root: repo(files), scope: 'full', packs: ['fintech'], offline: true });
+    const found = r.detections.filter((d) => d.file.split('/')[1] === d.ruleId).map((d) => `${d.ruleId}@${d.file}:${d.line}`);
+    expect(found.sort()).toEqual(expected.sort());
   });
 
   it('honours # fortis-ignore', async () => {
