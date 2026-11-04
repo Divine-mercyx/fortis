@@ -6,7 +6,7 @@ import { controlsFor, FRAMEWORKS, RULE_CATALOG, TARGET_AUTHORIZATION_TEXT, type 
 
 import { Search } from '@/components/icons';
 import { CodeLine, CopyButton, SeverityPill } from '@/components/ui';
-import { API_BASE, CLI_COMMAND, CLI_PACKAGE, CLI_VERSION } from '@/lib/cli';
+import { API_BASE, CLI_COMMAND, CLI_INSTALL_URL, CLI_PACKAGE, CLI_VERSION } from '@/lib/cli';
 
 /* ---------- Stack and CI choices: every command on the page follows them ---------- */
 
@@ -35,9 +35,9 @@ const STACKS: Record<StackId, { label: string; install: string; run: string; not
   },
   other: {
     label: 'Other languages (Python, Go, Java, PHP…)',
-    install: `npm i -g ${CLI_PACKAGE}`,
+    install: `curl -fsSL ${CLI_INSTALL_URL}/install.sh | sh`,
     run: CLI_COMMAND,
-    note: 'Install Node.js 18+ to run the CLI. Secret scanning, staging tests (ZAP) and access checks work for any language. The fintech code rules read JavaScript and TypeScript today, and the dependency check reads npm, pnpm and yarn lockfiles.',
+    note: `A standalone binary: no Node.js needed. On Windows, in PowerShell: irm ${CLI_INSTALL_URL}/install.ps1 | iex. Secrets, dependencies, staging tests (ZAP) and access checks work for your language. The fintech code rules read JavaScript and TypeScript so far, and the scan tells you which files they skipped.`,
   },
 };
 
@@ -140,11 +140,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - name: Install Fortis
+        uses: Divine-mercyx/fortis@cli-v${CLI_VERSION}
         with:
-          node-version: 22
+          version: ${CLI_VERSION}
       - name: Fortis scan
-        run: npx --yes ${pkg} scan --ci --sarif fortis.sarif
+        run: fortis scan --ci --sarif fortis.sarif
         env:
           FORTIS_KEY: \${{ secrets.FORTIS_KEY }}
       - name: Upload to GitHub code scanning
@@ -162,11 +163,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - name: Install Fortis
+        uses: Divine-mercyx/fortis@cli-v${CLI_VERSION}
         with:
-          node-version: 22
+          version: ${CLI_VERSION}
       - name: Fortis test
-        run: npx --yes ${pkg} test --target \${{ vars.FORTIS_STAGING_URL }} --wait 600
+        run: fortis test --target \${{ vars.FORTIS_STAGING_URL }} --wait 600
         env:
           FORTIS_KEY: \${{ secrets.FORTIS_KEY }}
           FORTIS_ZAP_AUTH: \${{ secrets.FORTIS_TEST_TOKEN }}`;
@@ -176,9 +178,9 @@ const GITLAB_YML = `# fortis.gitlab-ci.yml  (written by: fortis ci init --provid
 
 fortis-scan:
   stage: test
-  image: node:22
+  image: ghcr.io/divine-mercyx/fortis:${CLI_VERSION}
   script:
-    - npx --yes ${pkg} scan --ci --sarif fortis.sarif
+    - fortis scan --ci --sarif fortis.sarif
   artifacts:
     when: always
     paths: [fortis.sarif]
@@ -219,7 +221,7 @@ const ACCESS_JSON = `{
 
 const PACK_LABEL: Record<RulePack, string> = { fintech: 'Fintech', secrets: 'Secrets', dependencies: 'Dependencies' };
 const RULE_LANG: Record<string, string> = {
-  'FX-SEC-001': 'Any file', 'SEC-GEN-001': 'Any file', 'DEP-OSV': 'package-lock.json, pnpm-lock.yaml, yarn.lock',
+  'FX-SEC-001': 'Any file', 'SEC-GEN-001': 'Any file', 'DEP-OSV': 'Lockfiles for JavaScript, PHP, Python, Java, Go, .NET and Ruby',
   'FX-BOLA-001': 'Any language (running app)', 'FX-AUTH-001': 'Any language (running app)',
 };
 
@@ -346,7 +348,7 @@ export default function DocsPage() {
 
         <Section id="requirements" title="Requirements">
           <ul className="doc-list">
-            <li><b>Node.js 18.17 or newer</b> to run the CLI, whatever language your project uses.</li>
+            <li><b>Node.js 18.17 or newer</b> if you install from npm. The standalone binary needs no Node.</li>
             <li><b>git</b>, for the pre-push hook and changed-file scans.</li>
             <li><b>Docker</b>, only for <C>fortis test</C> (ZAP runs in the official <C>zaproxy/zap-stable</C> image).</li>
             <li>A <b>Fortis key</b> for the fintech rules, dashboard sync, staging tests and access checks. Secrets and dependency checks run without one.</li>
@@ -370,7 +372,7 @@ export default function DocsPage() {
           <p>Check it works:</p>
           <CodeLine cmd={run('--version')} />
           {stack !== 'other' ? (
-            <p className="small">You can also run it without installing: <C>npx {CLI_PACKAGE}@{CLI_VERSION} scan</C>. CI templates do this so builds are reproducible.</p>
+            <p className="small">You can also run it without installing: <C>npx {CLI_PACKAGE}@{CLI_VERSION} scan</C>.</p>
           ) : null}
         </Section>
 
@@ -685,7 +687,7 @@ export default function DocsPage() {
       "title": "Money record read without an ownership check",
       "file": "src/routes/transfers.ts",
       "line": 41,
-      "snippet": "const t = await Transfer.findById(req.params.id)"
+      "snippet": "const t = await Transfer.${'findById'}(req.params.id)"
     }
   ]
 }`} />
@@ -716,8 +718,10 @@ export default function DocsPage() {
           <dl className="doc-faq">
             <dt>“No Fortis key found, so only the free checks ran”</dt>
             <dd>Run <C>{run('login fts_…')}</C>, or set <C>FORTIS_KEY</C>. Check with <C>{run('whoami')}</C>.</dd>
-            <dt>“Dependency check skipped: no lockfile”</dt>
-            <dd>The check reads <C>package-lock.json</C>, <C>pnpm-lock.yaml</C> or <C>yarn.lock</C> at the repository root. Run your package manager&apos;s install and commit the lockfile. Bun lockfiles are not read yet.</dd>
+            <dt>“found but no lockfile, so those dependencies weren&apos;t checked”</dt>
+            <dd>Fortis needs exact versions. Commit the lockfile the message names, in any folder of the repository. Bun lockfiles are not read yet; pass <C>--sbom</C> with a CycloneDX file instead.</dd>
+            <dt>“pom.xml: checked 3 of 28 declared dependencies”</dt>
+            <dd><C>pom.xml</C> lists only direct dependencies, and a parent POM or BOM often sets their versions. Generate a CycloneDX SBOM with Maven and pass <C>--sbom target/bom.json</C> to check them all, including transitive ones. <C>{CLI_COMMAND} ci init</C> adds this step on GitHub Actions.</dd>
             <dt>“Dependency check skipped: could not reach api.osv.dev”</dt>
             <dd>The machine or CI runner can&apos;t reach the OSV database. Allow <C>https://api.osv.dev</C> through your proxy or firewall. The scan then shows “Nothing found · the dependency check did not run” rather than a full pass.</dd>
             <dt>“Docker is installed but not running”</dt>
@@ -735,6 +739,8 @@ export default function DocsPage() {
 
         <Section id="changelog" title="Changelog">
           <dl className="doc-faq">
+            <dt>0.1.0-beta.9</dt>
+            <dd>The dependency check now covers PHP, Python, Java, Go, .NET and Ruby as well as JavaScript, in any folder, and reads CycloneDX SBOMs with <C>--sbom</C>. Standalone binaries, a Docker image and a GitHub Action mean non-JavaScript teams don&apos;t need Node. More secrets are caught in non-JavaScript code and config files. When the dependency check can&apos;t finish, its open findings stay open instead of being marked fixed.</dd>
             <dt>0.1.0-beta.8</dt>
             <dd>The dependency check reads PHP, Python, Java, Go, .NET and Ruby lockfiles (and a CycloneDX SBOM with <C>--sbom</C>) as well as npm, pnpm and Yarn, and secret scanning understands those languages&apos; config files. A scan that couldn&apos;t run the dependency check no longer closes its findings. The first push of a new repository or branch checks every commit being pushed, not only the last one (a key leaked in an earlier commit used to get through). The git hook works with Yarn Plug’n’Play and says clearly when the CLI isn&apos;t installed. Run <C>{run('init')}</C> again to upgrade an existing hook.</dd>
             <dt>0.1.0-beta.7</dt>

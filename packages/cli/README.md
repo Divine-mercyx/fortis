@@ -34,11 +34,13 @@ To verify where a binary came from, run `gh attestation verify fortis-linux-x64.
 
 ## What it checks
 
-| Pack | Rules | Plan |
-|---|---|---|
-| Secrets | Paystack, Flutterwave and Monnify secret keys; private keys, AWS, GitHub, Slack, Google and Fortis keys; random-looking hard-coded secrets | Free |
-| Dependencies | Known vulnerabilities in `package-lock.json`, `pnpm-lock.yaml` or `yarn.lock`, from [OSV](https://osv.dev) | Free |
-| Fintech | Money records read without an ownership check; webhooks without a signature check; balance updates outside a transaction; BVN/NIN in logs; weak or leaked OTPs; transfers without an idempotency key | Core and above |
+| Pack | Rules | Languages | Plan |
+|---|---|---|---|
+| Secrets | Paystack / Flutterwave / Monnify secret keys; private keys, AWS, GitHub, Slack, Google and Fortis keys; random-looking hard-coded secrets, including unquoted values in `.env`, `.properties` and YAML files | Any | Free |
+| Dependencies | Known vulnerabilities, from [OSV](https://osv.dev) | See below | Free |
+| Fintech | Money records read without an ownership check; webhooks without a signature check; balance updates outside a transaction; BVN/NIN in logs; weak or leaked OTPs; transfers without an idempotency key | JavaScript and TypeScript only, so far | Core and above |
+
+`fortis test` and `fortis access` test a running app over HTTP, so they work whatever the backend is written in.
 
 Run `fortis rules` for the list and `fortis explain FX-OWN-001` for why a rule matters and how to fix it.
 
@@ -46,7 +48,7 @@ Run `fortis rules` for the list and `fortis explain FX-OWN-001` for why a rule m
 
 | Language | Files |
 |---|---|
-| JavaScript | `package-lock.json`, `yarn.lock`, `pnpm-lock.yaml` |
+| JavaScript | `package-lock.json`, `npm-shrinkwrap.json`, `yarn.lock`, `pnpm-lock.yaml` |
 | PHP | `composer.lock` |
 | Python | `poetry.lock`, `uv.lock`, `Pipfile.lock`, or a pinned `requirements.txt` |
 | Java / Kotlin | `gradle.lockfile`, `pom.xml`, or an SBOM |
@@ -54,7 +56,7 @@ Run `fortis rules` for the list and `fortis explain FX-OWN-001` for why a rule m
 | .NET | `packages.lock.json` |
 | Ruby | `Gemfile.lock` |
 
-Files are found in any folder of the repository. Dev and test dependencies are left out where the file marks them (`yarn.lock`, recent `pnpm-lock.yaml` and `uv.lock` don't, so those are checked too). If a project has no lockfile, the scan says so.
+Files are found in any folder of the repository. Dev and test dependencies are left out wherever they can be told apart (`uv.lock` and yarn workspaces can't, so those are all checked). Findings point at the package's line in the file. If a project has no lockfile, the scan says so.
 
 **Maven needs an SBOM for full coverage.** `pom.xml` lists only direct dependencies, and a parent POM or BOM often decides their versions, so Fortis reports how many it could check. To cover everything, including transitive dependencies, have Maven list them and pass the result to Fortis. `fortis ci init` adds this step for you on GitHub Actions.
 
@@ -74,6 +76,7 @@ fortis scan --sbom target/bom.json
 | `fortis scan --ci` | Full scan for CI; findings it no longer sees are closed as fixed in the dashboard |
 | `fortis scan --fail-on high` | Block at high or above (default: critical) |
 | `fortis scan --json` / `--no-upload` / `--offline` | Machine output (secrets masked, like every other output), keep results local, or skip the network |
+| `fortis scan --sbom bom.json` | Also check a CycloneDX JSON SBOM |
 | `fortis login <key>` / `fortis logout` | Save or remove the key for this machine |
 | `fortis whoami` | Project, workspace and plan for the key |
 
@@ -84,9 +87,9 @@ If the dependency check can't finish (OSV is down, or a lockfile can't be read),
 ## In CI
 
 ```yaml
-- uses: Divine-mercyx/fortis@cli-v0.1.0-beta.6
+- uses: Divine-mercyx/fortis@cli-v0.1.0-beta.9
   with:
-    version: 0.1.0-beta.6
+    version: 0.1.0-beta.9
 - run: fortis scan --ci
   env:
     FORTIS_KEY: ${{ secrets.FORTIS_KEY }}
@@ -224,6 +227,12 @@ the version in `package.json`. Publish it with `npm publish fortis-watchdog-<ver
 Keys are read from `FORTIS_KEY`, then from `~/.config/fortis/credentials.json` (written by `fortis login`, mode 0600).
 
 ## Changelog
+
+**0.1.0-beta.9**
+- The dependency check now covers PHP, Python, Java, Go, .NET and Ruby as well as JavaScript, in any folder of the repository, and reads CycloneDX SBOMs with `--sbom`.
+- Standalone binaries, a Docker image and a GitHub Action, so non-JavaScript teams don't need Node. `fortis ci init` uses them.
+- More secrets are caught in non-JavaScript code and config files, including unquoted values in `.env`, `.properties` and YAML.
+- When the dependency check can't finish, its open findings stay open instead of being marked fixed. A full scan that finds no files now fails instead of passing.
 
 **0.1.0-beta.8**
 - Any language: the dependency check reads PHP, Python, Java (Gradle, `pom.xml`, or a CycloneDX SBOM with `--sbom`), Go, .NET and Ruby lockfiles as well as npm, pnpm and Yarn, anywhere in a monorepo, and says which projects have no lockfile. Secret scanning understands PHP, Go, Java/Spring, Python and `.env`/`.properties`/YAML config. (John Imeobong)

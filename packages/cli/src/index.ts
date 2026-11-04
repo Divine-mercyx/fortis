@@ -126,6 +126,7 @@ async function cmdScan(flags: Flags): Promise<number> {
     notes.push('No Fortis key found, so only the free secrets and dependency checks ran. Add a key for the fintech rule pack.');
   }
 
+  const sbom = str(flags.sbom);
   // The hook passes --stdin: git lists the refs being pushed there, so a first push covers every new commit.
   let pushed: PushedRef[] | undefined;
   if (prePush && flags.stdin && !process.stdin.isTTY) {
@@ -135,7 +136,7 @@ async function cmdScan(flags: Flags): Promise<number> {
       /* no stdin: fall back to comparing with the remote branch */
     }
   }
-  const result = await runScan({ root, scope: prePush ? 'changed' : 'full', packs, ignore: config.ignore, offline, pushed });
+  const result = await runScan({ root, scope: prePush ? 'changed' : 'full', packs, ignore: config.ignore, offline, pushed, sbom });
   result.notes.unshift(...notes);
 
   // Git errors look like an empty repository. Passing here would also close every open finding.
@@ -632,7 +633,7 @@ async function cmdInit(flags: Flags): Promise<number> {
   log('');
   const has = (f: string) => existsSync(join(root, f));
   const runScript = has('pnpm-lock.yaml') ? 'pnpm run security:scan' : has('yarn.lock') ? 'yarn security:scan' : has('bun.lock') || has('bun.lockb') ? 'bun run security:scan' : 'npm run security:scan';
-  log(c.grey(`Next: push as usual. In CI, set FORTIS_KEY and run: ${runScript}`));
+  log(c.grey(`Next: push as usual. For CI, run: fortis ci init${existsSync(pkgPath) ? ` (or set FORTIS_KEY and run: ${runScript})` : ''}`));
   return 0;
 }
 

@@ -1,6 +1,6 @@
 import { globToRegExp } from '../files';
 import { parseNpmLock, parsePnpmLock, parseYarnLock, type LockedPackage } from './js-lockfiles';
-import { TEST_PATH } from './types';
+import { lineOf, TEST_PATH } from './types';
 
 /*
  * Reads the exact package versions a project uses, for any language. Each format gets a small
@@ -13,7 +13,7 @@ export type Locked = { name: string; version: string; ecosystem: Ecosystem; dev:
 /** `skipped` counts declared packages with no exact version to check. */
 export type Parsed = { packages: Locked[]; skipped: number };
 
-const pkg = (ecosystem: Ecosystem, name: string, version: string, dev = false): Locked => ({ name, version, ecosystem, dev });
+const pkg = (ecosystem: Ecosystem, name: string, version: string, dev = false, line = 0): Locked => ({ name, version, ecosystem, dev, line });
 
 /*
  * npm, pnpm and Yarn: the readers in js-lockfiles.ts. They are tested against real lockfiles from
@@ -55,13 +55,15 @@ const pypiName = (name: string) => name.toLowerCase().replace(/[-_.]+/g, '-');
 /** poetry.lock and uv.lock: `[[package]]` tables. uv lists the project itself with an editable or virtual source. */
 function tomlPythonLock(text: string): Parsed {
   const packages: Locked[] = [];
-  for (const block of text.split(/^\[\[package\]\]\s*$/m).slice(1)) {
+  const heads = [...text.matchAll(/^\[\[package\]\]\s*$/gm)];
+  heads.forEach((head, i) => {
+    const block = text.slice(head.index + head[0].length, heads[i + 1]?.index ?? text.length);
     const table = block.split(/^\[\[?(?!package\.)/m)[0]!;
     const name = /^name\s*=\s*"([^"]+)"/m.exec(table)?.[1];
     const version = /^version\s*=\s*"([^"]+)"/m.exec(table)?.[1];
-    if (!name || !version || /^source\s*=\s*\{\s*(editable|virtual)\b/m.test(table)) continue;
-    packages.push(pkg('PyPI', pypiName(name), version, /^category\s*=\s*"dev"/m.test(table)));
-  }
+    if (!name || !version || /^source\s*=\s*\{\s*(editable|virtual)\b/m.test(table)) return;
+    packages.push(pkg('PyPI', pypiName(name), version, /^category\s*=\s*"dev"/m.test(table), lineOf(text, head.index)));
+  });
   return { packages, skipped: 0 };
 }
 
@@ -84,12 +86,12 @@ function requirementsTxt(text: string, file: string): Parsed {
   const dev = /dev|test/i.test(file.slice(file.lastIndexOf('/') + 1));
   const packages: Locked[] = [];
   let skipped = 0;
-  for (const raw of text.split(/\r?\n/)) {
+  for (const [i, raw] of text.split(/\r?\n/).entries()) {
     const line = raw.replace(/\s#.*$/, '').trim();
     // Options, includes, comments and the `--hash` lines that continue a requirement.
     if (!line || line.startsWith('#') || line.startsWith('-') || line.startsWith('\\')) continue;
     const m = /^([A-Za-z0-9][A-Za-z0-9._-]*)(?:\[[^\]]*\])?\s*===?\s*([^\s;,\\]+)\s*(?:[;\\].*)?$/.exec(line);
-    if (m) packages.push(pkg('PyPI', pypiName(m[1]!), m[2]!, dev));
+    if (m) packages.push(pkg('PyPI', pypiName(m[1]!), m[2]!, dev, i + 1));
     else if (/^[A-Za-z0-9]/.test(line) && !line.includes('://')) skipped++;
   }
   return { packages, skipped };
@@ -98,11 +100,11 @@ function requirementsTxt(text: string, file: string): Parsed {
 /** `group:name:version=compileClasspath,runtimeClasspath`. */
 function gradleLock(text: string): Parsed {
   const packages: Locked[] = [];
-  for (const line of text.split(/\r?\n/)) {
+  for (const [i, line] of text.split(/\r?\n/).entries()) {
     const m = /^([^:#\s]+):([^:\s]+):([^=\s]+)=(.*)$/.exec(line.trim());
     if (!m) continue;
     const dev = m[4]!.split(',').every((conf) => /^test/i.test(conf.trim()));
-    packages.push(pkg('Maven', `${m[1]}:${m[2]}`, m[3]!, dev));
+    packages.push(pkg('Maven', `${m[1]}:${m[2]}`, m[3]!, dev, i + 1));
   }
   return { packages, skipped: 0 };
 }
@@ -146,12 +148,12 @@ function pomXml(text: string): Parsed {
 function goMod(text: string): Parsed {
   const packages: Locked[] = [];
   let inRequire = false;
-  for (const raw of text.split(/\r?\n/)) {
+  for (const [i, raw] of text.split(/\r?\n/).entries()) {
     const line = raw.replace(/\/\/.*$/, '').trim();
     if (/^require\s*\($/.test(line)) { inRequire = true; continue; }
     if (line === ')') { inRequire = false; continue; }
     const m = (inRequire ? /^(\S+)\s+(v\S+)$/ : /^require\s+(\S+)\s+(v\S+)$/).exec(line);
-    if (m) packages.push(pkg('Go', m[1]!, m[2]!.replace(/\+incompatible$/, '')));
+    if (m) packages.push(pkg('Go', m[1]!, m[2]!.replace(/\+incompatible$/, ''), false, i + 1));
   }
   return { packages, skipped: 0 };
 }
@@ -171,10 +173,10 @@ function nugetLock(text: string): Parsed {
 function gemfileLock(text: string): Parsed {
   const packages: Locked[] = [];
   let inGem = false;
-  for (const line of text.split(/\r?\n/)) {
+  for (const [i, line] of text.split(/\r?\n/).entries()) {
     if (/^\S/.test(line)) inGem = line === 'GEM';
     const m = inGem ? /^ {4}(\S+) \(([^)-]+)(?:-[^)]*)?\)$/.exec(line) : null;
-    if (m) packages.push(pkg('RubyGems', m[1]!, m[2]!));
+    if (m) packages.push(pkg('RubyGems', m[1]!, m[2]!, false, i + 1));
   }
   return { packages, skipped: 0 };
 }

@@ -169,3 +169,62 @@ describe('finding lockfiles', () => {
     expect(notes[0]).toContain('build.gradle');
   });
 });
+
+describe('production packages are never marked dev by mistake', () => {
+  const lock = (importers: string, snapshots: string, packages: string[]) => [
+    "lockfileVersion: '9.0'", '', 'importers:', '', importers, '', 'packages:', '',
+    ...packages.map((p) => `  ${p}:\n    resolution: {integrity: x}\n`), 'snapshots:', '', snapshots, '',
+  ].join('\n');
+  const dep = (group: string, name: string, version: string) => `    ${group}:\n      ${name}:\n        specifier: ^1\n        version: ${version}`;
+  const devOf = (file: string, text: string, manifest?: unknown) =>
+    Object.fromEntries(parseLockfile(file, text, manifest === undefined ? undefined : JSON.stringify(manifest)).packages.map((p) => [`${p.name}@${p.version}`, p.dev]));
+
+  it('pnpm v9: follows chains and peer suffixes, and marks what only dev tools need', () => {
+    const text = lock(
+      `  .:\n${dep('dependencies', 'express', '4.0.0(peer@1.0.0)')}\n${dep('devDependencies', 'vitest', '3.0.0')}`,
+      [
+        "  express@4.0.0(peer@1.0.0):\n    dependencies:\n      qs: 6.0.0\n      '@scope/deep': 2.0.0",
+        '  qs@6.0.0: {}',
+        "  '@scope/deep@2.0.0': {}",
+        '  vitest@3.0.0:\n    dependencies:\n      tinypool: 1.1.1\n      qs: 6.0.0',
+        '  tinypool@1.1.1: {}',
+      ].join('\n\n'),
+      ['express@4.0.0', 'qs@6.0.0', "'@scope/deep@2.0.0'", 'vitest@3.0.0', 'tinypool@1.1.1'],
+    );
+    expect(devOf('pnpm-lock.yaml', text)).toEqual({
+      'express@4.0.0': false, 'qs@6.0.0': false, '@scope/deep@2.0.0': false, 'vitest@3.0.0': true, 'tinypool@1.1.1': true,
+    });
+  });
+
+  it('pnpm v9: an aliased dependency is production, at the root and deeper in the graph', () => {
+    const text = lock(
+      `  .:\n${dep('dependencies', 'alias-name', 'real-name@1.0.0')}\n      cliui:\n        specifier: ^8\n        version: 8.0.0\n${dep('devDependencies', 'vitest', '3.0.0')}`,
+      '  real-name@1.0.0: {}\n\n  cliui@8.0.0:\n    dependencies:\n      string-width-cjs: string-width@4.2.3\n\n  string-width@4.2.3: {}\n\n  vitest@3.0.0: {}',
+      ['real-name@1.0.0', 'cliui@8.0.0', 'string-width@4.2.3', 'vitest@3.0.0'],
+    );
+    expect(devOf('pnpm-lock.yaml', text)).toEqual({ 'real-name@1.0.0': false, 'cliui@8.0.0': false, 'string-width@4.2.3': false, 'vitest@3.0.0': true });
+  });
+
+  it('pnpm v9: a package any workspace needs at run time is production', () => {
+    const text = lock(`  apps/api:\n${dep('dependencies', 'zod', '3.0.0')}\n\n  apps/web:\n${dep('devDependencies', 'zod', '3.0.0')}`, '  zod@3.0.0: {}', ['zod@3.0.0']);
+    expect(devOf('pnpm-lock.yaml', text)).toEqual({ 'zod@3.0.0': false });
+  });
+
+  it('yarn workspace root: its packages have their own dependencies, so nothing is marked dev', () => {
+    const text = '# yarn lockfile v1\n\nlodash@^4.17.0:\n  version "4.17.15"\n\nminimist@^1.2.0:\n  version "1.2.5"\n';
+    expect(devOf('yarn.lock', text, { workspaces: ['apps/*'], dependencies: { lodash: '^4.17.0' } })).toEqual({ 'lodash@4.17.15': false, 'minimist@1.2.5': false });
+    expect(devOf('yarn.lock', text, { dependencies: { lodash: '^4.17.0' } })).toEqual({ 'lodash@4.17.15': false, 'minimist@1.2.5': true });
+  });
+});
+
+describe('line numbers', () => {
+  it.each([
+    ['requirements.txt', '# deps\ndjango==3.2.0\n', 2],
+    ['poetry.lock', '# header\n\n[[package]]\nname = "django"\nversion = "3.2.0"\n', 3],
+    ['gradle.lockfile', '# generated\na:b:1.0=runtimeClasspath\n', 2],
+    ['go.mod', 'module x\n\nrequire a.b/c v1.0.0\n', 3],
+    ['Gemfile.lock', 'GEM\n  remote: x\n  specs:\n    rack (2.2.3)\n', 4],
+  ])('%s says which line a package is on', (file, text, line) => {
+    expect(parseLockfile(file, text).packages[0]!.line).toBe(line);
+  });
+});

@@ -202,9 +202,9 @@ describe('findings API', () => {
 describe('masking', () => {
   it.each([
     [`key = '${['sk', 'live', 'abcdefghijklmnop1234'].join('_')}'`, 'sk_live_••••••••1234'],
-    ['FLWSECK-abcdefghijklmnopqrstuvwx1234-X', 'FLWSECK-••••••••34-X'],
+    [['FLWSECK', 'abcdefghijklmnopqrstuvwx1234', 'X'].join('-'), 'FLWSECK-••••••••34-X'],
     ['bvn: 22123456789', 'bvn: ••••••••6789'],
-    ['-----BEGIN RSA PRIVATE KEY----- MIIE...', '[private key removed]'],
+    [['-----BEGIN RSA PRIVATE', 'KEY----- MIIE...'].join(' '), '[private key removed]'],
   ])('masks %s', (input, expected) => {
     expect(maskSnippet(input)).toContain(expected);
   });

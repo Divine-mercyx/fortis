@@ -3,11 +3,12 @@ import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'nod
 import { tmpdir } from 'node:os';
 import { delimiter, dirname, join } from 'node:path';
 
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { toUpload } from '../src/api';
 import { installHook } from '../src/hook';
 import { changedFiles, parsePushRefs } from '../src/git';
+import { printReport } from '../src/report';
 import { runScan } from '../src/scan';
 
 const PAYSTACK_LIVE = ['sk', 'live', 'a1B2c3D4e5F6g7H8i9J0k1L2m3N4'].join('_');
@@ -154,6 +155,27 @@ describe('runScan', () => {
     expect(r.notes.join()).toContain('OSV responded 503');
   });
 
+  it('says plainly when OSV cannot be reached', async () => {
+    const { dir } = repo({ 'requirements.txt': 'django==3.2.0\n' });
+    const offline: typeof fetch = async () => { throw new TypeError('fetch failed'); };
+    const r = await runScan({ root: dir, scope: 'full', packs: ['dependencies'], fetchImpl: offline });
+    expect(r.notes.join()).toContain('could not reach api.osv.dev');
+    expect(r.incompleteChecks).toEqual(['dependencies']);
+  });
+
+  it('does not call it a full pass when the dependency check did not finish', () => {
+    const shown = (incompleteChecks: 'dependencies'[]) => {
+      const write = vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
+      printReport({ detections: [], filesScanned: 1, packagesChecked: 0, durationMs: 1, notes: [], incompleteChecks }, { failOn: 'critical', prePush: false, packs: ['dependencies'] });
+      const out = write.mock.calls.map((c) => String(c[0])).join('');
+      write.mockRestore();
+      return out;
+    };
+    expect(shown([])).toContain('All checks passed');
+    expect(shown(['dependencies'])).toContain('did not finish');
+    expect(shown(['dependencies'])).not.toContain('All checks passed');
+  });
+
   it('survives a malformed lockfile and still checks the others', async () => {
     const asked: { name: string; ecosystem: string }[] = [];
     const { dir } = repo({ 'composer.lock': '{ not json', 'requirements.txt': 'django==3.2.0\n' });
@@ -206,14 +228,17 @@ describe('runScan', () => {
     g('push', '-q', '--no-verify', '-u', 'origin', 'main');
     writeFileSync(join(dir, 'src/app.php'), '<?php echo 1;\n');
     g('add', '-A');
+    const sha = (ref: string) => execFileSync('git', ['rev-parse', ref], { cwd: dir, encoding: 'utf8' }).trim();
+    // What the hook sees: the remote already has the commit before this one.
+    const pushed = () => parsePushRefs(`refs/heads/main ${sha('HEAD')} refs/heads/main ${sha('HEAD~1')}\n`);
     g('commit', '-q', '-m', 'code only');
-    await runScan({ root: dir, scope: 'changed', packs: ['dependencies'], fetchImpl: fakeOsv(asked) });
+    await runScan({ root: dir, scope: 'changed', packs: ['dependencies'], pushed: pushed(), fetchImpl: fakeOsv(asked) });
     expect(asked).toHaveLength(0);
 
     writeFileSync(join(dir, 'composer.lock'), JSON.stringify({ packages: [{ name: 'a/b', version: '2.0.0' }] }));
     g('add', '-A');
     g('commit', '-q', '-m', 'upgrade');
-    await runScan({ root: dir, scope: 'changed', packs: ['dependencies'], fetchImpl: fakeOsv(asked) });
+    await runScan({ root: dir, scope: 'changed', packs: ['dependencies'], pushed: pushed(), fetchImpl: fakeOsv(asked) });
     expect(asked).toEqual([{ name: 'a/b', ecosystem: 'Packagist' }]);
   });
 
@@ -276,6 +301,72 @@ describe('upload payload and hook', () => {
     expect(readFileSync(join(other, '.git/hooks/pre-push'), 'utf8')).toMatch(/npm test[\s\S]*fortis scan --pre-push/);
   });
 
+  it('writes a hook that needs no Node: the local copy first, then the installed binary', () => {
+    const { dir } = repo({ 'a.txt': 'x' });
+    installHook(dir);
+    const hook = readFileSync(join(dir, '.git/hooks/pre-push'), 'utf8');
+    expect(hook).not.toContain('else npx');
+    expect(hook.indexOf('node_modules/.bin/fortis')).toBeLessThan(hook.indexOf('command -v fortis'));
+  });
+
+  it('upgrades hooks that older versions wrote with npx, keeping anything else in them', () => {
+    const { dir } = repo({ 'a.txt': 'x' });
+    writeFileSync(join(dir, '.git/hooks/pre-push'), '#!/bin/sh\nnpm test\n\n# fortis-pre-push\nnpx --no-install fortis scan --pre-push || exit 1\n');
+    expect(installHook(dir).status).toBe('updated');
+    const hook = readFileSync(join(dir, '.git/hooks/pre-push'), 'utf8');
+    expect(hook).toContain('npm test');
+    expect(hook).not.toMatch(/^npx/m);
+    expect(hook).toContain('command -v fortis');
+    expect(installHook(dir).status).toBe('already');
+  });
+
+  it('upgrades the hook beta.5 wrote, whose last resort was npx', () => {
+    const { dir } = repo({ 'a.txt': 'x' });
+    writeFileSync(join(dir, '.git/hooks/pre-push'), [
+      '#!/bin/sh', '# fortis-pre-push', '# Installed by Fortis.',
+      'if [ -x ./node_modules/.bin/fortis ]; then ./node_modules/.bin/fortis scan --pre-push',
+      'elif command -v fortis >/dev/null 2>&1; then fortis scan --pre-push',
+      'else npx --no-install fortis scan --pre-push; fi', '',
+    ].join('\n'));
+    expect(installHook(dir).status).toBe('updated');
+    const hook = readFileSync(join(dir, '.git/hooks/pre-push'), 'utf8');
+    expect(hook).not.toContain('else npx');
+    expect(hook).toContain('command -v fortis');
+    expect(installHook(dir).status).toBe('already');
+  });
+
+  it('a failing scan still stops the push when the hook has other commands after it', () => {
+    const { dir } = repo({ 'a.txt': 'x' });
+    writeFileSync(join(dir, '.git/hooks/pre-push'), '#!/bin/sh\necho before\n');
+    installHook(dir);
+    const hookPath = join(dir, '.git/hooks/pre-push');
+    writeFileSync(hookPath, `${readFileSync(hookPath, 'utf8')}echo after\n`);
+    mkdirSync(join(dir, 'node_modules/.bin'), { recursive: true });
+    writeFileSync(join(dir, 'node_modules/.bin/fortis'), '#!/bin/sh\nexit 1\n', { mode: 0o755 });
+    const run = spawnSync('sh', [hookPath], { cwd: dir, encoding: 'utf8' });
+    expect(run.status).toBe(1);
+    expect(run.stdout).not.toContain('after');
+  });
+
+  it('the hook runs the installed binary, and a missing CLI stops the push with instructions', () => {
+    const { dir } = repo({ 'a.txt': 'x' });
+    installHook(dir);
+    const hookPath = join(dir, '.git/hooks/pre-push');
+    const sh = (path: string) => spawnSync('sh', [hookPath], { cwd: dir, encoding: 'utf8', env: { ...process.env, PATH: path } });
+    const shDir = dirname(execFileSync(process.platform === 'win32' ? 'where' : 'which', ['sh'], { encoding: 'utf8' }).split(/\r?\n/)[0]!);
+
+    const missing = sh(shDir);
+    expect(missing.status).toBe(1);
+    expect(missing.stderr).toContain('install.sh');
+
+    const bin = join(dir, 'fake-bin');
+    mkdirSync(bin);
+    writeFileSync(join(bin, 'fortis'), '#!/bin/sh\necho "ran: $*"\n', { mode: 0o755 });
+    const found = sh(`${bin}${delimiter}${shDir}`);
+    expect(found.stdout).toContain('ran: scan --pre-push');
+    expect(found.status).toBe(0);
+  });
+
   it('upgrades hooks from earlier versions to pass the pushed refs, keeping the user\'s own lines', () => {
     const OLD_RUN = 'if [ -x ./node_modules/.bin/fortis ]; then ./node_modules/.bin/fortis scan --pre-push\nelif command -v fortis >/dev/null 2>&1; then fortis scan --pre-push\nelse npx --no-install fortis scan --pre-push; fi';
     const { dir } = repo({ 'a.txt': 'x' });
@@ -301,7 +392,8 @@ describe('upload payload and hook', () => {
   it('hook says clearly when the CLI is not installed instead of failing with an npm error', () => {
     const { dir } = repo({ 'a.txt': 'x' });
     installHook(dir);
-    const r = spawnSync('sh', [join(dir, '.git/hooks/pre-push')], { cwd: dir, encoding: 'utf8', env: { PATH: '/usr/bin:/bin' }, input: '' });
+    const shDir = dirname(execFileSync(process.platform === 'win32' ? 'where' : 'which', ['sh'], { encoding: 'utf8' }).split(/\r?\n/)[0]!);
+    const r = spawnSync('sh', [join(dir, '.git/hooks/pre-push')], { cwd: dir, encoding: 'utf8', env: { ...process.env, PATH: shDir }, input: '' });
     expect(r.status).toBe(1);
     expect(r.stderr).toContain("Fortis: the CLI isn't installed in this repo");
   });

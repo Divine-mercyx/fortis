@@ -34,7 +34,7 @@ export function readLockfile(root: string): Lockfile | null {
   return null;
 }
 
-type Manifest = { dependencies?: Record<string, string>; optionalDependencies?: Record<string, string>; peerDependencies?: Record<string, string>; devDependencies?: Record<string, string> };
+type Manifest = { dependencies?: Record<string, string>; optionalDependencies?: Record<string, string>; peerDependencies?: Record<string, string>; devDependencies?: Record<string, string>; workspaces?: unknown };
 
 function readManifest(root: string): Manifest {
   try {
@@ -192,6 +192,9 @@ export function splitPnpmKey(key: string, v5: boolean): [string, string] | null 
   return [parts.join('/'), version];
 }
 
+/** A dependency's snapshot key. An aliased dependency's version is already the real `name@version`. */
+const pnpmRef = (name: string, version: string) => (/^@?[^@(]+@/.test(version) ? version : `${name}@${version}`);
+
 export function parsePnpmLock(text: string): LockedPackage[] {
   const all = lines(text);
   const secs = sections(all);
@@ -221,7 +224,7 @@ export function parsePnpmLock(text: string): LockedPackage[] {
     const line = listed.get(key.replace(/\(.*$/, ''));
     const kv = splitPnpmKey(key, false);
     if (!kv || line === undefined) continue;
-    const deps = [...childMap(body, 'dependencies'), ...childMap(body, 'optionalDependencies')].map(([n, v]) => `${n}@${v}`);
+    const deps = [...childMap(body, 'dependencies'), ...childMap(body, 'optionalDependencies')].map(([n, v]) => pnpmRef(n, v));
     nodes.set(key, { name: kv[0], version: kv[1], line, deps });
   }
   // Packages with no snapshot entry (or a lockfile without snapshots) still count.
@@ -240,7 +243,7 @@ export function parsePnpmLock(text: string): LockedPackage[] {
       for (let i = start + 1; i < body.length && body[i]!.indent > level; i++) {
         const [k, v] = keyValue(body[i]!.text);
         if (body[i]!.indent === level + 2) name = k;
-        else if (k === 'version' && name && !v.startsWith('link:')) prodRoots.push(`${name}@${v}`);
+        else if (k === 'version' && name && !v.startsWith('link:')) prodRoots.push(pnpmRef(name, v));
       }
     }
   }
@@ -286,7 +289,8 @@ export function parseYarnLock(text: string, manifest: Manifest = {}): LockedPack
     return byDescriptor.get(d) ?? (at > 0 ? byDescriptor.get(`${d.slice(0, at)}@npm:${d.slice(at + 1)}`) : undefined);
   };
   for (const n of nodes.values()) n.deps = n.deps.map((d) => resolve(d) ?? '').filter(Boolean);
-  const prodRoots = Object.entries({ ...manifest.dependencies, ...manifest.optionalDependencies, ...manifest.peerDependencies })
+  // A workspace root doesn't list its packages' dependencies, so walking from it would mark them dev.
+  const prodRoots = Object.entries(manifest.workspaces ? {} : { ...manifest.dependencies, ...manifest.optionalDependencies, ...manifest.peerDependencies })
     .map(([n, r]) => resolve(`${n}@${r}`) ?? '')
     .filter(Boolean);
   return classify(nodes, prodRoots);
