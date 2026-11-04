@@ -1,0 +1,2 @@
+django==4.2.0
+git+https://{{GH_TOKEN}}@github.com/acme/private.git  # @hit

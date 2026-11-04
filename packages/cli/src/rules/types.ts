@@ -23,8 +23,8 @@ export type ProjectContext = {
 
 export const emptyContext = (): ProjectContext => ({ idempotencyHelpers: new Set() });
 
-/** Test code, fixtures and mocks: fintech checks skip these (secret checks still run). */
-export const TEST_PATH = /(^|\/)(__tests__|__mocks__|tests?|spec|e2e|fixtures?|mocks?)\/|\.(test|spec|mock|mocks|fixture|stories)\.[cm]?[jt]sx?$/i;
+/** Test code, fixtures, mocks and generated migrations: fintech checks skip these (secret checks still run). */
+export const TEST_PATH = /(^|\/)(__tests__|__mocks__|tests?|spec|e2e|fixtures?|mocks?|migrations)\/|\.(test|spec|mock|mocks|fixture|stories)\.[cm]?[jt]sx?$|(^|\/)(test_[^/]*|[^/]*_test|conftest)\.py$/i;
 
 export type FileRule = {
   id: string;

@@ -1,6 +1,7 @@
 import { globToRegExp } from '../files';
 import { parseNpmLock, parsePnpmLock, parseYarnLock, type LockedPackage } from './js-lockfiles';
-import { lineOf, TEST_PATH } from './types';
+import { pipfileLock, pylockToml, pypiName, requirementsTxt, tomlPythonLock } from './python-lockfiles';
+import { TEST_PATH } from './types';
 
 /*
  * Reads the exact package versions a project uses, for any language. Each format gets a small
@@ -10,8 +11,8 @@ import { lineOf, TEST_PATH } from './types';
 export type Ecosystem = 'npm' | 'Packagist' | 'PyPI' | 'Maven' | 'Go' | 'NuGet' | 'RubyGems' | 'crates.io';
 /** `line`: where the package is in its lockfile (npm-family lockfiles), so findings point at it. */
 export type Locked = { name: string; version: string; ecosystem: Ecosystem; dev: boolean; line?: number };
-/** `skipped` counts declared packages with no exact version to check. */
-export type Parsed = { packages: Locked[]; skipped: number };
+/** `skipped` counts declared packages with no exact version to check. `directOnly`: the file doesn't list what those packages need. */
+export type Parsed = { packages: Locked[]; skipped: number; directOnly?: boolean };
 
 const pkg = (ecosystem: Ecosystem, name: string, version: string, dev = false, line = 0): Locked => ({ name, version, ecosystem, dev, line });
 
@@ -47,53 +48,6 @@ function composerLock(text: string): Parsed {
   };
   add(lock.packages, false);
   add(lock['packages-dev'], true);
-  return { packages, skipped };
-}
-
-const pypiName = (name: string) => name.toLowerCase().replace(/[-_.]+/g, '-');
-
-/** poetry.lock and uv.lock: `[[package]]` tables. uv lists the project itself with an editable or virtual source. */
-function tomlPythonLock(text: string): Parsed {
-  const packages: Locked[] = [];
-  const heads = [...text.matchAll(/^\[\[package\]\]\s*$/gm)];
-  heads.forEach((head, i) => {
-    const block = text.slice(head.index + head[0].length, heads[i + 1]?.index ?? text.length);
-    const table = block.split(/^\[\[?(?!package\.)/m)[0]!;
-    const name = /^name\s*=\s*"([^"]+)"/m.exec(table)?.[1];
-    const version = /^version\s*=\s*"([^"]+)"/m.exec(table)?.[1];
-    if (!name || !version || /^source\s*=\s*\{\s*(editable|virtual)\b/m.test(table)) return;
-    packages.push(pkg('PyPI', pypiName(name), version, /^category\s*=\s*"dev"/m.test(table), lineOf(text, head.index)));
-  });
-  return { packages, skipped: 0 };
-}
-
-function pipfileLock(text: string): Parsed {
-  const lock = JSON.parse(text) as { default?: Record<string, { version?: string }>; develop?: Record<string, { version?: string }> };
-  const packages: Locked[] = [];
-  let skipped = 0;
-  const add = (section: Record<string, { version?: string }> | undefined, dev: boolean) => {
-    for (const [name, meta] of Object.entries(section ?? {})) {
-      if (meta.version?.startsWith('==')) packages.push(pkg('PyPI', pypiName(name), meta.version.slice(2), dev));
-      else skipped++;
-    }
-  };
-  add(lock.default, false);
-  add(lock.develop, true);
-  return { packages, skipped };
-}
-
-function requirementsTxt(text: string, file: string): Parsed {
-  const dev = /dev|test/i.test(file.slice(file.lastIndexOf('/') + 1));
-  const packages: Locked[] = [];
-  let skipped = 0;
-  for (const [i, raw] of text.split(/\r?\n/).entries()) {
-    const line = raw.replace(/\s#.*$/, '').trim();
-    // Options, includes, comments and the `--hash` lines that continue a requirement.
-    if (!line || line.startsWith('#') || line.startsWith('-') || line.startsWith('\\')) continue;
-    const m = /^([A-Za-z0-9][A-Za-z0-9._-]*)(?:\[[^\]]*\])?\s*===?\s*([^\s;,\\]+)\s*(?:[;\\].*)?$/.exec(line);
-    if (m) packages.push(pkg('PyPI', pypiName(m[1]!), m[2]!, dev, i + 1));
-    else if (/^[A-Za-z0-9]/.test(line) && !line.includes('://')) skipped++;
-  }
   return { packages, skipped };
 }
 
@@ -218,17 +172,18 @@ export function cycloneDx(text: string): Parsed {
   return { packages, skipped };
 }
 
-/** `manifest`: the package.json beside the lockfile, which Yarn needs to tell dev-only packages apart. */
+/** `manifest`: the file beside the lockfile that lists what production needs (package.json for Yarn, pyproject.toml for Poetry). */
 type Format = { match: RegExp; ecosystem: Ecosystem; parse: (text: string, file: string, manifest?: string) => Parsed };
 
-const REQUIREMENTS = /(^|\/)requirements[-_.\w]*\.txt$|(^|\/)requirements\/[-_.\w]+\.txt$/;
+const REQUIREMENTS = /(^|\/)[-_.\w]*requirements[-_.\w]*\.txt$|(^|\/)requirements\/[-_.\w]+\.txt$|(^|\/)constraints[-_.\w]*\.txt$/;
 
 const FORMATS: Format[] = [
   { match: /(^|\/)(package-lock|npm-shrinkwrap)\.json$/, ecosystem: 'npm', parse: npmLock },
   { match: /(^|\/)yarn\.lock$/, ecosystem: 'npm', parse: yarnLock },
   { match: /(^|\/)pnpm-lock\.yaml$/, ecosystem: 'npm', parse: pnpmLock },
   { match: /(^|\/)composer\.lock$/, ecosystem: 'Packagist', parse: composerLock },
-  { match: /(^|\/)(poetry|uv)\.lock$/, ecosystem: 'PyPI', parse: tomlPythonLock },
+  { match: /(^|\/)(poetry|uv|pdm)\.lock$/, ecosystem: 'PyPI', parse: tomlPythonLock },
+  { match: /(^|\/)pylock(\.[-_\w]+)?\.toml$/, ecosystem: 'PyPI', parse: pylockToml },
   { match: /(^|\/)Pipfile\.lock$/, ecosystem: 'PyPI', parse: pipfileLock },
   { match: REQUIREMENTS, ecosystem: 'PyPI', parse: requirementsTxt },
   { match: /(^|\/)([\w-]+-)?gradle\.lockfile$/, ecosystem: 'Maven', parse: gradleLock },
@@ -239,12 +194,20 @@ const FORMATS: Format[] = [
 ];
 
 export const isPomXml = (path: string) => /(^|\/)pom\.xml$/.test(path);
+export const isRequirements = (path: string) => REQUIREMENTS.test(path);
+
+/** The file beside a lockfile that says what production needs, for formats that can't say themselves. */
+export function manifestFor(file: string): string | null {
+  if (/(^|\/)yarn\.lock$/.test(file)) return 'package.json';
+  if (/(^|\/)poetry\.lock$/.test(file)) return 'pyproject.toml';
+  return null;
+}
 
 /** Project files that mean an ecosystem is in use, and how to get a lockfile Fortis can read. */
 const MANIFESTS: { match: RegExp; ecosystem: Ecosystem; label: string; hint: string }[] = [
   { match: /(^|\/)package\.json$/, ecosystem: 'npm', label: 'package.json', hint: 'commit package-lock.json, yarn.lock or pnpm-lock.yaml (Bun lockfiles are not read yet)' },
   { match: /(^|\/)composer\.json$/, ecosystem: 'Packagist', label: 'composer.json', hint: 'commit composer.lock' },
-  { match: /(^|\/)(pyproject\.toml|Pipfile|setup\.py)$/, ecosystem: 'PyPI', label: 'Python project files', hint: 'commit poetry.lock, uv.lock, Pipfile.lock or a pinned requirements.txt' },
+  { match: /(^|\/)(pyproject\.toml|Pipfile|setup\.py|setup\.cfg)$/, ecosystem: 'PyPI', label: 'Python project files', hint: 'run uv lock, poetry lock or pip-compile and commit the result, or pass --sbom' },
   { match: /(^|\/)build\.gradle(\.kts)?$/, ecosystem: 'Maven', label: 'build.gradle', hint: 'turn on Gradle dependency locking, or pass --sbom' },
   { match: /\.csproj$/, ecosystem: 'NuGet', label: '.csproj files', hint: 'set RestorePackagesWithLockFile, or pass --sbom' },
   { match: /(^|\/)Gemfile$/, ecosystem: 'RubyGems', label: 'Gemfile', hint: 'commit Gemfile.lock' },
@@ -262,7 +225,7 @@ export function findLockfiles(paths: string[], ignore: string[] = []): string[] 
   const files = relevant(paths, ignore).filter((p) => FORMATS.some((f) => f.match.test(p)));
   // A real lock describes the same project more completely than a requirements file beside it.
   const projectDir = (p: string) => p.replace(/requirements\/[^/]+$|[^/]+$/, '');
-  const pythonLocks = new Set(files.filter((p) => /(^|\/)(poetry\.lock|uv\.lock|Pipfile\.lock)$/.test(p)).map(projectDir));
+  const pythonLocks = new Set(files.filter((p) => /(^|\/)(poetry\.lock|uv\.lock|pdm\.lock|pylock(\.[-_\w]+)?\.toml|Pipfile\.lock)$/.test(p)).map(projectDir));
   return files.filter((p) => !REQUIREMENTS.test(p) || !pythonLocks.has(projectDir(p)));
 }
 
