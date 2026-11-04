@@ -3,12 +3,14 @@ import { join } from 'node:path';
 import { execFileSync } from 'node:child_process';
 
 const MARKER = '# fortis-pre-push';
-/** Finds the CLI wherever it was installed: in this project (npm, pnpm, yarn), or globally (any language). */
+/** Finds the CLI wherever it was installed: in this project (npm, pnpm, yarn, Yarn Plug'n'Play), or globally (any language). */
 // --stdin: git writes the refs being pushed to the hook's stdin; the CLI reads them so a first
 // push (new branch, empty remote) checks every new commit, not just the last one.
 const RUN = `if [ -x ./node_modules/.bin/fortis ]; then ./node_modules/.bin/fortis scan --pre-push --stdin
+elif [ -f ./.pnp.cjs ] && command -v yarn >/dev/null 2>&1; then yarn fortis scan --pre-push --stdin
 elif command -v fortis >/dev/null 2>&1; then fortis scan --pre-push --stdin
-else npx --no-install fortis scan --pre-push --stdin; fi`;
+elif npx --no-install fortis --version >/dev/null 2>&1; then npx --no-install fortis scan --pre-push --stdin
+else echo "Fortis: the CLI isn't installed in this repo. Run: npm i -D fortis-watchdog (or skip once: git push --no-verify)" >&2; exit 1; fi`;
 
 const HOOK = `#!/bin/sh
 ${MARKER}
@@ -33,7 +35,7 @@ export function installHook(root: string): { path: string; status: 'installed' |
   if (existsSync(path)) {
     const current = readFileSync(path, 'utf8');
     if (current.includes(MARKER)) {
-      if (current.includes('scan --pre-push --stdin')) return { path, status: 'already' };
+      if (current.includes(RUN) || current.includes(RUN.replace(/\n/g, '\n  '))) return { path, status: 'already' };
       // A hook from an earlier version: swap in the current Fortis lines, keep everything else.
       const ours = current.startsWith(`#!/bin/sh\n${MARKER}`);
       const start = current.indexOf(MARKER);

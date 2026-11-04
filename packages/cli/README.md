@@ -162,6 +162,11 @@ Keys are read from `FORTIS_KEY`, then from `~/.config/fortis/credentials.json` (
 
 ## Changelog
 
+**0.1.0-beta.8**
+- The first push of a new repository or branch checks every commit being pushed, not only the last one. Before this, a key leaked in an earlier commit got through on a first push.
+- The git hook works with Yarn Plug'n'Play, and says clearly when the CLI isn't installed instead of failing with an npm error.
+- `fortis init` upgrades a hook installed by an earlier version (your own lines in the hook are kept), and its CI hint matches your package manager.
+
 **0.1.0-beta.7**
 - The dependency check reads `pnpm-lock.yaml` (v5, v6 and v9, workspaces included) and `yarn.lock` (Yarn 1 and Yarn 2+), as well as `package-lock.json`. Dev-only packages are still skipped by default.
 - Dependency findings point at the lockfile and line where the package appears.
