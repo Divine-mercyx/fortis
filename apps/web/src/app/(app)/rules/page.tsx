@@ -28,8 +28,8 @@ function HealthLine({ h }: { h?: Health }) {
 }
 
 const PACKS: { id: RulePack; name: string; icon: typeof Key; text: string }[] = [
-  { id: 'fintech', name: 'Fintech rule pack', icon: Bank, text: 'Checks written for money-moving code: payment keys, transfers, wallets, webhooks, KYC data and OTPs.' },
-  { id: 'secrets', name: 'Secrets', icon: Key, text: 'API keys, tokens and private keys committed to the repository.' },
+  { id: 'fintech', name: 'Fintech rule pack', icon: Bank, text: 'Checks written for money-moving code: transfers, wallets, webhooks, KYC data and OTPs.' },
+  { id: 'secrets', name: 'Secrets', icon: Key, text: 'API keys, tokens and private keys committed to the repository, including Paystack, Flutterwave and Monnify secret keys.' },
   { id: 'dependencies', name: 'Dependencies', icon: Layers, text: 'Known vulnerabilities in the open-source packages your project uses.' },
 ];
 

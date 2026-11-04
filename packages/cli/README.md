@@ -12,9 +12,9 @@ git push                       # the pre-push hook checks what you're pushing
 
 | Pack | Rules | Plan |
 |---|---|---|
-| Secrets | Private keys, AWS, GitHub, Slack, Google and Fortis keys; random-looking hard-coded secrets | Free |
+| Secrets | Paystack, Flutterwave and Monnify secret keys; private keys, AWS, GitHub, Slack, Google and Fortis keys; random-looking hard-coded secrets | Free |
 | Dependencies | Known vulnerabilities in `package-lock.json`, `pnpm-lock.yaml` or `yarn.lock`, from [OSV](https://osv.dev) | Free |
-| Fintech | Paystack / Flutterwave / Monnify secret keys; money records read without an ownership check; webhooks without a signature check; balance updates outside a transaction; BVN/NIN in logs; weak or leaked OTPs; transfers without an idempotency key | Core and above |
+| Fintech | Money records read without an ownership check; webhooks without a signature check; balance updates outside a transaction; BVN/NIN in logs; weak or leaked OTPs; transfers without an idempotency key | Core and above |
 
 Run `npx fortis rules` for the list and `npx fortis explain FX-OWN-001` for why a rule matters and how to fix it.
 
@@ -26,7 +26,7 @@ Run `npx fortis rules` for the list and `npx fortis explain FX-OWN-001` for why 
 | `fortis scan --pre-push` | Checks only the files in the commits being pushed (the hook runs this) |
 | `fortis scan --ci` | Full scan for CI; findings it no longer sees are closed as fixed in the dashboard |
 | `fortis scan --fail-on high` | Block at high or above (default: critical) |
-| `fortis scan --json` / `--no-upload` / `--offline` | Machine output, keep results local, or skip the network |
+| `fortis scan --json` / `--no-upload` / `--offline` | Machine output (secrets masked, like every other output), keep results local, or skip the network |
 | `fortis login <key>` / `fortis logout` | Save or remove the key for this machine |
 | `fortis whoami` | Project, workspace and plan for the key |
 
@@ -147,6 +147,9 @@ Then on npmjs.com: package → Settings → Trusted publishing → GitHub Action
 `packages/cli/package.json` and push a matching tag (for example `cli-v0.1.0`); GitHub Actions
 tests, builds and publishes with provenance. Versions with a pre-release suffix go to the `beta` tag.
 
+Publishing a tarball by hand: `npm pack` rebuilds `dist/` first, so the packed CLI always reports
+the version in `package.json`. Publish it with `npm publish fortis-watchdog-<version>.tgz --tag beta`.
+
 ## Configuration
 
 `.fortis.json` (committed; never contains the key):
@@ -156,3 +159,18 @@ tests, builds and publishes with provenance. Versions with a pre-release suffix 
 ```
 
 Keys are read from `FORTIS_KEY`, then from `~/.config/fortis/credentials.json` (written by `fortis login`, mode 0600).
+
+## Changelog
+
+**0.1.0-beta.7**
+- The dependency check reads `pnpm-lock.yaml` (v5, v6 and v9, workspaces included) and `yarn.lock` (Yarn 1 and Yarn 2+), as well as `package-lock.json`. Dev-only packages are still skipped by default.
+- Dependency findings point at the lockfile and line where the package appears.
+- A scan where the dependency check could not run says "Nothing found · the dependency check did not run" instead of "All checks passed", and an unreachable OSV is reported as "could not reach api.osv.dev".
+
+**0.1.0-beta.6**
+- Paystack, Flutterwave and Monnify secret keys are caught on the free plan. Before this they were only reported on paid plans.
+- `fortis scan --json` masks secrets in flagged lines, like every other output.
+- A full scan with no lockfile says the dependency check was skipped instead of reporting a clean result.
+
+**0.1.0-beta.5**
+- Published from a stale build, so it reports itself as `0.1.0-beta.4`. Upgrade to beta.6 or later.
