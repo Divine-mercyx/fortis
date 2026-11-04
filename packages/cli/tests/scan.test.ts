@@ -7,7 +7,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 
 import { toUpload } from '../src/api';
 import { installHook } from '../src/hook';
-import { missingLockfileNote, runScan } from '../src/scan';
+import { runScan } from '../src/scan';
 
 const PAYSTACK_LIVE = ['sk', 'live', 'a1B2c3D4e5F6g7H8i9J0k1L2m3N4'].join('_');
 const dirs: string[] = [];
@@ -54,14 +54,17 @@ describe('runScan', () => {
     expect(r.detections.map((d) => d.ruleId)).toEqual(['FX-SEC-001']);
   });
 
-  it('says when the dependency check could not run instead of reporting a clean result', () => {
-    const none = repo({ 'package.json': '{}' }).dir;
-    expect(missingLockfileNote(none)).toMatch(/no package-lock\.json/);
-    const pnpm = repo({ 'package.json': '{}', 'pnpm-lock.yaml': "lockfileVersion: '9.0'\n" }).dir;
-    expect(missingLockfileNote(pnpm)).toMatch(/pnpm-lock\.yaml is not supported/);
-    const npm = repo({ 'package.json': '{}', 'package-lock.json': '{}' }).dir;
-    expect(missingLockfileNote(npm)).toBeNull();
-    expect(missingLockfileNote(repo({ 'main.go': 'package main\n' }).dir)).toBeNull();
+  it('says when the dependency check could not run instead of reporting a clean result', async () => {
+    const scan = (files: Record<string, string>) => runScan({ root: repo(files).dir, scope: 'full', packs: ['dependencies'], fetchImpl: fakeOsv([]) });
+    const none = await scan({ 'package.json': '{}' });
+    expect(none.notes.join()).toContain('commit package-lock.json');
+    expect(none.incompleteChecks).toEqual(['dependencies']);
+    for (const lockfile of ['package-lock.json', 'pnpm-lock.yaml', 'yarn.lock']) {
+      const locked = await scan({ 'package.json': '{}', [lockfile]: lockfile.endsWith('.json') ? '{}' : '' });
+      expect(locked.notes.join()).not.toContain('no lockfile');
+      expect(locked.incompleteChecks).toEqual([]);
+    }
+    expect((await scan({ 'main.go': 'package main\n' })).notes.join()).not.toContain('no lockfile');
   });
 
   it('pre-push scope checks only files changed since the last commit', async () => {
@@ -222,7 +225,7 @@ describe('runScan', () => {
       '.venv/lib/x.py': `k = '${PAYSTACK_LIVE}'\n`,
       'src/config.py': `k = '${PAYSTACK_LIVE}'\n`,
     });
-    const r = await runScan({ root: dir, scope: 'full', packs: ['fintech'], offline: true });
+    const r = await runScan({ root: dir, scope: 'full', packs: ['secrets'], offline: true });
     expect(r.detections.map((d) => d.file)).toEqual(['src/config.py']);
   });
 });
@@ -279,6 +282,34 @@ describe('upload payload and hook', () => {
     expect(hook).not.toContain('npx');
     expect(hook).toContain('command -v fortis');
     expect(installHook(dir).status).toBe('already');
+  });
+
+  it('upgrades the hook beta.5 wrote, whose last resort was npx', () => {
+    const { dir } = repo({ 'a.txt': 'x' });
+    writeFileSync(join(dir, '.git/hooks/pre-push'), [
+      '#!/bin/sh', '# fortis-pre-push', '# Installed by Fortis.',
+      'if [ -x ./node_modules/.bin/fortis ]; then ./node_modules/.bin/fortis scan --pre-push',
+      'elif command -v fortis >/dev/null 2>&1; then fortis scan --pre-push',
+      'else npx --no-install fortis scan --pre-push; fi', '',
+    ].join('\n'));
+    expect(installHook(dir).status).toBe('upgraded');
+    const hook = readFileSync(join(dir, '.git/hooks/pre-push'), 'utf8');
+    expect(hook).not.toContain('npx');
+    expect(hook).toContain('command -v fortis');
+    expect(installHook(dir).status).toBe('already');
+  });
+
+  it('a failing scan still stops the push when the hook has other commands after it', () => {
+    const { dir } = repo({ 'a.txt': 'x' });
+    writeFileSync(join(dir, '.git/hooks/pre-push'), '#!/bin/sh\necho before\n');
+    installHook(dir);
+    const hookPath = join(dir, '.git/hooks/pre-push');
+    writeFileSync(hookPath, `${readFileSync(hookPath, 'utf8')}echo after\n`);
+    mkdirSync(join(dir, 'node_modules/.bin'), { recursive: true });
+    writeFileSync(join(dir, 'node_modules/.bin/fortis'), '#!/bin/sh\nexit 1\n', { mode: 0o755 });
+    const run = spawnSync('sh', [hookPath], { cwd: dir, encoding: 'utf8' });
+    expect(run.status).toBe(1);
+    expect(run.stdout).not.toContain('after');
   });
 
   it('the hook runs the installed binary, and a missing CLI stops the push with instructions', () => {

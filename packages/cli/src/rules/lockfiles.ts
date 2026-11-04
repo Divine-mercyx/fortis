@@ -52,7 +52,74 @@ function yarnLock(text: string): Parsed {
   return { packages, skipped: 0 };
 }
 
-/** Lockfile v6+ keys look like `name@1.2.3(peer@1)`, older ones like `/name/1.2.3`. v9 has no dev marker here. */
+const unquote = (s: string) => s.trim().replace(/^['"]|['"]$/g, '');
+const withoutPeers = (id: string) => id.replace(/\(.*$/, '');
+
+/** A dependency's snapshot key. The version may instead be a link, or an alias's real `name@version`. */
+function pnpmRef(name: string, version: string): string | null {
+  if (version.startsWith('link:') || version.startsWith('workspace:')) return null;
+  return /^@?[^@(]+@/.test(version) ? version : `${name}@${version}`;
+}
+
+/**
+ * Lockfile v9 doesn't mark dev packages, so walk from what each workspace package needs at run
+ * time. Returns the `name@version`s reached, or null if this lockfile can't say. A dev package
+ * is only left out when we're sure, because leaving one out hides its vulnerabilities.
+ */
+function pnpmProduction(text: string): Set<string> | null {
+  const RUNTIME = new Set(['dependencies', 'optionalDependencies']);
+  const roots: string[] = [];
+  const edges = new Map<string, string[]>();
+  let section = '';
+  let group = '';
+  let dep = '';
+  let snapshot: string[] | null = null;
+  for (const line of text.split(/\r?\n/)) {
+    if (/^\S/.test(line)) {
+      section = line.replace(/:.*$/, '');
+      continue;
+    }
+    if (section === 'importers') {
+      const heading = /^ {4}(\w+):\s*$/.exec(line);
+      const name = /^ {6}(\S.*?):\s*$/.exec(line);
+      const version = /^ {8}version:\s*(.+)$/.exec(line);
+      if (heading) group = heading[1]!;
+      else if (name) dep = unquote(name[1]!);
+      else if (version && RUNTIME.has(group)) {
+        const ref = pnpmRef(dep, unquote(version[1]!));
+        if (ref) roots.push(ref);
+      }
+    } else if (section === 'snapshots') {
+      const key = /^ {2}(\S.*?):(?:\s*\{\})?\s*$/.exec(line);
+      const heading = /^ {4}(\w+):\s*$/.exec(line);
+      const edge = /^ {6}('[^']+'|"[^"]+"|[^\s:]+):\s*(.+)$/.exec(line);
+      if (key) {
+        snapshot = [];
+        edges.set(unquote(key[1]!), snapshot);
+      } else if (heading) group = heading[1]!;
+      else if (edge && snapshot && RUNTIME.has(group)) {
+        const ref = pnpmRef(unquote(edge[1]!), unquote(edge[2]!));
+        if (ref) snapshot.push(ref);
+      }
+    }
+  }
+  if (!edges.size) return null; // older lockfiles carry their own `dev: true` markers
+  if (roots.length && !roots.some((r) => edges.has(r))) return null; // a shape we didn't understand
+
+  const production = new Set<string>();
+  const seen = new Set<string>();
+  const queue = [...roots];
+  while (queue.length) {
+    const id = queue.pop()!;
+    if (seen.has(id) || !edges.has(id)) continue;
+    seen.add(id);
+    production.add(withoutPeers(id));
+    queue.push(...edges.get(id)!);
+  }
+  return production;
+}
+
+/** Lockfile v6+ keys look like `name@1.2.3(peer@1)`, older ones like `/name/1.2.3_peer@1`. */
 function pnpmLock(text: string): Parsed {
   const packages: Locked[] = [];
   let inPackages = false;
@@ -66,18 +133,20 @@ function pnpmLock(text: string): Parsed {
     if (!inPackages) continue;
     const key = /^ {2}(\S.*):\s*$/.exec(line);
     if (key) {
-      const id = key[1]!.replace(/^['"]|['"]$/g, '').replace(/^\//, '').replace(/\(.*$/, '').replace(/_.*$/, '');
+      const id = withoutPeers(unquote(key[1]!).replace(/^\//, ''));
+      const oldStyle = /^(@[^/@]+\/[^/@]+|[^/@]+)\/(\d[^/]*)$/.exec(id);
       const at = id.lastIndexOf('@');
-      const slash = id.lastIndexOf('/');
       if (id.includes(':')) last = null; // file:, git and tarball installs
+      else if (oldStyle) last = pkg('npm', oldStyle[1]!, oldStyle[2]!.replace(/_.*$/, ''));
       else if (at > 0) last = pkg('npm', id.slice(0, at), id.slice(at + 1));
-      else if (slash > 0) last = pkg('npm', id.slice(0, slash), id.slice(slash + 1));
       else last = null;
       if (last) packages.push(last);
     } else if (last && /^ {4}dev: true\s*$/.test(line)) {
       last.dev = true;
     }
   }
+  const production = pnpmProduction(text);
+  if (production) for (const p of packages) p.dev = !production.has(`${p.name}@${p.version}`);
   return { packages, skipped: 0 };
 }
 

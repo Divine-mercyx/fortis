@@ -20,8 +20,8 @@ describe('fortis scan --json', () => {
     g('commit', '-q', '-m', 'init');
 
     const cli = join(__dirname, '..', 'src', 'index.ts');
-    const tsx = join(__dirname, '..', 'node_modules', '.bin', 'tsx');
-    const r = spawnSync(tsx, [cli, 'scan', '--json', '--offline', '--no-upload'], {
+    const tsx = join(__dirname, '..', 'node_modules', 'tsx', 'dist', 'cli.mjs');
+    const r = spawnSync(process.execPath, [tsx, cli, 'scan', '--json', '--offline', '--no-upload'], {
       cwd: dir,
       encoding: 'utf8',
       env: { ...process.env, FORTIS_KEY: '', HOME: dir },

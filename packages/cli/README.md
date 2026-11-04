@@ -57,7 +57,7 @@ Run `fortis rules` for the list and `fortis explain FX-OWN-001` for why a rule m
 | .NET | `packages.lock.json` |
 | Ruby | `Gemfile.lock` |
 
-Files are found in any folder of the repository. Dev and test dependencies are left out where the file marks them (`yarn.lock`, recent `pnpm-lock.yaml` and `uv.lock` don't, so those are checked too). If a project has no lockfile, the scan says so.
+Files are found in any folder of the repository. Dev and test dependencies are left out where the file shows them (`yarn.lock` and `uv.lock` don't, so those are checked too). If a project has no lockfile, the scan says so.
 
 **Maven needs an SBOM for full coverage.** `pom.xml` lists only direct dependencies, and a parent POM or BOM often decides their versions, so Fortis reports how many it could check. To cover everything, including transitive dependencies, have Maven list them and pass the result to Fortis. `fortis ci init` adds this step for you on GitHub Actions.
 

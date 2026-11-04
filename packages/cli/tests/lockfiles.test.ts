@@ -28,12 +28,73 @@ describe('lockfile formats', () => {
   });
 
   it('pnpm-lock.yaml: v9, v6 and old-style keys', () => {
-    const v9 = `lockfileVersion: '9.0'\n\nimporters:\n  .:\n    dependencies:\n\npackages:\n\n  '@babel/core@7.1.2':\n    resolution: {integrity: x}\n\n  next@15.0.0(react@19.0.0):\n    resolution: {integrity: y}\n\nsnapshots:\n\n  ignored@9.9.9:\n    dependencies:\n`;
+    const v9 = `lockfileVersion: '9.0'\n\nimporters:\n\n  .:\n    dependencies:\n      next:\n        specifier: ^15\n        version: 15.0.0(react@19.0.0)\n      '@babel/core':\n        specifier: ^7\n        version: 7.1.2\n\npackages:\n\n  '@babel/core@7.1.2':\n    resolution: {integrity: x}\n\n  next@15.0.0(react@19.0.0):\n    resolution: {integrity: y}\n\nsnapshots:\n\n  '@babel/core@7.1.2': {}\n\n  next@15.0.0(react@19.0.0): {}\n\n  ignored@9.9.9: {}\n`;
     expect(names('pnpm-lock.yaml', v9)).toEqual(['@babel/core@7.1.2', 'next@15.0.0']);
     const v6 = `packages:\n\n  /axios@1.6.0:\n    resolution: {integrity: x}\n    dev: true\n`;
     expect(names('pnpm-lock.yaml', v6)).toEqual(['axios@1.6.0 dev']);
     const v5 = `packages:\n\n  /@scope/name/1.2.3_peer@1:\n    dev: false\n  /left-pad/1.3.0:\n    dev: false\n`;
     expect(names('pnpm-lock.yaml', v5)).toEqual(['@scope/name@1.2.3', 'left-pad@1.3.0']);
+  });
+
+  it('pnpm-lock.yaml: keeps package names with underscores', () => {
+    const text = `packages:\n\n  string_decoder@1.3.0:\n    resolution: {integrity: x}\n\n  /safe_buffer/5.2.1_peer@1:\n    resolution: {integrity: y}\n`;
+    expect(names('pnpm-lock.yaml', text)).toEqual(['string_decoder@1.3.0', 'safe_buffer@5.2.1']);
+  });
+
+  describe('pnpm-lock.yaml v9: working out dev packages from the dependency graph', () => {
+    const lock = (importers: string, snapshots: string, packages: string[]) => [
+      "lockfileVersion: '9.0'", '', 'importers:', '', importers, '', 'packages:', '',
+      ...packages.map((p) => `  ${p}:\n    resolution: {integrity: x}\n`), 'snapshots:', '', snapshots, '',
+    ].join('\n');
+    const dep = (group: string, name: string, version: string) => `    ${group}:\n      ${name}:\n        specifier: ^1\n        version: ${version}`;
+    const devOf = (text: string) => Object.fromEntries(parseLockfile('pnpm-lock.yaml', text).packages.map((p) => [`${p.name}@${p.version}`, p.dev]));
+
+    it('marks what only dev tools need, following chains and peer suffixes', () => {
+      const text = lock(
+        `  .:\n${dep('dependencies', 'express', '4.0.0(peer@1.0.0)')}\n${dep('devDependencies', 'vitest', '3.0.0')}`,
+        [
+          '  express@4.0.0(peer@1.0.0):\n    dependencies:\n      qs: 6.0.0\n      \'@scope/deep\': 2.0.0',
+          '  qs@6.0.0: {}',
+          "  '@scope/deep@2.0.0': {}",
+          '  peer@1.0.0: {}',
+          '  vitest@3.0.0:\n    dependencies:\n      tinypool: 1.1.1\n      qs: 6.0.0\n    transitivePeerDependencies:\n      - supports-color',
+          '  tinypool@1.1.1: {}',
+        ].join('\n\n'),
+        ['express@4.0.0', 'qs@6.0.0', "'@scope/deep@2.0.0'", 'peer@1.0.0', 'vitest@3.0.0', 'tinypool@1.1.1'],
+      );
+      expect(devOf(text)).toEqual({
+        'express@4.0.0': false, 'qs@6.0.0': false, '@scope/deep@2.0.0': false,
+        'vitest@3.0.0': true, 'tinypool@1.1.1': true, 'peer@1.0.0': true,
+      });
+    });
+
+    it('counts a package as production if any workspace package needs it at run time', () => {
+      const text = lock(
+        `  apps/api:\n${dep('dependencies', 'zod', '3.0.0')}\n\n  apps/web:\n${dep('devDependencies', 'zod', '3.0.0')}`,
+        '  zod@3.0.0: {}',
+        ['zod@3.0.0'],
+      );
+      expect(devOf(text)).toEqual({ 'zod@3.0.0': false });
+    });
+
+    it('follows optional dependencies and aliases, and ignores workspace links', () => {
+      const text = lock(
+        `  .:\n${dep('dependencies', 'alias-name', 'real-name@1.0.0')}\n${dep('dependencies', '\'@fortis/shared\'', 'link:packages/shared')}\n${dep('optionalDependencies', 'fsevents', '2.0.0')}`,
+        '  real-name@1.0.0: {}\n\n  fsevents@2.0.0:\n    optionalDependencies:\n      nested-opt: 1.0.0\n\n  nested-opt@1.0.0: {}',
+        ['real-name@1.0.0', 'fsevents@2.0.0', 'nested-opt@1.0.0'],
+      );
+      expect(devOf(text)).toEqual({ 'real-name@1.0.0': false, 'fsevents@2.0.0': false, 'nested-opt@1.0.0': false });
+    });
+
+    it('marks everything dev in a project with only dev dependencies', () => {
+      const text = lock(`  .:\n${dep('devDependencies', 'vitest', '3.0.0')}`, '  vitest@3.0.0: {}', ['vitest@3.0.0']);
+      expect(devOf(text)).toEqual({ 'vitest@3.0.0': true });
+    });
+
+    it('checks everything rather than hiding packages when it cannot follow the graph', () => {
+      const text = lock(`  .:\n${dep('dependencies', 'express', '4.0.0')}`, '  somethingelse@1.0.0: {}', ['express@4.0.0', 'somethingelse@1.0.0']);
+      expect(devOf(text)).toEqual({ 'express@4.0.0': false, 'somethingelse@1.0.0': false });
+    });
   });
 
   it('composer.lock: dev section marked, branch installs skipped', () => {
