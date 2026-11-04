@@ -303,7 +303,7 @@ describe('upload payload and hook', () => {
     const { dir } = repo({ 'a.txt': 'x' });
     installHook(dir);
     const hook = readFileSync(join(dir, '.git/hooks/pre-push'), 'utf8');
-    expect(hook).not.toContain('npx');
+    expect(hook).not.toContain('else npx');
     expect(hook.indexOf('node_modules/.bin/fortis')).toBeLessThan(hook.indexOf('command -v fortis'));
   });
 
@@ -313,7 +313,7 @@ describe('upload payload and hook', () => {
     expect(installHook(dir).status).toBe('updated');
     const hook = readFileSync(join(dir, '.git/hooks/pre-push'), 'utf8');
     expect(hook).toContain('npm test');
-    expect(hook).not.toContain('npx');
+    expect(hook).not.toMatch(/^npx/m);
     expect(hook).toContain('command -v fortis');
     expect(installHook(dir).status).toBe('already');
   });
@@ -328,7 +328,7 @@ describe('upload payload and hook', () => {
     ].join('\n'));
     expect(installHook(dir).status).toBe('updated');
     const hook = readFileSync(join(dir, '.git/hooks/pre-push'), 'utf8');
-    expect(hook).not.toContain('npx');
+    expect(hook).not.toContain('else npx');
     expect(hook).toContain('command -v fortis');
     expect(installHook(dir).status).toBe('already');
   });
@@ -379,6 +379,21 @@ describe('upload payload and hook', () => {
     const hook = readFileSync(join(other, '.git/hooks/pre-push'), 'utf8');
     expect(hook).toMatch(/^#!\/bin\/sh\nnpm test\n[\s\S]*scan --pre-push --stdin[\s\S]*\) \|\| exit 1\necho after\n$/);
     expect(hook.match(/fortis-pre-push/g)).toHaveLength(1);
+
+    // A beta.8 hook (has --stdin, no Plug'n'Play line) is upgraded too.
+    const { dir: third } = repo({ 'a.txt': 'x' });
+    writeFileSync(join(third, '.git/hooks/pre-push'), `#!/bin/sh\n# fortis-pre-push\n${OLD_RUN.replace(/--pre-push/g, '--pre-push --stdin')}\n`);
+    expect(installHook(third).status).toBe('updated');
+    expect(readFileSync(join(third, '.git/hooks/pre-push'), 'utf8')).toContain('.pnp.cjs');
+  });
+
+  it('hook says clearly when the CLI is not installed instead of failing with an npm error', () => {
+    const { dir } = repo({ 'a.txt': 'x' });
+    installHook(dir);
+    const shDir = dirname(execFileSync(process.platform === 'win32' ? 'where' : 'which', ['sh'], { encoding: 'utf8' }).split(/\r?\n/)[0]!);
+    const r = spawnSync('sh', [join(dir, '.git/hooks/pre-push')], { cwd: dir, encoding: 'utf8', env: { ...process.env, PATH: shDir }, input: '' });
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain("Fortis: the CLI isn't installed in this repo");
   });
 });
 

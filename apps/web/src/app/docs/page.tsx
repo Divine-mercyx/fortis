@@ -25,7 +25,7 @@ const STACKS: Record<StackId, { label: string; install: string; run: string; not
     label: 'Node.js · Yarn',
     install: `yarn add -D ${CLI_PACKAGE}`,
     run: `yarn ${CLI_COMMAND}`,
-    note: 'Every check works, including the dependency check on yarn.lock (Yarn 1 and Yarn 2+). With Yarn Plug’n’Play, install the CLI globally so the git hook can find it.',
+    note: 'Every check works, including the dependency check on yarn.lock (Yarn 1 and Yarn 2+). Yarn Plug’n’Play works too: the git hook runs the CLI through yarn.',
   },
   bun: {
     label: 'Node.js · Bun',
@@ -508,10 +508,11 @@ export default function DocsPage() {
         {/* ---------------- Guides ---------------- */}
 
         <Section id="pre-push" title="Pre-push hook" eyebrow="Guides">
-          <p><C>fortis init</C> installs a git pre-push hook. It finds the CLI in your project (npm, pnpm, Yarn or Bun) or on your PATH (a global install), then runs <C>fortis scan --pre-push</C> on the files you are pushing.</p>
+          <p><C>fortis init</C> installs a git pre-push hook. It finds the CLI in your project (npm, pnpm, Yarn, including Plug’n’Play, or Bun) or on your PATH (a global install), then runs <C>fortis scan --pre-push</C> on the files changed by the commits you are pushing. On the first push of a new repository or branch, that is every commit the remote doesn&apos;t have yet.</p>
           <ul className="doc-list">
             <li>A critical finding blocks the push; everything else is shown but lets it through. Change the threshold with <C>{'"failOn"'}</C> in <C>.fortis.json</C>.</li>
             <li>An existing hook is kept, and Fortis runs after it.</li>
+            <li>After upgrading the CLI, run <C>{run('init')}</C> again to update the hook. Your own lines in it are kept.</li>
             <li>In an emergency, skip it once with <C>git push --no-verify</C>. CI still scans.</li>
           </ul>
         </Section>
@@ -727,6 +728,8 @@ export default function DocsPage() {
             <dd>Start Docker Desktop (or the docker service), or run ZAP yourself and pass <C>--zap-report report.json</C>.</dd>
             <dt>“… is not a target on this project” / “Verify the domain…”</dt>
             <dd>Add the URL under Project → Staging targets, add the TXT record, check it, and have an admin authorise testing.</dd>
+            <dt>“Fortis: the CLI isn&apos;t installed in this repo”</dt>
+            <dd>The git hook couldn&apos;t find the CLI. Install it in the project (see Install) or globally with <C>npm i -g {CLI_PACKAGE}</C>. To push once without the check: <C>git push --no-verify</C>.</dd>
             <dt>The hook didn&apos;t run</dt>
             <dd>Re-run <C>{run('init')}</C>. If you use a custom <C>core.hooksPath</C> (Husky), Fortis installs into that folder.</dd>
             <dt>A finding is wrong</dt>
@@ -738,6 +741,8 @@ export default function DocsPage() {
           <dl className="doc-faq">
             <dt>0.1.0-beta.9</dt>
             <dd>The dependency check now covers PHP, Python, Java, Go, .NET and Ruby as well as JavaScript, in any folder, and reads CycloneDX SBOMs with <C>--sbom</C>. Standalone binaries, a Docker image and a GitHub Action mean non-JavaScript teams don&apos;t need Node. More secrets are caught in non-JavaScript code and config files. When the dependency check can&apos;t finish, its open findings stay open instead of being marked fixed.</dd>
+            <dt>0.1.0-beta.8</dt>
+            <dd>The first push of a new repository or branch checks every commit being pushed, not only the last one (a key leaked in an earlier commit used to get through). The git hook works with Yarn Plug’n’Play and says clearly when the CLI isn&apos;t installed. Run <C>{run('init')}</C> again to upgrade an existing hook.</dd>
             <dt>0.1.0-beta.7</dt>
             <dd>The dependency check reads <C>pnpm-lock.yaml</C> (v5, v6 and v9, workspaces included) and <C>yarn.lock</C> (Yarn 1 and Yarn 2+), as well as <C>package-lock.json</C>. Findings point at the lockfile line. When the dependency check can&apos;t run, the scan says so instead of “All checks passed”.</dd>
             <dt>0.1.0-beta.6</dt>
