@@ -103,7 +103,10 @@ jobs:
           cp ../packages/cli/install/install.sh ../packages/cli/install/install.ps1 .
           sha256sum * > SHA256SUMS
           cat SHA256SUMS
+      # GitHub only stores attestations for public repositories (or organisation plans), so a
+      # private personal repo skips this instead of failing the whole release.
       - uses: actions/attest-build-provenance@v2
+        if: ${{ !github.event.repository.private }}
         with:
           subject-path: release/*
       - name: Publish the release
