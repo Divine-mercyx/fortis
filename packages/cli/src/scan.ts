@@ -10,11 +10,11 @@ import { allFiles, changedFiles, type PushedRef } from './git';
 export type ScanOptions = {
   root: string;
   scope: 'changed' | 'full';
-  /** From the git hook's stdin: the refs being pushed (pre-push scope only). */
-  pushed?: PushedRef[];
   packs: readonly RulePack[];
   ignore?: string[];
   offline?: boolean;
+  /** From the git hook's stdin: the refs being pushed (pre-push scope only). */
+  pushed?: PushedRef[];
   /** A CycloneDX JSON SBOM to check as well as the lockfiles. */
   sbom?: string;
   fetchImpl?: typeof fetch;

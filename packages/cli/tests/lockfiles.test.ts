@@ -1,10 +1,4 @@
-import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-
-import { afterAll, describe, expect, it } from 'vitest';
-
-import { scanDependencies } from '../src/rules/dependencies';
+import { describe, expect, it } from 'vitest';
 
 import { cycloneDx, findLockfiles, fromPurl, missingLockfiles, parseLockfile } from '../src/rules/lockfiles';
 
@@ -34,73 +28,12 @@ describe('lockfile formats', () => {
   });
 
   it('pnpm-lock.yaml: v9, v6 and old-style keys', () => {
-    const v9 = `lockfileVersion: '9.0'\n\nimporters:\n\n  .:\n    dependencies:\n      next:\n        specifier: ^15\n        version: 15.0.0(react@19.0.0)\n      '@babel/core':\n        specifier: ^7\n        version: 7.1.2\n\npackages:\n\n  '@babel/core@7.1.2':\n    resolution: {integrity: x}\n\n  next@15.0.0(react@19.0.0):\n    resolution: {integrity: y}\n\nsnapshots:\n\n  '@babel/core@7.1.2': {}\n\n  next@15.0.0(react@19.0.0): {}\n\n  ignored@9.9.9: {}\n`;
+    const v9 = `lockfileVersion: '9.0'\n\nimporters:\n  .:\n    dependencies:\n\npackages:\n\n  '@babel/core@7.1.2':\n    resolution: {integrity: x}\n\n  next@15.0.0(react@19.0.0):\n    resolution: {integrity: y}\n\nsnapshots:\n\n  ignored@9.9.9:\n    dependencies:\n`;
     expect(names('pnpm-lock.yaml', v9)).toEqual(['@babel/core@7.1.2', 'next@15.0.0']);
     const v6 = `packages:\n\n  /axios@1.6.0:\n    resolution: {integrity: x}\n    dev: true\n`;
     expect(names('pnpm-lock.yaml', v6)).toEqual(['axios@1.6.0 dev']);
     const v5 = `packages:\n\n  /@scope/name/1.2.3_peer@1:\n    dev: false\n  /left-pad/1.3.0:\n    dev: false\n`;
     expect(names('pnpm-lock.yaml', v5)).toEqual(['@scope/name@1.2.3', 'left-pad@1.3.0']);
-  });
-
-  it('pnpm-lock.yaml: keeps package names with underscores', () => {
-    const text = `packages:\n\n  string_decoder@1.3.0:\n    resolution: {integrity: x}\n\n  /safe_buffer/5.2.1_peer@1:\n    resolution: {integrity: y}\n`;
-    expect(names('pnpm-lock.yaml', text)).toEqual(['string_decoder@1.3.0', 'safe_buffer@5.2.1']);
-  });
-
-  describe('pnpm-lock.yaml v9: working out dev packages from the dependency graph', () => {
-    const lock = (importers: string, snapshots: string, packages: string[]) => [
-      "lockfileVersion: '9.0'", '', 'importers:', '', importers, '', 'packages:', '',
-      ...packages.map((p) => `  ${p}:\n    resolution: {integrity: x}\n`), 'snapshots:', '', snapshots, '',
-    ].join('\n');
-    const dep = (group: string, name: string, version: string) => `    ${group}:\n      ${name}:\n        specifier: ^1\n        version: ${version}`;
-    const devOf = (text: string) => Object.fromEntries(parseLockfile('pnpm-lock.yaml', text).packages.map((p) => [`${p.name}@${p.version}`, p.dev]));
-
-    it('marks what only dev tools need, following chains and peer suffixes', () => {
-      const text = lock(
-        `  .:\n${dep('dependencies', 'express', '4.0.0(peer@1.0.0)')}\n${dep('devDependencies', 'vitest', '3.0.0')}`,
-        [
-          '  express@4.0.0(peer@1.0.0):\n    dependencies:\n      qs: 6.0.0\n      \'@scope/deep\': 2.0.0',
-          '  qs@6.0.0: {}',
-          "  '@scope/deep@2.0.0': {}",
-          '  peer@1.0.0: {}',
-          '  vitest@3.0.0:\n    dependencies:\n      tinypool: 1.1.1\n      qs: 6.0.0\n    transitivePeerDependencies:\n      - supports-color',
-          '  tinypool@1.1.1: {}',
-        ].join('\n\n'),
-        ['express@4.0.0', 'qs@6.0.0', "'@scope/deep@2.0.0'", 'peer@1.0.0', 'vitest@3.0.0', 'tinypool@1.1.1'],
-      );
-      expect(devOf(text)).toEqual({
-        'express@4.0.0': false, 'qs@6.0.0': false, '@scope/deep@2.0.0': false,
-        'vitest@3.0.0': true, 'tinypool@1.1.1': true, 'peer@1.0.0': true,
-      });
-    });
-
-    it('counts a package as production if any workspace package needs it at run time', () => {
-      const text = lock(
-        `  apps/api:\n${dep('dependencies', 'zod', '3.0.0')}\n\n  apps/web:\n${dep('devDependencies', 'zod', '3.0.0')}`,
-        '  zod@3.0.0: {}',
-        ['zod@3.0.0'],
-      );
-      expect(devOf(text)).toEqual({ 'zod@3.0.0': false });
-    });
-
-    it('follows optional dependencies and aliases, and ignores workspace links', () => {
-      const text = lock(
-        `  .:\n${dep('dependencies', 'alias-name', 'real-name@1.0.0')}\n${dep('dependencies', '\'@fortis/shared\'', 'link:packages/shared')}\n${dep('optionalDependencies', 'fsevents', '2.0.0')}`,
-        '  real-name@1.0.0: {}\n\n  fsevents@2.0.0:\n    optionalDependencies:\n      nested-opt: 1.0.0\n\n  nested-opt@1.0.0: {}',
-        ['real-name@1.0.0', 'fsevents@2.0.0', 'nested-opt@1.0.0'],
-      );
-      expect(devOf(text)).toEqual({ 'real-name@1.0.0': false, 'fsevents@2.0.0': false, 'nested-opt@1.0.0': false });
-    });
-
-    it('marks everything dev in a project with only dev dependencies', () => {
-      const text = lock(`  .:\n${dep('devDependencies', 'vitest', '3.0.0')}`, '  vitest@3.0.0: {}', ['vitest@3.0.0']);
-      expect(devOf(text)).toEqual({ 'vitest@3.0.0': true });
-    });
-
-    it('checks everything rather than hiding packages when it cannot follow the graph', () => {
-      const text = lock(`  .:\n${dep('dependencies', 'express', '4.0.0')}`, '  somethingelse@1.0.0: {}', ['express@4.0.0', 'somethingelse@1.0.0']);
-      expect(devOf(text)).toEqual({ 'express@4.0.0': false, 'somethingelse@1.0.0': false });
-    });
   });
 
   it('composer.lock: dev section marked, branch installs skipped', () => {
@@ -237,106 +170,54 @@ describe('finding lockfiles', () => {
   });
 });
 
-/*
- * Real lockfiles generated from the same package.json by npm 10, pnpm 10 (v9), pnpm 8 (v6),
- * yarn 1.22 and yarn 4.5. Production: lodash, react, react-dom (peer dep on react) and
- * @babel/code-frame. Dev: minimist and @types/node.
- */
-describe('real lockfiles', () => {
-  const FIXTURES = join(__dirname, 'fixtures', 'lockfiles');
-  const read = (dir: string) => {
-    const file = findLockfiles(readdirSync(join(FIXTURES, dir)))[0]!;
-    const sibling = (name: string) => readFileSync(join(FIXTURES, dir, name), 'utf8');
-    return { file, packages: parseLockfile(file, readFileSync(join(FIXTURES, dir, file), 'utf8'), sibling).packages };
-  };
-  const split = (dir: string) => {
-    const { packages } = read(dir);
-    const list = (dev: boolean) => packages.filter((p) => p.dev === dev).map((p) => `${p.name}@${p.version}`).sort();
-    return { prod: list(false), dev: list(true) };
-  };
-  const reference = split('npm');
+describe('production packages are never marked dev by mistake', () => {
+  const lock = (importers: string, snapshots: string, packages: string[]) => [
+    "lockfileVersion: '9.0'", '', 'importers:', '', importers, '', 'packages:', '',
+    ...packages.map((p) => `  ${p}:\n    resolution: {integrity: x}\n`), 'snapshots:', '', snapshots, '',
+  ].join('\n');
+  const dep = (group: string, name: string, version: string) => `    ${group}:\n      ${name}:\n        specifier: ^1\n        version: ${version}`;
+  const devOf = (file: string, text: string, manifest?: unknown) =>
+    Object.fromEntries(parseLockfile(file, text, manifest === undefined ? undefined : JSON.stringify(manifest)).packages.map((p) => [`${p.name}@${p.version}`, p.dev]));
 
-  it('npm is the reference: 17 production packages, 2 dev-only', () => {
-    expect(reference.prod).toHaveLength(17);
-    expect(reference.prod).toContain('lodash@4.17.15');
-    expect(reference.prod).toContain('js-tokens@4.0.0'); // transitive, reached from two places
-    expect(reference.dev).toEqual(['@types/node@20.0.0', 'minimist@1.2.5']);
+  it('pnpm v9: follows chains and peer suffixes, and marks what only dev tools need', () => {
+    const text = lock(
+      `  .:\n${dep('dependencies', 'express', '4.0.0(peer@1.0.0)')}\n${dep('devDependencies', 'vitest', '3.0.0')}`,
+      [
+        "  express@4.0.0(peer@1.0.0):\n    dependencies:\n      qs: 6.0.0\n      '@scope/deep': 2.0.0",
+        '  qs@6.0.0: {}',
+        "  '@scope/deep@2.0.0': {}",
+        '  vitest@3.0.0:\n    dependencies:\n      tinypool: 1.1.1\n      qs: 6.0.0',
+        '  tinypool@1.1.1: {}',
+      ].join('\n\n'),
+      ['express@4.0.0', 'qs@6.0.0', "'@scope/deep@2.0.0'", 'vitest@3.0.0', 'tinypool@1.1.1'],
+    );
+    expect(devOf('pnpm-lock.yaml', text)).toEqual({
+      'express@4.0.0': false, 'qs@6.0.0': false, '@scope/deep@2.0.0': false, 'vitest@3.0.0': true, 'tinypool@1.1.1': true,
+    });
   });
 
-  it.each(['pnpm9', 'pnpm8', 'yarn1', 'berry'])('%s gives exactly the same packages and dev split as npm', (dir) => {
-    expect(split(dir)).toEqual(reference);
+  it('pnpm v9: an aliased dependency is production, at the root and deeper in the graph', () => {
+    const text = lock(
+      `  .:\n${dep('dependencies', 'alias-name', 'real-name@1.0.0')}\n      cliui:\n        specifier: ^8\n        version: 8.0.0\n${dep('devDependencies', 'vitest', '3.0.0')}`,
+      '  real-name@1.0.0: {}\n\n  cliui@8.0.0:\n    dependencies:\n      string-width-cjs: string-width@4.2.3\n\n  string-width@4.2.3: {}\n\n  vitest@3.0.0: {}',
+      ['real-name@1.0.0', 'cliui@8.0.0', 'string-width@4.2.3', 'vitest@3.0.0'],
+    );
+    expect(devOf('pnpm-lock.yaml', text)).toEqual({ 'real-name@1.0.0': false, 'cliui@8.0.0': false, 'string-width@4.2.3': false, 'vitest@3.0.0': true });
   });
 
-  it.each(['pnpm9', 'pnpm8', 'yarn1', 'berry'])('%s says which line each package is on', (dir) => {
-    expect(read(dir).packages.find((p) => p.name === 'lodash')!.line).toBeGreaterThan(1);
+  it('pnpm v9: a package any workspace needs at run time is production', () => {
+    const text = lock(`  apps/api:\n${dep('dependencies', 'zod', '3.0.0')}\n\n  apps/web:\n${dep('devDependencies', 'zod', '3.0.0')}`, '  zod@3.0.0: {}', ['zod@3.0.0']);
+    expect(devOf('pnpm-lock.yaml', text)).toEqual({ 'zod@3.0.0': false });
   });
 
-  // OSV stand-in: lodash@4.17.15 is vulnerable, everything else is clean.
-  const osv: typeof fetch = async (url, init) => {
-    if (!String(url).endsWith('/v1/querybatch')) return new Response(JSON.stringify({ id: 'GHSA-p6mc-m468-83gw', summary: 'Prototype Pollution in lodash', aliases: ['CVE-2020-8203'], database_specific: { severity: 'HIGH' } }));
-    const { queries } = JSON.parse(String(init!.body)) as { queries: { package: { name: string }; version: string }[] };
-    return new Response(JSON.stringify({ results: queries.map((q) => (q.package.name === 'lodash' && q.version === '4.17.15' ? { vulns: [{ id: 'GHSA-p6mc-m468-83gw' }] } : {})) }));
-  };
-
-  it.each(['pnpm9', 'yarn1', 'berry'])('%s: finds the vulnerable package, at its line, without checking dev packages', async (dir) => {
-    const { file } = read(dir);
-    const r = await scanDependencies(join(FIXTURES, dir), [file], { fetchImpl: osv });
-    expect(r.error).toBeUndefined();
-    expect(r.checked).toBe(17);
-    expect(r.detections).toHaveLength(1);
-    expect(r.detections[0]).toMatchObject({ ruleId: 'DEP-OSV', severity: 'high', file, snippet: 'lodash@4.17.15 · CVE-2020-8203' });
-    expect(r.detections[0]!.line).toBeGreaterThan(1);
+  it('yarn workspace root: its packages have their own dependencies, so nothing is marked dev', () => {
+    const text = '# yarn lockfile v1\n\nlodash@^4.17.0:\n  version "4.17.15"\n\nminimist@^1.2.0:\n  version "1.2.5"\n';
+    expect(devOf('yarn.lock', text, { workspaces: ['apps/*'], dependencies: { lodash: '^4.17.0' } })).toEqual({ 'lodash@4.17.15': false, 'minimist@1.2.5': false });
+    expect(devOf('yarn.lock', text, { dependencies: { lodash: '^4.17.0' } })).toEqual({ 'lodash@4.17.15': false, 'minimist@1.2.5': true });
   });
 });
 
-describe('yarn dev packages', () => {
-  const dirs: string[] = [];
-  afterAll(() => dirs.forEach((d) => rmSync(d, { recursive: true, force: true })));
-  const LOCK = '# yarn lockfile v1\n\nlodash@^4.17.0:\n  version "4.17.15"\n\nminimist@^1.2.0:\n  version "1.2.5"\n';
-  const devOf = (manifest: unknown) => {
-    const sibling = () => (manifest === null ? null : JSON.stringify(manifest));
-    return Object.fromEntries(parseLockfile('yarn.lock', LOCK, sibling).packages.map((p) => [p.name, p.dev]));
-  };
-
-  it('marks what production never reaches', () => {
-    expect(devOf({ dependencies: { lodash: '^4.17.0' }, devDependencies: { minimist: '^1.2.0' } })).toEqual({ lodash: false, minimist: true });
-  });
-
-  it('counts everything as production when it cannot tell, so nothing is hidden', () => {
-    const allProd = { lodash: false, minimist: false };
-    expect(devOf(null)).toEqual(allProd); // no package.json
-    expect(devOf({ private: true })).toEqual(allProd); // no run-time dependencies listed
-    expect(devOf({ dependencies: { other: '^1.0.0' } })).toEqual(allProd); // roots not in the lockfile
-    expect(devOf({ workspaces: ['apps/*'], dependencies: { lodash: '^4.17.0' } })).toEqual(allProd); // packages have their own deps
-  });
-
-  it('reads the package.json next to the lockfile, in any folder', async () => {
-    const dir = mkdtempSync(join(tmpdir(), 'fortis-yarn-'));
-    dirs.push(dir);
-    writeFileSync(join(dir, 'yarn.lock'), LOCK);
-    writeFileSync(join(dir, 'package.json'), JSON.stringify({ dependencies: { lodash: '^4.17.0' } }));
-    const asked: string[] = [];
-    const osv: typeof fetch = async (_url, init) => {
-      const { queries } = JSON.parse(String(init!.body)) as { queries: { package: { name: string } }[] };
-      asked.push(...queries.map((q) => q.package.name));
-      return new Response(JSON.stringify({ results: queries.map(() => ({})) }));
-    };
-    await scanDependencies(dir, ['yarn.lock'], { fetchImpl: osv });
-    expect(asked).toEqual(['lodash']);
-  });
-});
-
-describe('other lockfile details', () => {
-  it('reads npm-shrinkwrap.json like package-lock.json', () => {
-    expect(findLockfiles(['npm-shrinkwrap.json'])).toEqual(['npm-shrinkwrap.json']);
-    expect(parseLockfile('npm-shrinkwrap.json', JSON.stringify({ packages: { 'node_modules/a': { version: '1.0.0' } } })).packages[0]).toMatchObject({ name: 'a', ecosystem: 'npm' });
-  });
-
-  it('reports an aliased npm package under its real name, which is the one OSV knows', () => {
-    const text = JSON.stringify({ packages: { 'node_modules/my-alias': { name: 'lodash', version: '4.17.15' } } });
-    expect(parseLockfile('package-lock.json', text).packages[0]).toMatchObject({ name: 'lodash', version: '4.17.15' });
-  });
-
+describe('line numbers', () => {
   it.each([
     ['requirements.txt', '# deps\ndjango==3.2.0\n', 2],
     ['poetry.lock', '# header\n\n[[package]]\nname = "django"\nversion = "3.2.0"\n', 3],

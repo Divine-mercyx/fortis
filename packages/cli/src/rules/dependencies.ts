@@ -53,14 +53,9 @@ export function readPackages(root: string, files: string[], opts: { sbom?: strin
     const abs = join(root, file);
     if (!existsSync(abs)) continue;
     try {
-      const sibling = (name: string) => {
-        try {
-          return readFileSync(join(dirname(abs), name), 'utf8');
-        } catch {
-          return null;
-        }
-      };
-      const parsed = parseLockfile(file, readFileSync(abs, 'utf8'), sibling);
+      const manifestPath = join(root, dirname(file), 'package.json');
+      const manifest = /(^|\/)yarn\.lock$/.test(file) && existsSync(manifestPath) ? readFileSync(manifestPath, 'utf8') : undefined;
+      const parsed = parseLockfile(file, readFileSync(abs, 'utf8'), manifest);
       packages.push(...parsed.packages.map((p) => ({ ...p, file })));
       seen.add(ecosystemOf(file));
       if (isPomXml(file)) {
@@ -163,7 +158,7 @@ export async function scanDependencies(
         severity,
         title: `${pkg.name}@${pkg.version}: ${top?.summary ?? 'known vulnerability'}${vulnIds.length > 1 ? ` (+${vulnIds.length - 1} more)` : ''}`.slice(0, 200),
         file: where.file,
-        line: where.line,
+        line: where.line ?? 0,
         snippet: `${pkg.name}@${pkg.version} · ${ref}`,
       });
     }

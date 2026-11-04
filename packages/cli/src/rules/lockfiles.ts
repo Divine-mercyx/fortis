@@ -1,4 +1,5 @@
 import { globToRegExp } from '../files';
+import { parseNpmLock, parsePnpmLock, parseYarnLock, type LockedPackage } from './js-lockfiles';
 import { lineOf, TEST_PATH } from './types';
 
 /*
@@ -7,217 +8,31 @@ import { lineOf, TEST_PATH } from './types';
  */
 
 export type Ecosystem = 'npm' | 'Packagist' | 'PyPI' | 'Maven' | 'Go' | 'NuGet' | 'RubyGems' | 'crates.io';
-/** `line` is where the package sits in its file, or 0 where a reader can't tell (JSON formats). */
-export type Locked = { name: string; version: string; ecosystem: Ecosystem; dev: boolean; line: number };
+/** `line`: where the package is in its lockfile (npm-family lockfiles), so findings point at it. */
+export type Locked = { name: string; version: string; ecosystem: Ecosystem; dev: boolean; line?: number };
 /** `skipped` counts declared packages with no exact version to check. */
 export type Parsed = { packages: Locked[]; skipped: number };
 
 const pkg = (ecosystem: Ecosystem, name: string, version: string, dev = false, line = 0): Locked => ({ name, version, ecosystem, dev, line });
 
-function npmLock(text: string): Parsed {
-  const lock = JSON.parse(text) as {
-    packages?: Record<string, { name?: string; version?: string; dev?: boolean; link?: boolean }>;
-    dependencies?: Record<string, { version: string; dev?: boolean }>;
-  };
-  const packages: Locked[] = [];
-  if (lock.packages) {
-    for (const [path, meta] of Object.entries(lock.packages)) {
-      // Keys without node_modules/ are the project and its workspaces, not installed packages.
-      const at = path.lastIndexOf('node_modules/');
-      if (at === -1 || !meta.version || meta.link) continue;
-      packages.push(pkg('npm', meta.name ?? path.slice(at + 'node_modules/'.length), meta.version, Boolean(meta.dev)));
-    }
-  } else if (lock.dependencies) {
-    for (const [name, meta] of Object.entries(lock.dependencies)) packages.push(pkg('npm', name, meta.version, Boolean(meta.dev)));
-  }
-  return { packages, skipped: 0 };
-}
-
-const unquote = (s: string) => s.trim().replace(/^['"]|['"]$/g, '');
-const withoutPeers = (id: string) => id.replace(/\(.*$/, '');
-
-/** `name@range` → name; an alias `foo@npm:bar@^1` → bar. */
-function yarnDescriptorName(descriptor: string): string {
-  const at = descriptor.indexOf('@', 1);
-  if (at === -1) return descriptor;
-  return /^npm:(@?[^@]+)@/.exec(descriptor.slice(at + 1))?.[1] ?? descriptor.slice(0, at);
-}
-
-/**
- * Yarn classic and Berry: an unindented `"name@range", "name@range2":` line, then its fields.
- * The lockfile doesn't mark dev packages, so walk from package.json's run-time dependencies.
- * Without that file, or in a workspace root whose packages have their own, everything counts
- * as production: leaving a package out hides its vulnerabilities.
+/*
+ * npm, pnpm and Yarn: the readers in js-lockfiles.ts. They are tested against real lockfiles from
+ * npm 10, pnpm 8 and 10 (lockfile v5, v6, v9) and Yarn 1 and 4, record the line each package is on,
+ * and work out dev-only packages, from the lockfile's own flag or, for pnpm v9 and Yarn, by walking
+ * the dependency graph from package.json's production dependencies.
  */
-function yarnLock(text: string, _file: string, sibling: Sibling): Parsed {
-  const berry = /^__metadata:/m.test(text);
-  type Node = Locked & { edges: string[] };
-  const nodes = new Map<string, Node>();
-  const byDescriptor = new Map<string, string>();
-
-  let descriptors: string[] = [];
-  let headLine = 0;
-  let version = '';
-  let resolution = '';
-  let edges: string[] = [];
-  let inDeps = false;
-  const finish = () => {
-    if (descriptors.length && /^\d/.test(version) && !/@(workspace|link|portal|file):/.test(`${descriptors.join()} ${resolution}`)) {
-      const name = yarnDescriptorName(berry && resolution ? resolution : descriptors[0]!);
-      const id = `${name}@${version}#${headLine}`;
-      nodes.set(id, { ...pkg('npm', name, version, false, headLine), edges });
-      for (const d of descriptors) byDescriptor.set(d, id);
-    }
-    descriptors = [];
-    version = resolution = '';
-    edges = [];
-    inDeps = false;
-  };
-  text.split(/\r?\n/).forEach((line, i) => {
-    if (line && !/^[\s#]/.test(line) && line.endsWith(':')) {
-      finish();
-      if (!line.startsWith('__metadata')) {
-        descriptors = line.slice(0, -1).split(/,\s*/).map(unquote);
-        headLine = i + 1;
-      }
-      return;
-    }
-    const child = inDeps ? /^ {4}("[^"]+"|[^\s:]+):? +(.+)$/.exec(line) : null;
-    if (child) {
-      edges.push(`${unquote(child[1]!)}@${unquote(child[2]!)}`);
-      return;
-    }
-    if (/^ {2}\S/.test(line)) {
-      inDeps = /^ {2}(dependencies|optionalDependencies):\s*$/.test(line);
-      const f = /^ {2}(version|resolution):? +"?([^"]*)"?\s*$/.exec(line);
-      if (f?.[1] === 'version') version = f[2]!;
-      if (f?.[1] === 'resolution') resolution = f[2]!;
-    }
-  });
-  finish();
-
-  let manifest: { dependencies?: Record<string, string>; optionalDependencies?: Record<string, string>; peerDependencies?: Record<string, string>; workspaces?: unknown } = {};
+const fromJs = (list: LockedPackage[]): Parsed => ({ packages: list.map((p) => ({ ...p, ecosystem: 'npm' as const })), skipped: 0 });
+const npmLock = (text: string): Parsed => fromJs(parseNpmLock(text));
+const pnpmLock = (text: string): Parsed => fromJs(parsePnpmLock(text));
+const yarnLock = (text: string, _file: string, manifest?: string): Parsed => {
+  let pkgJson = {};
   try {
-    manifest = JSON.parse(sibling('package.json') ?? '{}');
+    pkgJson = manifest ? JSON.parse(manifest) : {};
   } catch {
-    /* no usable package.json: everything stays production */
+    /* no readable package.json: every package counts as production */
   }
-  const resolveDescriptor = (d: string) => {
-    const at = d.indexOf('@', 1);
-    return byDescriptor.get(d) ?? (at > 0 ? byDescriptor.get(`${d.slice(0, at)}@npm:${d.slice(at + 1)}`) : undefined);
-  };
-  const roots = Object.entries({ ...manifest.dependencies, ...manifest.optionalDependencies, ...manifest.peerDependencies }).map(([n, r]) => resolveDescriptor(`${n}@${r}`));
-  const stack = roots.filter((r): r is string => Boolean(r));
-  if (stack.length && !manifest.workspaces) {
-    const production = new Set<string>();
-    while (stack.length) {
-      const id = stack.pop()!;
-      if (production.has(id)) continue;
-      production.add(id);
-      for (const edge of nodes.get(id)?.edges ?? []) {
-        const next = resolveDescriptor(edge);
-        if (next) stack.push(next);
-      }
-    }
-    for (const [id, node] of nodes) node.dev = !production.has(id);
-  }
-  return { packages: [...nodes.values()].map(({ edges: _edges, ...p }) => p), skipped: 0 };
-}
-
-/** A dependency's snapshot key. The version may instead be a link, or an alias's real `name@version`. */
-function pnpmRef(name: string, version: string): string | null {
-  if (version.startsWith('link:') || version.startsWith('workspace:')) return null;
-  return /^@?[^@(]+@/.test(version) ? version : `${name}@${version}`;
-}
-
-/**
- * Lockfile v9 doesn't mark dev packages, so walk from what each workspace package needs at run
- * time. Returns the `name@version`s reached, or null if this lockfile can't say. A dev package
- * is only left out when we're sure, because leaving one out hides its vulnerabilities.
- */
-function pnpmProduction(text: string): Set<string> | null {
-  const RUNTIME = new Set(['dependencies', 'optionalDependencies']);
-  const roots: string[] = [];
-  const edges = new Map<string, string[]>();
-  let section = '';
-  let group = '';
-  let dep = '';
-  let snapshot: string[] | null = null;
-  for (const line of text.split(/\r?\n/)) {
-    if (/^\S/.test(line)) {
-      section = line.replace(/:.*$/, '');
-      continue;
-    }
-    if (section === 'importers') {
-      const heading = /^ {4}(\w+):\s*$/.exec(line);
-      const name = /^ {6}(\S.*?):\s*$/.exec(line);
-      const version = /^ {8}version:\s*(.+)$/.exec(line);
-      if (heading) group = heading[1]!;
-      else if (name) dep = unquote(name[1]!);
-      else if (version && RUNTIME.has(group)) {
-        const ref = pnpmRef(dep, unquote(version[1]!));
-        if (ref) roots.push(ref);
-      }
-    } else if (section === 'snapshots') {
-      const key = /^ {2}(\S.*?):(?:\s*\{\})?\s*$/.exec(line);
-      const heading = /^ {4}(\w+):\s*$/.exec(line);
-      const edge = /^ {6}('[^']+'|"[^"]+"|[^\s:]+):\s*(.+)$/.exec(line);
-      if (key) {
-        snapshot = [];
-        edges.set(unquote(key[1]!), snapshot);
-      } else if (heading) group = heading[1]!;
-      else if (edge && snapshot && RUNTIME.has(group)) {
-        const ref = pnpmRef(unquote(edge[1]!), unquote(edge[2]!));
-        if (ref) snapshot.push(ref);
-      }
-    }
-  }
-  if (!edges.size) return null; // older lockfiles carry their own `dev: true` markers
-  if (roots.length && !roots.some((r) => edges.has(r))) return null; // a shape we didn't understand
-
-  const production = new Set<string>();
-  const seen = new Set<string>();
-  const queue = [...roots];
-  while (queue.length) {
-    const id = queue.pop()!;
-    if (seen.has(id) || !edges.has(id)) continue;
-    seen.add(id);
-    production.add(withoutPeers(id));
-    queue.push(...edges.get(id)!);
-  }
-  return production;
-}
-
-/** Lockfile v6+ keys look like `name@1.2.3(peer@1)`, older ones like `/name/1.2.3_peer@1`. */
-function pnpmLock(text: string): Parsed {
-  const packages: Locked[] = [];
-  let inPackages = false;
-  let last: Locked | null = null;
-  for (const [i, line] of text.split(/\r?\n/).entries()) {
-    if (/^\S/.test(line)) {
-      inPackages = line.startsWith('packages:');
-      last = null;
-      continue;
-    }
-    if (!inPackages) continue;
-    const key = /^ {2}(\S.*):\s*$/.exec(line);
-    if (key) {
-      const id = withoutPeers(unquote(key[1]!).replace(/^\//, ''));
-      const oldStyle = /^(@[^/@]+\/[^/@]+|[^/@]+)\/(\d[^/]*)$/.exec(id);
-      const at = id.lastIndexOf('@');
-      if (id.includes(':')) last = null; // file:, git and tarball installs
-      else if (oldStyle) last = pkg('npm', oldStyle[1]!, oldStyle[2]!.replace(/_.*$/, ''), false, i + 1);
-      else if (at > 0) last = pkg('npm', id.slice(0, at), id.slice(at + 1), false, i + 1);
-      else last = null;
-      if (last) packages.push(last);
-    } else if (last && /^ {4}dev: true\s*$/.test(line)) {
-      last.dev = true;
-    }
-  }
-  const production = pnpmProduction(text);
-  if (production) for (const p of packages) p.dev = !production.has(`${p.name}@${p.version}`);
-  return { packages, skipped: 0 };
-}
+  return fromJs(parseYarnLock(text, pkgJson));
+};
 
 function composerLock(text: string): Parsed {
   const lock = JSON.parse(text) as { packages?: { name: string; version: string }[]; 'packages-dev'?: { name: string; version: string }[] };
@@ -403,9 +218,8 @@ export function cycloneDx(text: string): Parsed {
   return { packages, skipped };
 }
 
-/** Reads a file next to the lockfile, such as its package.json. */
-export type Sibling = (name: string) => string | null;
-type Format = { match: RegExp; ecosystem: Ecosystem; parse: (text: string, file: string, sibling: Sibling) => Parsed };
+/** `manifest`: the package.json beside the lockfile, which Yarn needs to tell dev-only packages apart. */
+type Format = { match: RegExp; ecosystem: Ecosystem; parse: (text: string, file: string, manifest?: string) => Parsed };
 
 const REQUIREMENTS = /(^|\/)requirements[-_.\w]*\.txt$|(^|\/)requirements\/[-_.\w]+\.txt$/;
 
@@ -428,7 +242,7 @@ export const isPomXml = (path: string) => /(^|\/)pom\.xml$/.test(path);
 
 /** Project files that mean an ecosystem is in use, and how to get a lockfile Fortis can read. */
 const MANIFESTS: { match: RegExp; ecosystem: Ecosystem; label: string; hint: string }[] = [
-  { match: /(^|\/)package\.json$/, ecosystem: 'npm', label: 'package.json', hint: 'commit package-lock.json, yarn.lock or pnpm-lock.yaml' },
+  { match: /(^|\/)package\.json$/, ecosystem: 'npm', label: 'package.json', hint: 'commit package-lock.json, yarn.lock or pnpm-lock.yaml (Bun lockfiles are not read yet)' },
   { match: /(^|\/)composer\.json$/, ecosystem: 'Packagist', label: 'composer.json', hint: 'commit composer.lock' },
   { match: /(^|\/)(pyproject\.toml|Pipfile|setup\.py)$/, ecosystem: 'PyPI', label: 'Python project files', hint: 'commit poetry.lock, uv.lock, Pipfile.lock or a pinned requirements.txt' },
   { match: /(^|\/)build\.gradle(\.kts)?$/, ecosystem: 'Maven', label: 'build.gradle', hint: 'turn on Gradle dependency locking, or pass --sbom' },
@@ -458,16 +272,11 @@ const formatOf = (file: string) => {
   return format;
 };
 
-export const parseLockfile = (file: string, text: string, sibling: Sibling = () => null): Parsed => formatOf(file).parse(text, file, sibling);
+export const parseLockfile = (file: string, text: string, manifest?: string): Parsed => formatOf(file).parse(text, file, manifest);
 export const ecosystemOf = (file: string): Ecosystem => formatOf(file).ecosystem;
 
 /** Ecosystems the project plainly uses but gave no versions for, so nothing was checked. */
 export function missingLockfiles(paths: string[], ignore: string[], found: ReadonlySet<Ecosystem>): string[] {
   const files = relevant(paths, ignore);
-  const bun = files.find((p) => /(^|\/)bun\.lockb?$/.test(p));
-  return MANIFESTS.filter((m) => !found.has(m.ecosystem) && files.some((p) => m.match.test(p))).map((m) =>
-    m.ecosystem === 'npm' && bun
-      ? `${bun.slice(bun.lastIndexOf('/') + 1)} is not supported yet, so those dependencies weren't checked: use npm, pnpm or yarn lockfiles, or pass --sbom.`
-      : `${m.label} found but no lockfile, so those dependencies weren't checked: ${m.hint}.`,
-  );
+  return MANIFESTS.filter((m) => !found.has(m.ecosystem) && files.some((p) => m.match.test(p))).map((m) => `${m.label} found but no lockfile, so those dependencies weren't checked: ${m.hint}.`);
 }

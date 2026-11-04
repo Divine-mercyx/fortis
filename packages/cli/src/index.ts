@@ -717,6 +717,15 @@ async function main(): Promise<number> {
   }
 }
 
+// `fortis rules | head`, `| grep -q`: the reader can stop early. Stop quietly, like other Unix
+// tools, instead of crashing on the broken pipe.
+for (const stream of [process.stdout, process.stderr]) {
+  stream.on('error', (e: NodeJS.ErrnoException) => {
+    if (e.code === 'EPIPE') process.exit(0);
+    throw e;
+  });
+}
+
 main().then(
   (code) => process.exit(code),
   (e) => {

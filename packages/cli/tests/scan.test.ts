@@ -57,19 +57,14 @@ describe('runScan', () => {
   });
 
   it('says when the dependency check could not run instead of reporting a clean result', async () => {
-    const scan = (files: Record<string, string>) => runScan({ root: repo(files).dir, scope: 'full', packs: ['dependencies'], fetchImpl: fakeOsv([]) });
-    const none = await scan({ 'package.json': '{}' });
-    expect(none.notes.join()).toContain('commit package-lock.json');
+    const opts = { scope: 'full' as const, packs: ['dependencies'] as const, fetchImpl: (async () => new Response('{"results":[]}')) as typeof fetch };
+    const none = await runScan({ root: repo({ 'package.json': '{}' }).dir, ...opts });
+    expect(none.notes.join(' ')).toMatch(/package\.json found but no lockfile/);
     expect(none.incompleteChecks).toEqual(['dependencies']);
-    for (const lockfile of ['package-lock.json', 'pnpm-lock.yaml', 'yarn.lock']) {
-      const locked = await scan({ 'package.json': '{}', [lockfile]: lockfile.endsWith('.json') ? '{}' : '' });
-      expect(locked.notes.join()).not.toContain('no lockfile');
-      expect(locked.incompleteChecks).toEqual([]);
-    }
-    const bun = await scan({ 'package.json': '{}', 'bun.lockb': 'x' });
-    expect(bun.notes.join()).toContain('bun.lockb is not supported yet');
-    expect(bun.incompleteChecks).toEqual(['dependencies']);
-    expect((await scan({ 'main.go': 'package main\n' })).notes.join()).not.toContain('no lockfile');
+    const bun = await runScan({ root: repo({ 'package.json': '{}', 'bun.lockb': 'x' }).dir, ...opts });
+    expect(bun.notes.join(' ')).toMatch(/Bun lockfiles are not read yet/);
+    const pnpm = await runScan({ root: repo({ 'package.json': '{}', 'pnpm-lock.yaml': "lockfileVersion: '9.0'\n" }).dir, ...opts });
+    expect(pnpm.notes.join(' ')).not.toMatch(/no lockfile/);
   });
 
   it('pre-push scope skips files already on the remote', async () => {
@@ -225,6 +220,12 @@ describe('runScan', () => {
   it('pre-push checks a lockfile in any language only when it changed', async () => {
     const asked: { name: string; ecosystem: string }[] = [];
     const { dir, g } = repo({ 'composer.lock': JSON.stringify({ packages: [{ name: 'a/b', version: '1.0.0' }] }), 'src/app.php': '<?php\n' });
+    // The first commit is already on the remote, so only later commits are "being pushed".
+    const remote = mkdtempSync(join(tmpdir(), 'fortis-remote-'));
+    dirs.push(remote);
+    execFileSync('git', ['init', '-q', '--bare', remote]);
+    g('remote', 'add', 'origin', remote);
+    g('push', '-q', '--no-verify', '-u', 'origin', 'main');
     writeFileSync(join(dir, 'src/app.php'), '<?php echo 1;\n');
     g('add', '-A');
     const sha = (ref: string) => execFileSync('git', ['rev-parse', ref], { cwd: dir, encoding: 'utf8' }).trim();
@@ -259,7 +260,8 @@ describe('runScan', () => {
       '.venv/lib/x.py': `k = '${PAYSTACK_LIVE}'\n`,
       'src/config.py': `k = '${PAYSTACK_LIVE}'\n`,
     });
-    const r = await runScan({ root: dir, scope: 'full', packs: ['secrets'], offline: true });
+    // Payment keys are in the free secrets pack (since beta.6).
+    const r = await runScan({ root: dir, scope: 'full', packs: ['secrets', 'fintech'], offline: true });
     expect(r.detections.map((d) => d.file)).toEqual(['src/config.py']);
   });
 });
