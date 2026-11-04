@@ -1,36 +1,13 @@
-import { existsSync, readFileSync } from 'node:fs';
-import { join } from 'node:path';
-
 import type { Severity } from '@fortis/shared';
 
+import { readLockfile } from './lockfiles';
 import type { Detection } from './types';
 
 /*
  * DEP-OSV: known vulnerabilities in npm packages, from the OSV database (osv.dev).
- * Reads package-lock.json, asks OSV which versions are affected, then fetches severity
+ * Reads the lockfile (npm, pnpm or yarn; see lockfiles.ts), asks OSV which versions are affected, then fetches severity
  * for the advisories found. Needs network access; skipped with --offline.
  */
-
-type LockPackages = Record<string, { version?: string; dev?: boolean }>;
-
-export function readLockfile(root: string): { name: string; version: string; dev: boolean }[] {
-  const p = join(root, 'package-lock.json');
-  if (!existsSync(p)) return [];
-  const lock = JSON.parse(readFileSync(p, 'utf8')) as { packages?: LockPackages; dependencies?: Record<string, { version: string; dev?: boolean }> };
-  const out = new Map<string, { name: string; version: string; dev: boolean }>();
-  if (lock.packages) {
-    for (const [path, meta] of Object.entries(lock.packages)) {
-      if (!path || !meta.version) continue;
-      const name = path.slice(path.lastIndexOf('node_modules/') + 'node_modules/'.length);
-      out.set(`${name}@${meta.version}`, { name, version: meta.version, dev: Boolean(meta.dev) });
-    }
-  } else if (lock.dependencies) {
-    for (const [name, meta] of Object.entries(lock.dependencies)) {
-      out.set(`${name}@${meta.version}`, { name, version: meta.version, dev: Boolean(meta.dev) });
-    }
-  }
-  return [...out.values()];
-}
 
 const SEVERITY: Record<string, Severity> = { CRITICAL: 'critical', HIGH: 'high', MODERATE: 'medium', MEDIUM: 'medium', LOW: 'low' };
 
@@ -42,7 +19,8 @@ export async function scanDependencies(
 ): Promise<{ detections: Detection[]; checked: number; error?: string }> {
   const fetchImpl = opts.fetchImpl ?? fetch;
   const base = opts.osvUrl ?? 'https://api.osv.dev';
-  const pkgs = readLockfile(root).filter((p) => opts.includeDev || !p.dev);
+  const lock = readLockfile(root);
+  const pkgs = (lock?.packages ?? []).filter((p) => opts.includeDev || !p.dev);
   if (!pkgs.length) return { detections: [], checked: 0 };
 
   try {
@@ -87,13 +65,16 @@ export async function scanDependencies(
         ruleId: 'DEP-OSV',
         severity,
         title: `${pkg.name}@${pkg.version}: ${top?.summary ?? 'known vulnerability'}${vulnIds.length > 1 ? ` (+${vulnIds.length - 1} more)` : ''}`.slice(0, 200),
-        file: 'package-lock.json',
-        line: 0,
+        file: lock!.file,
+        line: pkg.line,
         snippet: `${pkg.name}@${pkg.version} · ${ref}`,
       };
     });
     return { detections, checked: pkgs.length };
   } catch (e) {
-    return { detections: [], checked: 0, error: (e as Error).message };
+    const msg = (e as Error).message;
+    // Node's fetch says only "fetch failed" when the host can't be reached (offline, proxy, firewall).
+    const error = /fetch failed|ENOTFOUND|ECONNREFUSED|ETIMEDOUT|aborted|timeout/i.test(msg) ? `could not reach ${new URL(base).host} (${msg})` : msg;
+    return { detections: [], checked: 0, error };
   }
 }

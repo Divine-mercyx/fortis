@@ -17,7 +17,10 @@ export function printReport(result: ScanResult, opts: { failOn: Severity; prePus
   log('');
 
   if (!detections.length) {
-    log(c.green(c.bold('✓ All checks passed')), c.grey('· nothing found'));
+    // Don't call it a full pass when a check couldn't run (offline, no lockfile, OSV down).
+    const skipped = result.notes.some((n) => n.startsWith('Dependency check skipped'));
+    if (skipped) log(c.green(c.bold('✓ Nothing found')), c.yellow('· the dependency check did not run (see below)'));
+    else log(c.green(c.bold('✓ All checks passed')), c.grey('· nothing found'));
     return;
   }
 

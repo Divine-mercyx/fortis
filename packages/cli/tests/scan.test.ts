@@ -56,9 +56,11 @@ describe('runScan', () => {
 
   it('says when the dependency check could not run instead of reporting a clean result', () => {
     const none = repo({ 'package.json': '{}' }).dir;
-    expect(missingLockfileNote(none)).toMatch(/no package-lock\.json/);
+    expect(missingLockfileNote(none)).toMatch(/no lockfile/);
     const pnpm = repo({ 'package.json': '{}', 'pnpm-lock.yaml': "lockfileVersion: '9.0'\n" }).dir;
-    expect(missingLockfileNote(pnpm)).toMatch(/pnpm-lock\.yaml is not supported/);
+    expect(missingLockfileNote(pnpm)).toBeNull();
+    const bun = repo({ 'package.json': '{}', 'bun.lockb': 'x' }).dir;
+    expect(missingLockfileNote(bun)).toMatch(/bun\.lockb is not supported/);
     const npm = repo({ 'package.json': '{}', 'package-lock.json': '{}' }).dir;
     expect(missingLockfileNote(npm)).toBeNull();
     expect(missingLockfileNote(repo({ 'main.go': 'package main\n' }).dir)).toBeNull();

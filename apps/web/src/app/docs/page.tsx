@@ -19,25 +19,25 @@ const STACKS: Record<StackId, { label: string; install: string; run: string; not
     label: 'Node.js · pnpm',
     install: `pnpm add -D ${CLI_PACKAGE}`,
     run: `pnpm exec ${CLI_COMMAND}`,
-    note: 'The dependency check reads package-lock.json, so it does not run on pnpm-lock.yaml yet. Every other check works.',
+    note: 'Every check works, including the dependency check on pnpm-lock.yaml (lockfile v5, v6 and v9, workspaces included).',
   },
   yarn: {
     label: 'Node.js · Yarn',
     install: `yarn add -D ${CLI_PACKAGE}`,
     run: `yarn ${CLI_COMMAND}`,
-    note: 'The dependency check reads package-lock.json, so it does not run on yarn.lock yet. With Yarn Plug’n’Play, install the CLI globally so the git hook can find it.',
+    note: 'Every check works, including the dependency check on yarn.lock (Yarn 1 and Yarn 2+). With Yarn Plug’n’Play, install the CLI globally so the git hook can find it.',
   },
   bun: {
     label: 'Node.js · Bun',
     install: `bun add -d ${CLI_PACKAGE}`,
     run: `bunx ${CLI_COMMAND}`,
-    note: 'The dependency check reads package-lock.json, so it does not run on bun.lockb yet. Every other check works.',
+    note: 'The dependency check reads npm, pnpm and yarn lockfiles, so it does not run on bun.lock / bun.lockb yet. Every other check works.',
   },
   other: {
     label: 'Other languages (Python, Go, Java, PHP…)',
     install: `npm i -g ${CLI_PACKAGE}`,
     run: CLI_COMMAND,
-    note: 'Install Node.js 18+ to run the CLI. Secret scanning, staging tests (ZAP) and access checks work for any language. The fintech code rules read JavaScript and TypeScript today, and the dependency check reads npm lockfiles.',
+    note: 'Install Node.js 18+ to run the CLI. Secret scanning, staging tests (ZAP) and access checks work for any language. The fintech code rules read JavaScript and TypeScript today, and the dependency check reads npm, pnpm and yarn lockfiles.',
   },
 };
 
@@ -218,7 +218,7 @@ const ACCESS_JSON = `{
 
 const PACK_LABEL: Record<RulePack, string> = { fintech: 'Fintech', secrets: 'Secrets', dependencies: 'Dependencies' };
 const RULE_LANG: Record<string, string> = {
-  'FX-SEC-001': 'Any file', 'SEC-GEN-001': 'Any file', 'DEP-OSV': 'package-lock.json (pnpm and yarn lockfiles not yet)',
+  'FX-SEC-001': 'Any file', 'SEC-GEN-001': 'Any file', 'DEP-OSV': 'package-lock.json, pnpm-lock.yaml, yarn.lock',
   'FX-BOLA-001': 'Any language (running app)', 'FX-AUTH-001': 'Any language (running app)',
 };
 

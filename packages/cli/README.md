@@ -13,7 +13,7 @@ git push                       # the pre-push hook checks what you're pushing
 | Pack | Rules | Plan |
 |---|---|---|
 | Secrets | Private keys, AWS, GitHub, Slack, Google and Fortis keys; random-looking hard-coded secrets | Free |
-| Dependencies | Known vulnerabilities in `package-lock.json`, from [OSV](https://osv.dev) | Free |
+| Dependencies | Known vulnerabilities in `package-lock.json`, `pnpm-lock.yaml` or `yarn.lock`, from [OSV](https://osv.dev) | Free |
 | Fintech | Paystack / Flutterwave / Monnify secret keys; money records read without an ownership check; webhooks without a signature check; balance updates outside a transaction; BVN/NIN in logs; weak or leaked OTPs; transfers without an idempotency key | Core and above |
 
 Run `npx fortis rules` for the list and `npx fortis explain FX-OWN-001` for why a rule matters and how to fix it.
