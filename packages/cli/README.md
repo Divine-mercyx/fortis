@@ -2,11 +2,35 @@
 
 Fintech security checks on every push, from [Fortis](https://fortis.dev).
 
+## Install
+
+**JavaScript or TypeScript project:**
+
 ```bash
 npm i -D fortis-watchdog
 npx fortis init --key fts_…   # from the Fortis dashboard → Projects → New CLI key
 git push                       # the pre-push hook checks what you're pushing
 ```
+
+**Any other language.** This is a standalone binary and needs no Node:
+
+```bash
+curl -fsSL https://github.com/Divine-mercyx/fortis/releases/latest/download/install.sh | sh
+```
+
+```powershell
+irm https://github.com/Divine-mercyx/fortis/releases/latest/download/install.ps1 | iex
+```
+
+Then run `fortis init --key fts_…` in your repository.
+
+The scripts check the download against the release's `SHA256SUMS`. `FORTIS_VERSION` pins a version, and `FORTIS_INSTALL_DIR` changes the folder (default `~/.fortis/bin`). Builds exist for Linux (x64, arm64, glibc only), macOS (arm64, x64) and Windows (x64). On Alpine, use npm or the Docker image:
+
+```bash
+docker run --rm -v "$PWD:/src" -w /src -e FORTIS_KEY ghcr.io/divine-mercyx/fortis fortis scan --ci
+```
+
+To verify where a binary came from, run `gh attestation verify fortis-linux-x64.tar.gz --repo Divine-mercyx/fortis`.
 
 ## What it checks
 
@@ -16,7 +40,30 @@ git push                       # the pre-push hook checks what you're pushing
 | Dependencies | Known vulnerabilities in `package-lock.json`, `pnpm-lock.yaml` or `yarn.lock`, from [OSV](https://osv.dev) | Free |
 | Fintech | Money records read without an ownership check; webhooks without a signature check; balance updates outside a transaction; BVN/NIN in logs; weak or leaked OTPs; transfers without an idempotency key | Core and above |
 
-Run `npx fortis rules` for the list and `npx fortis explain FX-OWN-001` for why a rule matters and how to fix it.
+Run `fortis rules` for the list and `fortis explain FX-OWN-001` for why a rule matters and how to fix it.
+
+### Dependency files it reads
+
+| Language | Files |
+|---|---|
+| JavaScript | `package-lock.json`, `yarn.lock`, `pnpm-lock.yaml` |
+| PHP | `composer.lock` |
+| Python | `poetry.lock`, `uv.lock`, `Pipfile.lock`, or a pinned `requirements.txt` |
+| Java / Kotlin | `gradle.lockfile`, `pom.xml`, or an SBOM |
+| Go | `go.mod` |
+| .NET | `packages.lock.json` |
+| Ruby | `Gemfile.lock` |
+
+Files are found in any folder of the repository. Dev and test dependencies are left out where the file marks them (`yarn.lock`, recent `pnpm-lock.yaml` and `uv.lock` don't, so those are checked too). If a project has no lockfile, the scan says so.
+
+**Maven needs an SBOM for full coverage.** `pom.xml` lists only direct dependencies, and a parent POM or BOM often decides their versions, so Fortis reports how many it could check. To cover everything, including transitive dependencies, have Maven list them and pass the result to Fortis. `fortis ci init` adds this step for you on GitHub Actions.
+
+```bash
+mvn org.cyclonedx:cyclonedx-maven-plugin:makeAggregateBom -DoutputFormat=json -DoutputName=bom
+fortis scan --sbom target/bom.json
+```
+
+`--sbom` reads any CycloneDX JSON file, so it works for other languages too.
 
 ## Commands
 
@@ -30,15 +77,22 @@ Run `npx fortis rules` for the list and `npx fortis explain FX-OWN-001` for why 
 | `fortis login <key>` / `fortis logout` | Save or remove the key for this machine |
 | `fortis whoami` | Project, workspace and plan for the key |
 
-Exit codes: `0` passed, `1` findings at or above the threshold, `2` usage or configuration error.
+Exit codes: `0` passed, `1` findings at or above the threshold, `2` usage or configuration error, including a full scan that found no files.
+
+If the dependency check can't finish (OSV is down, or a lockfile can't be read), the scan says so, and its open dependency findings stay open. "Couldn't check" isn't recorded as "fixed".
 
 ## In CI
 
 ```yaml
-- run: npx fortis scan --ci
+- uses: Divine-mercyx/fortis@cli-v0.1.0-beta.6
+  with:
+    version: 0.1.0-beta.6
+- run: fortis scan --ci
   env:
     FORTIS_KEY: ${{ secrets.FORTIS_KEY }}
 ```
+
+`fortis ci init` writes this for you. On other CI systems, use the install script or the Docker image.
 
 ## Testing a running app (OWASP ZAP)
 
@@ -58,15 +112,16 @@ Needs Docker (image `zaproxy/zap-stable`, override with `FORTIS_ZAP_IMAGE`). For
 ## CI in one command
 
 ```bash
-npx fortis ci init                    # GitHub Actions (or --provider gitlab)
+fortis ci init                    # GitHub Actions (or --provider gitlab)
 ```
 
-This writes `.github/workflows/fortis.yml`:
+This writes `.github/workflows/fortis.yml`, which needs no Node in your project:
 
 - **Every pull request and push** gets a full scan.
   - Findings appear as annotations on the pull request.
   - A SARIF file goes to GitHub code scanning (free on public repositories).
 - **Every push to `staging`** (change it with `--staging-branch`) also gets a ZAP test, once the new deploy is answering.
+- **Maven projects** also get a step that lists every dependency as an SBOM.
 
 Set the `FORTIS_KEY` secret and the `FORTIS_STAGING_URL` variable in the repository settings. Add `--sarif fortis.sarif` to any scan to write SARIF yourself.
 
@@ -129,6 +184,8 @@ const testKey = 'sk_test_…'; // fortis-ignore
 const t = await Transfer.findById(req.params.id);
 ```
 
+Any comment style works, for example `# fortis-ignore` in Python or YAML.
+
 Or exclude paths in `.fortis.json`: `{ "ignore": ["fixtures/**"] }`.
 
 The git hook can be skipped once with `git push --no-verify`.
@@ -144,8 +201,14 @@ cd packages/cli && pnpm publish --access public --tag beta
 
 Then on npmjs.com: package → Settings → Trusted publishing → GitHub Actions, repository
 `Divine-mercyx/fortis`, workflow `release-cli.yml`. After that, bump `version` in
-`packages/cli/package.json` and push a matching tag (for example `cli-v0.1.0`); GitHub Actions
-tests, builds and publishes with provenance. Versions with a pre-release suffix go to the `beta` tag.
+`packages/cli/package.json` and push a matching tag (for example `cli-v0.1.0`). GitHub Actions then:
+
+- tests, and builds and smoke-tests a binary on each platform;
+- publishes a GitHub Release with the binaries, install scripts, checksums and build attestations;
+- pushes the Docker image to `ghcr.io`;
+- publishes to npm with provenance. Versions with a pre-release suffix go to the `beta` tag.
+
+To build a binary for your own machine, run `pnpm --filter fortis-watchdog build:binary`. The result goes in `dist-sea/`. A tag on a fork runs everything except npm, which makes a safe dry run; set `FORTIS_REPO` to install from it.
 
 Publishing a tarball by hand: `npm pack` rebuilds `dist/` first, so the packed CLI always reports
 the version in `package.json`. Publish it with `npm publish fortis-watchdog-<version>.tgz --tag beta`.

@@ -1,0 +1,10 @@
+datasource:
+  username: wallet_app
+  password: {{GENERIC}} # @hit
+  token-header: X-Auth-Token-Header-Name
+security:
+  private-key: ./secrets/signing-key-2024.pem
+  client-secret: ${OAUTH_CLIENT_SECRET}
+  api-key: ${{secrets.API_KEY_FOR_STAGING}}
+billing:
+  secretRef: billing-credentials-prod-v2.yaml

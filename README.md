@@ -77,6 +77,9 @@ pnpm --filter @fortis/api exec tsx scripts/set-plan.ts <org-slug> core
 See `packages/cli/README.md`. Build it with `pnpm --filter fortis-watchdog build` (one bundled file in
 `dist/fortis.js`); set `FORTIS_DEFAULT_API_URL` at build time to change the default API address.
 
+`pnpm --filter fortis-watchdog build:binary` builds a standalone executable for your machine in `dist-sea/`.
+Non-JavaScript teams use these, because they need no Node. The root `action.yml` installs one in GitHub Actions.
+
 ## Dashboard
 
 Next.js App Router with no UI framework: the design tokens, fonts, buttons and motion are ported from

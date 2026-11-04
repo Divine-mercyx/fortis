@@ -118,6 +118,24 @@ describe('scan upload', () => {
     expect(types).toEqual(['detected', 'fixed', 'reopened']);
   });
 
+  it('keeps dependency findings open when the dependency check could not finish', async () => {
+    const { key } = await coreProject();
+    const depFinding = { ruleId: 'DEP-OSV', severity: 'high', title: 'axios@0.21.1: SSRF', file: 'package-lock.json', line: 0, snippet: 'axios@0.21.1 · CVE-2021-3749' };
+    await upload(key, scanPayload([liveKeyFinding, depFinding]));
+
+    // OSV was down: the key really is gone, but the dependency finding was never looked at.
+    const partial = await upload(key, scanPayload([], { incompleteChecks: ['dependencies'] }));
+    expect(partial.json().fixedCount).toBe(1);
+    let rows = (await pool.query('select rule_id, status from findings order by rule_id')).rows;
+    expect(rows).toEqual([{ rule_id: 'DEP-OSV', status: 'open' }, { rule_id: 'FX-SEC-001', status: 'fixed' }]);
+
+    // A complete scan that no longer sees it means it really was fixed.
+    const complete = await upload(key, scanPayload([]));
+    expect(complete.json().fixedCount).toBe(1);
+    rows = (await pool.query("select status from findings where rule_id = 'DEP-OSV'")).rows;
+    expect(rows[0].status).toBe('fixed');
+  });
+
   it('does not close anything from a changed-files (pre-push) scan', async () => {
     const { key } = await coreProject();
     await upload(key, scanPayload([liveKeyFinding, ownershipFinding]));

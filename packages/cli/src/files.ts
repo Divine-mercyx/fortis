@@ -4,10 +4,11 @@ import { join } from 'node:path';
 import type { SourceFile } from './rules/types';
 
 const DEFAULT_IGNORES = [
-  'node_modules/**', '**/node_modules/**', 'dist/**', 'build/**', 'out/**', '.next/**', 'coverage/**', 'vendor/**',
-  '**/*.min.js', '**/*.map', '**/*.lock', 'package-lock.json', 'pnpm-lock.yaml', 'yarn.lock',
+  'node_modules/**', '**/node_modules/**', 'dist/**', 'build/**', 'out/**', '.next/**', 'coverage/**', 'vendor/**', '**/vendor/**',
+  '**/target/**', '**/.gradle/**', '**/__pycache__/**', '**/.venv/**', '**/venv/**', '**/site-packages/**', '**/obj/**',
+  '**/*.min.js', '**/*.map', '**/*.lock', 'package-lock.json', '**/package-lock.json', 'pnpm-lock.yaml', '**/pnpm-lock.yaml', 'yarn.lock', '**/packages.lock.json', '**/gradle.lockfile',
 ];
-const BINARY = /\.(png|jpe?g|gif|webp|ico|svg|pdf|zip|gz|tgz|jar|woff2?|ttf|otf|eot|mp4|mp3|mov|wasm|exe|dll|so|dylib|bin|sqlite|db)$/i;
+const BINARY = /\.(png|jpe?g|gif|webp|ico|svg|pdf|zip|gz|tgz|jar|war|ear|class|pyc|phar|nupkg|woff2?|ttf|otf|eot|mp4|mp3|mov|wasm|exe|dll|so|dylib|bin|sqlite|db)$/i;
 const MAX_BYTES = 1024 * 1024;
 
 /** Tiny glob: `**` matches across folders, `*` within one. */
