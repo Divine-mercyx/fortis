@@ -9,7 +9,7 @@ import { isIgnored } from './types';
  * shape and the absence of the usual safeguard. Silence a reviewed line with `# fortis-ignore`.
  */
 
-const MONEY = /transfer|wallet|account|payout|withdraw|transaction|payment|balance|loan|disburse|beneficiar|card|invoice/i;
+const MONEY = /transfer|wallet|account|payout|withdraw|deposit|transaction|payment|balance|loan|disburse|beneficiar|card|invoice|expense|income|ledger|savings|statement|receipt/i;
 
 const hit = (file: SourceFile, line: number, ruleId: string, severity: Detection['severity'], title: string): Detection => ({
   ruleId,
@@ -43,7 +43,11 @@ const SQL_BY_ID = /\b(?:select|update|delete)\b.*\bwhere\s+(?:\w+\.)?id\s*=\s*(?
 const OWNER_SCOPE = /request\.user|current_user|\bg\.user|\buser_id\b|\bowner(_id)?\s*=|\bcustomer(_id)?\s*=|\buser\s*=|\buser\.id\b|\bcheck_object_permissions\b|\bget_queryset\b/;
 const ADMIN_ONLY = /staff_member_required|\badmin_required\b|IsAdminUser|\bis_staff\b|\bis_superuser\b|\/admin\//;
 
-const withoutSignInChecks = (code: string) => code.replace(/\b(?:request\.user|current_user|\w*user)\.is_authenticated\b/g, ' ');
+/** Neither says who owns the record: `request.user.is_authenticated`, or `expense.owner = request.user` when saving it. */
+const withoutNonChecks = (code: string) =>
+  code
+    .replace(/\b(?:request\.user|current_user|\w*user)\.is_authenticated\b/g, ' ')
+    .replace(/^\s*\w+\.\w+\s*=\s*(?:request\.user|current_user|g\.user)\b.*$/gm, ' ');
 
 /** The lookup uses something the caller controls: a URL parameter or the request itself. */
 function fromRequest(value: string, fn: PyFunction): boolean {
@@ -57,7 +61,7 @@ function ownershipInFunctions(file: SourceFile): Detection[] {
     if (!isRequestHandler(fn)) continue;
     const decorators = fn.decorators.map((d) => d.text).join('\n');
     if (ADMIN_ONLY.test(`${decorators}\n${fn.name}\n${fn.body}\n${fn.classBases ?? ''}`)) continue;
-    if (OWNER_SCOPE.test(withoutSignInChecks(pyCodeOnly(fn.body)))) continue;
+    if (OWNER_SCOPE.test(withoutNonChecks(pyCodeOnly(fn.body)))) continue;
     for (const { line, text } of bodyLines(file, fn)) {
       const code = pyCodeOnly(text);
       const byId = BY_ID.map((re) => re.exec(code)?.[1]).find(Boolean);

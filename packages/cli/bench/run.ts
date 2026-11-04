@@ -29,6 +29,9 @@ const FAKES: Record<string, string> = {
   AWS_KEY: `AKIA${rand(16, 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567')}`,
   GH_TOKEN: `ghp_${rand(36)}`,
   GENERIC: rand(28),
+  LIVE_PLACEHOLDER: ['sk', 'live', 'X'.repeat(25)].join('_'),
+  TEST_PLACEHOLDER: ['sk', 'test', `${'X'.repeat(20)}5678`].join('_'),
+  WEBHOOK_SECRET: ['whsec', rand(32)].join('_'),
   PYPI: `pypi-${rand(60)}`,
 };
 

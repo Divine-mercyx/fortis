@@ -160,6 +160,43 @@ source = { registry = "https://pypi.org/simple" }
     expect(devMap('uv.lock', text)).toEqual({ flask: false, werkzeug: false, psycopg: false, pytest: true, pluggy: true });
   });
 
+  it("uv.lock: follows extras, such as fastapi[standard]", () => {
+    const text = `[[package]]
+name = "app"
+version = "0.1.0"
+source = { virtual = "." }
+dependencies = [
+    { name = "fastapi", extra = ["standard"] },
+]
+
+[package.dev-dependencies]
+dev = [
+    { name = "pytest" },
+]
+
+[[package]]
+name = "fastapi"
+version = "0.100.0"
+source = { registry = "https://pypi.org/simple" }
+
+[package.optional-dependencies]
+standard = [
+    { name = "uvicorn" },
+]
+
+[[package]]
+name = "uvicorn"
+version = "0.30.0"
+source = { registry = "https://pypi.org/simple" }
+
+[[package]]
+name = "pytest"
+version = "7.0.0"
+source = { registry = "https://pypi.org/simple" }
+`;
+    expect(devMap('uv.lock', text)).toEqual({ fastapi: false, uvicorn: false, pytest: true });
+  });
+
   it('uv.lock: counts everything as production when the project lists no dependencies', () => {
     const text = '[[package]]\nname = "app"\nversion = "1.0"\nsource = { editable = "." }\n\n[[package]]\nname = "x"\nversion = "1.0"\nsource = { registry = "https://pypi.org/simple" }\n';
     expect(devMap('uv.lock', text)).toEqual({ x: false });

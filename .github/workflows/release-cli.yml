@@ -93,7 +93,7 @@ jobs:
         run: |
           EXE=packages/cli/dist-sea/fortis
           [ "$RUNNER_OS" = "Windows" ] && EXE=$EXE.exe
-          python3 packages/python/build_wheel.py --binary "$EXE" --platform "${{ matrix.wheel }}" --version "${GITHUB_REF_NAME#cli-v}" --out wheels
+          uv run --no-project --python 3.12 python packages/python/build_wheel.py --binary "$EXE" --platform "${{ matrix.wheel }}" --version "${GITHUB_REF_NAME#cli-v}" --out wheels
           bash packages/python/test_wheel.sh wheels/*.whl
       - uses: actions/upload-artifact@v4
         with:

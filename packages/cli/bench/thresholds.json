@@ -43,6 +43,10 @@
     "precision": 1,
     "recall": 1
   },
+  "FX-SEC-001:py": {
+    "precision": 1,
+    "recall": 1
+  },
   "FX-TXN-001": {
     "precision": 1,
     "recall": 1

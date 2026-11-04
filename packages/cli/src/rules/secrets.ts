@@ -1,5 +1,5 @@
 import type { Detection, FileRule, SourceFile } from './types';
-import { isIgnored } from './types';
+import { isIgnored, TEST_PATH } from './types';
 
 const ANY_TEXT = /\.(c|m)?(j|t)sx?$|\.(json|ya?ml|env|toml|ini|properties|py|pyi|ipynb|rb|php|go|java|kt|kts|groovy|scala|swift|dart|rs|vue|svelte|jsp|cshtml|cs|sh|sql|tf|tfvars|txt|md|xml|gradle|cfg|conf|pem|key|plist)$|(^|\/)id_(rsa|ecdsa|ed25519)$|(^|\/)\.env(\.|$)|(^|\/)Dockerfile$|(^|\/)\.pypirc$|(^|\/)pip\.conf$/i;
 
@@ -58,8 +58,8 @@ function entropy(s: string): number {
 }
 
 const PLACEHOLDER = /^(x+|\*+|<.*>|\$\{.*\}|\$[A-Za-z_]|%[\w(]|\{\{|\{cipher\}|ENC\(|your[_-]|changeme|example|placeholder|dummy|test|sample|redacted)/i;
-/** Routes, URLs without credentials, dashed-word labels and variable names (`:login-token="loginToken"`) are not secrets. */
-const NOT_SECRET = /^\/|^https?:\/\/[^@\s]+$|^[a-z]+(?:[-_./][a-z]+)+$|^[A-Za-z][a-z]*(?:[A-Z][a-z]+)+$/;
+/** Routes, URLs without credentials, dashed-word labels, variable and setting names (`:login-token="loginToken"`, `"WEBHOOK_SECRET"`) and email addresses are not secrets. */
+const NOT_SECRET = /^\/|^https?:\/\/[^@\s]+$|^[a-z]+(?:[-_./][a-z]+)+$|^[A-Za-z][a-z]*(?:[A-Z][a-z]+)+$|^[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+$|^[^@\s]+@[^@\s]+\.[A-Za-z]+$/;
 
 /** Firebase config files hold client keys that ship inside every app build; they are public by design. */
 const FIREBASE_CONFIG = /(^|\/)(google-services\.json|GoogleService-Info\.plist)$/i;
@@ -69,7 +69,9 @@ function scan(file: SourceFile, patterns: Pattern[]): Detection[] {
   file.lines.forEach((text, i) => {
     for (const p of patterns) {
       p.re.lastIndex = 0;
-      if (p.re.test(text) && !isIgnored(file, i + 1)) {
+      const match = p.re.exec(text);
+      // `sk_live_XXXXXXXXXXXX` is a placeholder in docs and fixtures, not a key.
+      if (match && !/X{8}/.test(match[0]) && !isIgnored(file, i + 1)) {
         if (p.title === 'Google API key in code' && FIREBASE_CONFIG.test(file.path)) {
           out.push({ ruleId: p.ruleId, severity: 'low', title: 'Firebase client key (public by design: restrict it to your app in Google Cloud)', file: file.path, line: i + 1, snippet: text.trim() });
           continue;
@@ -103,6 +105,8 @@ export const genericSecretRule: FileRule = {
       out.push({ ruleId: 'SEC-GEN-001', severity: 'high', title, file: file.path, line, snippet: text.trim() });
     };
     const report = (name: string, text: string, line: number) => reportAs(`Hard-coded ${name}`, text, line);
+    // Test fixtures are full of fake passwords. Real key shapes above still count there; guesses from a name don't.
+    if (TEST_PATH.test(file.path)) return out;
     const unquotedAllowed = CONFIG_FILE.test(file.path) && !EXAMPLE_FILE.test(file.path);
     const isNotebook = /\.ipynb$/i.test(file.path);
     file.lines.forEach((raw, i) => {

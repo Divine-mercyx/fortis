@@ -35,5 +35,5 @@ jobs:
       - run: pnpm --filter fortis-watchdog build:binary
       - run: bash packages/cli/scripts/smoke.sh packages/cli/dist-sea/fortis
       - uses: astral-sh/setup-uv@v6
-      - run: python3 packages/python/build_wheel.py --binary packages/cli/dist-sea/fortis --platform manylinux_2_28_x86_64 --version "$(node -p "require('./packages/cli/package.json').version")" --out wheels
+      - run: uv run --no-project --python 3.12 python packages/python/build_wheel.py --binary packages/cli/dist-sea/fortis --platform manylinux_2_28_x86_64 --version "$(node -p "require('./packages/cli/package.json').version")" --out wheels
       - run: bash packages/python/test_wheel.sh wheels/*.whl

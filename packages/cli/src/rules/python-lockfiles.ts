@@ -76,9 +76,18 @@ function namesIn(array: string): string[] {
 
 const sectionKeys = (section: string) => [...section.matchAll(/^"?([A-Za-z0-9][A-Za-z0-9._-]*)"?\s*=/gm)].map((m) => m[1]!);
 
-/** Packages this one needs: uv and PDM's `dependencies = [...]`, or Poetry's `[package.dependencies]`. */
+/**
+ * Packages this one needs: uv and PDM's `dependencies = [...]`, or Poetry's `[package.dependencies]`.
+ * A dependent may ask for an extra (`fastapi[standard]`), so extras count too: checking a package
+ * nobody needed is better than hiding one somebody did.
+ */
 function edgesOf(block: Block): string[] {
-  return [...namesIn(tomlArray(block.top, 'dependencies')), ...sectionKeys(tomlSection(block.whole, 'package.dependencies'))].map(pypiName);
+  const extras = tomlSection(block.whole, 'package.optional-dependencies');
+  return [
+    ...namesIn(tomlArray(block.top, 'dependencies')),
+    ...sectionKeys(tomlSection(block.whole, 'package.dependencies')),
+    ...sectionKeys(extras).flatMap((k) => namesIn(tomlArray(extras, k))),
+  ].map(pypiName);
 }
 
 /** The names reachable from `roots`, or null if the walk finds nothing, so nothing gets marked dev by mistake. */
@@ -124,10 +133,7 @@ export function tomlPythonLock(text: string, _file: string, manifest?: string): 
     // uv, and Poetry 1.5 to 1.8: neither marks dev packages, so walk from what production needs.
     const projects = all.filter((b) => b.isProject);
     const roots = projects.length
-      ? projects.flatMap((p) => {
-          const extras = tomlSection(p.whole, 'package.optional-dependencies');
-          return [...edgesOf(p), ...sectionKeys(extras).flatMap((k) => namesIn(tomlArray(extras, k)))];
-        })
+      ? projects.flatMap(edgesOf)
       : manifest
         ? pyprojectRoots(manifest)
         : [];

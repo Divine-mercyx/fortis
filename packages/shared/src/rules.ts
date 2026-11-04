@@ -123,7 +123,7 @@ export const RULE_CATALOG: readonly RuleMeta[] = [
 ];
 
 /** The fix for a finding, in the language of the file it's in. */
-export function fixFor(rule: RuleMeta, file: string): string {
+export function fixFor(rule: Pick<RuleMeta, 'fix' | 'fixPython'>, file: string): string {
   return /\.py$/i.test(file) && rule.fixPython ? rule.fixPython : rule.fix;
 }
 
