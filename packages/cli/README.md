@@ -228,19 +228,14 @@ Keys are read from `FORTIS_KEY`, then from `~/.config/fortis/credentials.json` (
 
 ## Changelog
 
-**0.1.0-beta.9**
-- The dependency check now covers PHP, Python, Java, Go, .NET and Ruby as well as JavaScript, in any folder of the repository, and reads CycloneDX SBOMs with `--sbom`.
-- Standalone binaries, a Docker image and a GitHub Action, so non-JavaScript teams don't need Node. `fortis ci init` uses them.
-- More secrets are caught in non-JavaScript code and config files, including unquoted values in `.env`, `.properties` and YAML.
-- When the dependency check can't finish, its open findings stay open instead of being marked fixed. A full scan that finds no files now fails instead of passing.
-
-**0.1.0-beta.8**
-- Any language: the dependency check reads PHP, Python, Java (Gradle, `pom.xml`, or a CycloneDX SBOM with `--sbom`), Go, .NET and Ruby lockfiles as well as npm, pnpm and Yarn, anywhere in a monorepo, and says which projects have no lockfile. Secret scanning understands PHP, Go, Java/Spring, Python and `.env`/`.properties`/YAML config. (John Imeobong)
-- Standalone binaries, install scripts, a Docker image and a GitHub Action, for projects without Node. (John Imeobong)
-- A scan that couldn't run the dependency check no longer closes its open findings, and a scan that finds no files fails instead of passing. (John Imeobong)
+**0.1.0-beta.9** (beta.8 was not published; its changes are here)
+- Any language: the dependency check reads PHP, Python, Java (Gradle, `pom.xml`, or a CycloneDX SBOM with `--sbom`), Go, .NET and Ruby lockfiles as well as npm, pnpm and Yarn, in any folder of the repository, and says which projects have no lockfile.
+- More secrets are caught in non-JavaScript code and config files, including PHP, Go and Java/Spring styles and unquoted values in `.env`, `.properties` and YAML.
+- Standalone binaries, install scripts, a Docker image and a GitHub Action, so non-JavaScript teams don't need Node. `fortis ci init` uses them.
 - The first push of a new repository or branch checks every commit being pushed, not only the last one. Before this, a key leaked in an earlier commit got through on a first push.
-- The git hook works with Yarn Plug'n'Play, and says clearly when the CLI isn't installed instead of failing with an npm error.
-- `fortis init` upgrades a hook installed by an earlier version (your own lines in the hook are kept), and its CI hint matches your package manager.
+- The git hook works with Yarn Plug'n'Play and without Node, and says clearly what to install when the CLI is missing. `fortis init` upgrades a hook from an earlier version and keeps your own lines in it.
+- When the dependency check can't finish, its open findings stay open instead of being marked fixed. A full scan that finds no files fails instead of passing.
+- `fortis rules | head` and similar pipes no longer crash the CLI.
 
 **0.1.0-beta.7**
 - The dependency check reads `pnpm-lock.yaml` (v5, v6 and v9, workspaces included) and `yarn.lock` (Yarn 1 and Yarn 2+), as well as `package-lock.json`. Dev-only packages are still skipped by default.

@@ -13,9 +13,6 @@
     "test": "pnpm -r test",
     "db:generate": "pnpm --filter @fortis/api db:generate",
     "db:migrate": "pnpm --filter @fortis/api db:migrate",
-    "security:scan": "fortis scan --ci"
-  },
-  "devDependencies": {
-    "fortis-watchdog": "^0.1.0-beta.5"
+    "security:scan": "pnpm --filter fortis-watchdog fortis scan --ci"
   }
 }

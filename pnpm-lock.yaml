@@ -6,11 +6,7 @@ settings:
 
 importers:
 
-  .:
-    devDependencies:
-      fortis-watchdog:
-        specifier: ^0.1.0-beta.5
-        version: 0.1.0-beta.5
+  .: {}
 
   apps/api:
     dependencies:
@@ -1352,11 +1348,6 @@ packages:
     resolution: {integrity: sha512-eru+uCPQ2g+nLBkf84MHP/KyNNMar0BDy0j+i8Fb72GF9/YHBZ58q7FODUtfVV7XU9nfRUHXSmaM8NmZcIbZ4Q==}
     engines: {node: '>=20'}
 
-  fortis-watchdog@0.1.0-beta.5:
-    resolution: {integrity: sha512-DeUq6WW3VUBoa3W8cwX6ldP09RMN6THuZKwYvcyUJJdxSJoxbzb7j1FTg9HgZJSmhw2MWrIB/RcdFy2rBd4yvw==}
-    engines: {node: '>=18.17'}
-    hasBin: true
-
   fsevents@2.3.3:
     resolution: {integrity: sha512-5xoDfX+fL7faATnagmWPpbFtwh/R77WmMMqqHGS65C3vvB0YHrgF+B1YmZ3441tMj5n63k0212XNoJwzlhffQw==}
     engines: {node: ^8.16.0 || ^10.6.0 || >=11.0.0}
@@ -2620,8 +2611,6 @@ snapshots:
       fast-deep-equal: 3.1.3
       fast-querystring: 1.1.2
       safe-regex2: 5.1.2
-
-  fortis-watchdog@0.1.0-beta.5: {}
 
   fsevents@2.3.3:
     optional: true

@@ -1,4 +1,7 @@
 {
   "failOn": "critical",
-  "projectId": "cc71bc4d-9cb3-45b5-ae9e-0773b15cd27e"
+  "projectId": "cc71bc4d-9cb3-45b5-ae9e-0773b15cd27e",
+  "ignore": [
+    "packages/cli/bench/cases/**"
+  ]
 }

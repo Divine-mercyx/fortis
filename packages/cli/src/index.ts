@@ -633,7 +633,9 @@ async function cmdInit(flags: Flags): Promise<number> {
   log('');
   const has = (f: string) => existsSync(join(root, f));
   const runScript = has('pnpm-lock.yaml') ? 'pnpm run security:scan' : has('yarn.lock') ? 'yarn security:scan' : has('bun.lock') || has('bun.lockb') ? 'bun run security:scan' : 'npm run security:scan';
-  log(c.grey(`Next: push as usual. For CI, run: fortis ci init${existsSync(pkgPath) ? ` (or set FORTIS_KEY and run: ${runScript})` : ''}`));
+  // A project install isn't on PATH: name the command the way this project runs it.
+  const fortis = !existsSync(pkgPath) ? 'fortis' : has('pnpm-lock.yaml') ? 'pnpm exec fortis' : has('yarn.lock') ? 'yarn fortis' : has('bun.lock') || has('bun.lockb') ? 'bunx fortis' : 'npx fortis';
+  log(c.grey(`Next: push as usual. For CI, run: ${fortis} ci init${existsSync(pkgPath) ? ` (or set FORTIS_KEY and run: ${runScript})` : ''}`));
   return 0;
 }
 
