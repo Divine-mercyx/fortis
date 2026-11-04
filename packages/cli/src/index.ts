@@ -13,7 +13,7 @@ import { githubAnnotations, toSarif } from './sarif';
 import { dockerAvailable, isLocalHost, parseZapReport, reportOrigins, runZap, waitForTarget, ZAP_IMAGE, type DastFinding, type ZapAuth, type ZapReport } from './dast';
 import { PROJECT_CONFIG, readProjectConfig, removeKey, resolveKey, saveKey, writeProjectConfig } from './config';
 import { apiUrl, VERSION } from './env';
-import { currentBranch, currentCommit, repoRoot } from './git';
+import { currentBranch, currentCommit, parsePushRefs, repoRoot, type PushedRef } from './git';
 import { installHook } from './hook';
 import { explain, printDastReport, printReport } from './report';
 import { meetsThreshold, runScan } from './scan';
@@ -125,7 +125,16 @@ async function cmdScan(flags: Flags): Promise<number> {
     notes.push('No Fortis key found, so only the free secrets and dependency checks ran. Add a key for the fintech rule pack.');
   }
 
-  const result = await runScan({ root, scope: prePush ? 'changed' : 'full', packs, ignore: config.ignore, offline });
+  // The hook passes --stdin: git lists the refs being pushed there, so a first push covers every new commit.
+  let pushed: PushedRef[] | undefined;
+  if (prePush && flags.stdin && !process.stdin.isTTY) {
+    try {
+      pushed = parsePushRefs(readFileSync(0, 'utf8'));
+    } catch {
+      /* no stdin: fall back to comparing with the remote branch */
+    }
+  }
+  const result = await runScan({ root, scope: prePush ? 'changed' : 'full', packs, ignore: config.ignore, offline, pushed });
   result.notes.unshift(...notes);
 
   if (flags.history) {
@@ -613,7 +622,9 @@ async function cmdInit(flags: Flags): Promise<number> {
     }
   }
   log('');
-  log(c.grey('Next: push as usual. In CI, set FORTIS_KEY and run: npm run security:scan'));
+  const has = (f: string) => existsSync(join(root, f));
+  const runScript = has('pnpm-lock.yaml') ? 'pnpm run security:scan' : has('yarn.lock') ? 'yarn security:scan' : has('bun.lock') || has('bun.lockb') ? 'bun run security:scan' : 'npm run security:scan';
+  log(c.grey(`Next: push as usual. In CI, set FORTIS_KEY and run: ${runScript}`));
   return 0;
 }
 
