@@ -28,6 +28,7 @@ const FAKES: Record<string, string> = {
   MONNIFY_PROD: ['MK', 'PROD', rand(10, 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789')].join('_'),
   AWS_KEY: `AKIA${rand(16, 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567')}`,
   GH_TOKEN: `ghp_${rand(36)}`,
+  GENERIC: rand(28),
 };
 
 type Score = { tp: number; fp: number; fn: number; misses: string[]; falsePositives: string[] };

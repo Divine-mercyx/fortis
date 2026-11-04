@@ -2,6 +2,8 @@ import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'n
 import { join } from 'node:path';
 import { execFileSync } from 'node:child_process';
 
+import { INSTALL_URL } from './env';
+
 const MARKER = '# fortis-pre-push';
 /** Finds the CLI wherever it was installed: in this project (npm, pnpm, yarn), or globally (any language). */
 // --stdin: git writes the refs being pushed to the hook's stdin; the CLI reads them so a first
@@ -15,6 +17,8 @@ ${MARKER}
 # Installed by Fortis. Checks the files you are about to push. Skip once with: git push --no-verify
 ${RUN}
 `;
+/** What earlier versions wrote. It needs Node, so `fortis init` replaces it. */
+const OLD_RUN = /^npx --no-install fortis scan --pre-push(?: \|\| exit 1)?$/m;
 
 function hooksDir(root: string): string {
   try {

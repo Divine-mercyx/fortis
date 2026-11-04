@@ -11,12 +11,40 @@ import { useSession } from '@/components/session';
 import { StagingTargets } from '@/components/targets';
 import { CodeLine, CopyButton, Empty, FormError, Modal, SeverityPill, Skeleton, StatusTag, useToast } from '@/components/ui';
 import { api, ApiError, fetcher } from '@/lib/api';
-import { CLI_COMMAND, CLI_PACKAGE } from '@/lib/cli';
+import { CLI_COMMAND, CLI_INSTALL_URL, CLI_PACKAGE } from '@/lib/cli';
 import { timeAgo } from '@/lib/format';
 import type { FindingRow, ScanRow } from '@/lib/types';
 
 type Project = { id: string; name: string; slug: string; repoUrl: string | null; createdAt: string };
 type Token = { id: string; name: string; prefix: string; createdAt: string; lastUsedAt: string | null; revokedAt: string | null; createdBy: string | null };
+
+/** npm for JavaScript projects; a standalone binary for every other stack, which may have no Node. */
+function InstallCommands({ initArgs = '' }: { initArgs?: string }) {
+  const [stack, setStack] = useState<'js' | 'other'>('js');
+  return (
+    <>
+      <div className="seg" role="group" aria-label="What your project is written in" style={{ marginBottom: 10 }}>
+        <button type="button" className={stack === 'js' ? 'on' : ''} aria-pressed={stack === 'js'} onClick={() => setStack('js')}>JavaScript / TypeScript</button>
+        <button type="button" className={stack === 'other' ? 'on' : ''} aria-pressed={stack === 'other'} onClick={() => setStack('other')}>Java, PHP, Python, Go, others</button>
+      </div>
+      {stack === 'js' ? (
+        <>
+          <CodeLine cmd={`npm i -D ${CLI_PACKAGE}`} />
+          <CodeLine cmd={`npx ${CLI_COMMAND} init${initArgs}`} />
+        </>
+      ) : (
+        <>
+          <CodeLine cmd={`curl -fsSL ${CLI_INSTALL_URL}/install.sh | sh`} />
+          <p className="small" style={{ margin: '8px 0' }}>On Windows, in PowerShell:</p>
+          <CodeLine cmd={`irm ${CLI_INSTALL_URL}/install.ps1 | iex`} />
+          <p className="small" style={{ margin: '8px 0' }}>Then, in your repository:</p>
+          <CodeLine cmd={`${CLI_COMMAND} init${initArgs}`} />
+          <p className="small" style={{ marginBottom: 0 }}>In every language, Fortis checks for leaked secrets and vulnerable dependencies. The fintech code rules cover JavaScript and TypeScript so far.</p>
+        </>
+      )}
+    </>
+  );
+}
 
 function NewKey({ projectId, onClose, onCreated }: { projectId: string; onClose: () => void; onCreated: () => void }) {
   const { org } = useSession();
@@ -51,9 +79,8 @@ function NewKey({ projectId, onClose, onCreated }: { projectId: string; onClose:
           <div className="code"><code>{secret}</code><CopyButton text={secret} /></div>
         </div>
         <p className="small" style={{ marginTop: 0 }}>In your repository, install the CLI and connect it with this key:</p>
-        <CodeLine cmd={`npm i -D ${CLI_PACKAGE}`} />
-        <CodeLine cmd={`npx ${CLI_COMMAND} init --key ${secret}`} />
-        <p className="small" style={{ marginBottom: 0 }}>For CI, save the key as a secret named <span className="mono">FORTIS_KEY</span> and run <span className="mono">npx {CLI_COMMAND} scan --ci</span>.</p>
+        <InstallCommands initArgs={` --key ${secret}`} />
+        <p className="small" style={{ marginBottom: 0 }}>For CI, save the key as a secret named <span className="mono">FORTIS_KEY</span> and run <span className="mono">{CLI_COMMAND} ci init</span> in the repository.</p>
         <div className="modal-actions" style={{ marginTop: 18 }}>
           <button className="btn btn-primary" onClick={onClose}><Check /> I've saved it</button>
         </div>
@@ -164,8 +191,8 @@ export default function ProjectPage() {
           <h2 className="h2" style={{ marginBottom: 20 }}>Three steps to your first scan.</h2>
           <ol className="steps">
             <li><strong>Create a CLI key</strong>{isAdmin ? <button className="btn btn-outline btn-sm" onClick={() => setNewKey(true)}><Plus /> New CLI key</button> : <span className="small">Ask an admin to create one.</span>}</li>
-            <li><strong>Install Fortis in the repo</strong><CodeLine cmd={`npm i -D ${CLI_PACKAGE}`} /><CodeLine cmd={`npx ${CLI_COMMAND} init`} /></li>
-            <li><strong>Push as usual</strong><span className="small">The pre-push hook checks changed files; add <span className="mono">npx {CLI_COMMAND} scan --ci</span> to CI for full scans that also close fixed findings.</span></li>
+            <li><strong>Install Fortis in the repo</strong><InstallCommands /></li>
+            <li><strong>Push as usual</strong><span className="small">The pre-push hook checks changed files; run <span className="mono">{CLI_COMMAND} ci init</span> to add full scans to CI, which also close fixed findings.</span></li>
           </ol>
           <p className="small" style={{ marginTop: 18 }}>The CLI is in early access; package and command names may change.</p>
         </section>

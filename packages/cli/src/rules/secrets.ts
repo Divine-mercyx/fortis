@@ -1,7 +1,7 @@
 import type { Detection, FileRule, SourceFile } from './types';
 import { isIgnored } from './types';
 
-const ANY_TEXT = /\.(c|m)?(j|t)sx?$|\.(json|ya?ml|env|toml|ini|properties|py|rb|php|go|java|kt|cs|sh|tf|txt|md|xml|gradle|pem|key|plist)$|(^|\/)id_(rsa|ecdsa|ed25519)$|(^|\/)\.env(\.|$)|(^|\/)Dockerfile$/i;
+const ANY_TEXT = /\.(c|m)?(j|t)sx?$|\.(json|ya?ml|env|toml|ini|properties|py|rb|php|go|java|kt|kts|groovy|scala|swift|dart|rs|vue|svelte|jsp|cshtml|cs|sh|sql|tf|tfvars|txt|md|xml|gradle|cfg|conf|pem|key|plist)$|(^|\/)id_(rsa|ecdsa|ed25519)$|(^|\/)\.env(\.|$)|(^|\/)Dockerfile$/i;
 
 type Pattern = { re: RegExp; ruleId: string; severity: Detection['severity']; title: string };
 
@@ -22,8 +22,18 @@ const GENERIC: Pattern[] = [
   { re: /\bfts_[A-Za-z0-9]{40}\b/g, ruleId: 'SEC-GEN-001', severity: 'high', title: 'Fortis CLI key in code' },
 ];
 
-/** `password = "…"`, `apiKey: '…'` and similar, when the value looks random. */
-const ASSIGNMENT = /\b([A-Za-z0-9_]*(?:secret|token|api[_-]?key|private[_-]?key|password|passwd|client[_-]?secret)[A-Za-z0-9_]*)\s*[:=]\s*["'`]([^"'`\s]{16,})["'`]/gi;
+/** `password = "…"`, `apiKey: '…'`, PHP's `'api_key' => '…'`, Go's `token := "…"` and similar, when the value looks random. */
+const ASSIGNMENT = /\b([A-Za-z0-9_]*(?:secret|token|api[_-]?key|private[_-]?key|password|passwd|client[_-]?secret)[A-Za-z0-9_]*)["']?\s*(?:=>|:=|[:=])\s*["'`]([^"'`\s]{16,})["'`]/gi;
+
+/** Config files where values go unquoted: `spring.datasource.password=…`, `API_TOKEN: …`. */
+const CONFIG_FILE = /\.(env|properties|ya?ml|ini|toml|conf|cfg)$|(^|\/)\.env(\.|$)/i;
+const EXAMPLE_FILE = /\.(example|sample|template|dist|tmpl)$|\.(example|sample)\./i;
+const UNQUOTED = /^\s*(?:export\s+|-\s+)?([A-Za-z0-9_.-]*(?:secret|token|api[_-]?key|private[_-]?key|password|passwd)[A-Za-z0-9_.-]*)\s*[:=]\s*([^\s"'`#]{16,})\s*(?:#.*)?$/i;
+/** Key files, keystores and dotted class names are settings that point at a secret, not the secret. */
+const CONFIG_REFERENCE = /^(?:classpath|file|env|vault|secretref|arn):|^\.{0,2}\/|^[\w./-]+\.(?:pem|key|jks|p12|pfx|json|ya?ml|crt)$|^(?:[A-Za-z_][\w$]*\.){2,}[\w$]+$/;
+
+/** The value on this line comes from the environment, in any of the languages we scan. */
+const READS_ENV = /process\.env|import\.meta\.env|os\.environ|getenv\(|\benv\(|\$_ENV|\$_SERVER|System\.getProperty|GetEnvironmentVariable|\bENV\[|@Value\(/;
 
 function entropy(s: string): number {
   const freq = new Map<string, number>();
@@ -36,9 +46,9 @@ function entropy(s: string): number {
   return h;
 }
 
-const PLACEHOLDER = /^(x+|\*+|<.*>|\$\{.*\}|your[_-]|changeme|example|placeholder|dummy|test|sample|redacted)/i;
-/** Routes, URLs without credentials and dashed-word labels are not secrets. */
-const NOT_SECRET = /^\/|^https?:\/\/[^@\s]+$|^[a-z]+(?:[-_./][a-z]+)+$/;
+const PLACEHOLDER = /^(x+|\*+|<.*>|\$\{.*\}|\$[A-Za-z_]|%[\w(]|\{\{|\{cipher\}|ENC\(|your[_-]|changeme|example|placeholder|dummy|test|sample|redacted)/i;
+/** Routes, URLs without credentials, dashed-word labels and variable names (`:login-token="loginToken"`) are not secrets. */
+const NOT_SECRET = /^\/|^https?:\/\/[^@\s]+$|^[a-z]+(?:[-_./][a-z]+)+$|^[A-Za-z][a-z]*(?:[A-Z][a-z]+)+$/;
 
 /** Firebase config files hold client keys that ship inside every app build; they are public by design. */
 const FIREBASE_CONFIG = /(^|\/)(google-services\.json|GoogleService-Info\.plist)$/i;
@@ -75,17 +85,23 @@ export const genericSecretRule: FileRule = {
   appliesTo: ANY_TEXT,
   run: (file) => {
     const out = scan(file, GENERIC);
+    const looksRandom = (value: string) => !PLACEHOLDER.test(value) && !NOT_SECRET.test(value) && entropy(value) >= 3.5
+      && !PAYMENT_KEYS.some((p) => { p.re.lastIndex = 0; return p.re.test(value); });
+    const report = (name: string, text: string, line: number) => {
+      if (isIgnored(file, line) || out.some((d) => d.line === line)) return;
+      out.push({ ruleId: 'SEC-GEN-001', severity: 'high', title: `Hard-coded ${name}`, file: file.path, line, snippet: text.trim() });
+    };
+    const unquotedAllowed = CONFIG_FILE.test(file.path) && !EXAMPLE_FILE.test(file.path);
     file.lines.forEach((text, i) => {
-      if (/process\.env|import\.meta\.env|os\.environ|getenv\(/.test(text)) return;
+      if (READS_ENV.test(text)) return;
       ASSIGNMENT.lastIndex = 0;
       for (const m of text.matchAll(ASSIGNMENT)) {
-        const value = m[2]!;
-        if (PLACEHOLDER.test(value) || NOT_SECRET.test(value) || entropy(value) < 3.5) continue;
-        if (PAYMENT_KEYS.some((p) => { p.re.lastIndex = 0; return p.re.test(value); })) continue;
-        if (isIgnored(file, i + 1)) continue;
-        if (out.some((d) => d.line === i + 1)) continue;
-        out.push({ ruleId: 'SEC-GEN-001', severity: 'high', title: `Hard-coded ${m[1]}`, file: file.path, line: i + 1, snippet: text.trim() });
+        if (looksRandom(m[2]!)) report(m[1]!, text, i + 1);
       }
+      if (!unquotedAllowed) return;
+      const m = UNQUOTED.exec(text);
+      // Requiring a digit keeps out plain settings such as `token-header: X-Auth-Token-Name`.
+      if (m && /\d/.test(m[2]!) && !CONFIG_REFERENCE.test(m[2]!) && looksRandom(m[2]!)) report(m[1]!, text, i + 1);
     });
     return out;
   },

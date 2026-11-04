@@ -11,12 +11,28 @@ import type { Detection } from './types';
 
 const SEVERITY: Record<string, Severity> = { CRITICAL: 'critical', HIGH: 'high', MODERATE: 'medium', MEDIUM: 'medium', LOW: 'low' };
 
-type OsvVuln = { id: string; summary?: string; aliases?: string[]; database_specific?: { severity?: string } };
+  if (opts.allPaths) {
+    const missing = missingLockfiles(opts.allPaths, opts.ignore ?? [], seen);
+    if (missing.length) incomplete = true;
+    notes.push(...missing);
+  }
+  return { packages, notes, incomplete };
+}
+
+async function inPool<T>(items: T[], size: number, run: (item: T) => Promise<void>) {
+  let next = 0;
+  await Promise.all(
+    Array.from({ length: Math.min(size, items.length) }, async () => {
+      while (next < items.length) await run(items[next++]!);
+    }),
+  );
+}
 
 export async function scanDependencies(
   root: string,
-  opts: { includeDev?: boolean; fetchImpl?: typeof fetch; osvUrl?: string } = {},
-): Promise<{ detections: Detection[]; checked: number; error?: string }> {
+  files: string[],
+  opts: { sbom?: string; allPaths?: string[]; ignore?: string[]; includeDev?: boolean; fetchImpl?: typeof fetch; osvUrl?: string } = {},
+): Promise<{ detections: Detection[]; checked: number; error?: string; notes: string[]; incomplete: boolean }> {
   const fetchImpl = opts.fetchImpl ?? fetch;
   const base = opts.osvUrl ?? 'https://api.osv.dev';
   const lock = readLockfile(root);
@@ -24,13 +40,13 @@ export async function scanDependencies(
   if (!pkgs.length) return { detections: [], checked: 0 };
 
   try {
-    const hits: { pkg: (typeof pkgs)[number]; ids: string[] }[] = [];
+    const hits: { pkg: Locked; ids: string[] }[] = [];
     for (let i = 0; i < pkgs.length; i += 500) {
       const chunk = pkgs.slice(i, i + 500);
       const res = await fetchImpl(`${base}/v1/querybatch`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ queries: chunk.map((p) => ({ package: { name: p.name, ecosystem: 'npm' }, version: p.version })) }),
+        body: JSON.stringify({ queries: chunk.map((p) => ({ package: { name: p.name, ecosystem: p.ecosystem }, version: p.version })) }),
         signal: AbortSignal.timeout(15_000),
       });
       if (!res.ok) throw new Error(`OSV responded ${res.status}`);
@@ -41,19 +57,23 @@ export async function scanDependencies(
     }
 
     const details = new Map<string, OsvVuln>();
-    const ids = [...new Set(hits.flatMap((h) => h.ids))].slice(0, 60);
-    await Promise.all(
-      ids.map(async (id) => {
-        try {
-          const r = await fetchImpl(`${base}/v1/vulns/${encodeURIComponent(id)}`, { signal: AbortSignal.timeout(10_000) });
-          if (r.ok) details.set(id, (await r.json()) as OsvVuln);
-        } catch {
-          /* keep going without severity */
-        }
-      }),
-    );
+    const allIds = [...new Set(hits.flatMap((h) => h.ids))];
+    await inPool(allIds.slice(0, MAX_ADVISORIES), ADVISORY_CONCURRENCY, async (id) => {
+      try {
+        const r = await fetchImpl(`${base}/v1/vulns/${encodeURIComponent(id)}`, { signal: AbortSignal.timeout(10_000) });
+        if (r.ok) details.set(id, (await r.json()) as OsvVuln);
+      } catch {
+        /* keep going without severity */
+      }
+    });
+    if (allIds.length > MAX_ADVISORIES) notes.push(`Severity was looked up for the first ${MAX_ADVISORIES} of ${allIds.length} advisories; the rest show as medium.`);
 
-    const detections: Detection[] = hits.map(({ pkg, ids: vulnIds }) => {
+    const byKey = new Map(hits.map((h) => [keyOf(h.pkg), h]));
+    const detections: Detection[] = [];
+    for (const where of new Map(located.map((p) => [`${p.file}|${keyOf(p)}`, p])).values()) {
+      const hit = byKey.get(keyOf(where));
+      if (!hit) continue;
+      const { pkg, ids: vulnIds } = hit;
       const vulns = vulnIds.map((id) => details.get(id)).filter(Boolean) as OsvVuln[];
       const ranked = vulns
         .map((v) => SEVERITY[(v.database_specific?.severity ?? '').toUpperCase()] ?? 'medium')
@@ -61,16 +81,16 @@ export async function scanDependencies(
       const severity = ranked[0] ?? 'medium';
       const top = vulns[0];
       const ref = top?.aliases?.find((a) => a.startsWith('CVE-')) ?? top?.id ?? vulnIds[0];
-      return {
+      detections.push({
         ruleId: 'DEP-OSV',
         severity,
         title: `${pkg.name}@${pkg.version}: ${top?.summary ?? 'known vulnerability'}${vulnIds.length > 1 ? ` (+${vulnIds.length - 1} more)` : ''}`.slice(0, 200),
         file: lock!.file,
         line: pkg.line,
         snippet: `${pkg.name}@${pkg.version} · ${ref}`,
-      };
-    });
-    return { detections, checked: pkgs.length };
+      });
+    }
+    return { detections, checked: pkgs.length, notes, incomplete: read.incomplete };
   } catch (e) {
     const msg = (e as Error).message;
     // Node's fetch says only "fetch failed" when the host can't be reached (offline, proxy, firewall).

@@ -47,6 +47,7 @@ ${c.bold('Scan options')}
   --offline        skip the network (no dependency check, no upload)
   --history        also search all git history for secrets (deleted keys still need rotating)
   --sarif <file>   write SARIF for GitHub code scanning, GitLab and IDEs
+  --sbom <file>    also check a CycloneDX JSON SBOM (full Maven coverage, including transitive)
   --no-baseline    block on every finding, ignoring ${BASELINE_FILE}
 
 ${c.bold('Test options')}  ${c.grey('(needs Docker; the target must be verified and authorised in the dashboard)')}
@@ -82,7 +83,7 @@ function parseArgs(argv: string[]): { cmd: string; args: string[]; flags: Flags 
     if (a.startsWith('--')) {
       const [k, v] = a.slice(2).split('=', 2) as [string, string | undefined];
       if (v !== undefined) flags[k] = v;
-      else if (['key', 'api', 'fail-on', 'target', 'mode', 'openapi', 'minutes', 'zap-report', 'sarif', 'since', 'provider', 'staging-branch', 'wait', 'config'].includes(k) && rest[i + 1] && !rest[i + 1]!.startsWith('--')) flags[k] = rest[++i]!;
+      else if (['key', 'api', 'fail-on', 'target', 'mode', 'openapi', 'minutes', 'zap-report', 'sarif', 'since', 'provider', 'staging-branch', 'wait', 'config', 'sbom'].includes(k) && rest[i + 1] && !rest[i + 1]!.startsWith('--')) flags[k] = rest[++i]!;
       else flags[k] = true;
     } else args.push(a);
   }
@@ -137,6 +138,12 @@ async function cmdScan(flags: Flags): Promise<number> {
   const result = await runScan({ root, scope: prePush ? 'changed' : 'full', packs, ignore: config.ignore, offline, pushed });
   result.notes.unshift(...notes);
 
+  // Git errors look like an empty repository. Passing here would also close every open finding.
+  if (!prePush && result.filesScanned === 0 && result.packagesChecked === 0) {
+    err(c.red('✖ Found no files to scan.'), c.grey('Run this inside a git repository. In a container, the repository may also need: git config --global --add safe.directory <path>'));
+    return 2;
+  }
+
   if (flags.history) {
     const h = await scanHistory(root, { since: str(flags.since), ignore: config.ignore });
     result.detections.push(...h.detections);
@@ -161,6 +168,7 @@ async function cmdScan(flags: Flags): Promise<number> {
         scanId: randomUUID(),
         trigger: prePush ? 'pre-push' : ci ? 'ci' : 'manual',
         scope: prePush ? 'changed' : 'full',
+        incompleteChecks: result.incompleteChecks.length ? result.incompleteChecks : undefined,
         commit: currentCommit(root),
         branch: currentBranch(root),
         cliVersion: VERSION,
@@ -536,7 +544,7 @@ async function cmdBaseline(flags: Flags): Promise<number> {
   const config = readProjectConfig(root);
   const api = apiUrl(str(flags.api) ?? config.apiUrl);
   const packs = await resolvePacks(api, resolveKey(api));
-  const result = await runScan({ root, scope: 'full', packs, ignore: config.ignore, offline: Boolean(flags.offline) });
+  const result = await runScan({ root, scope: 'full', packs, ignore: config.ignore, offline: Boolean(flags.offline), sbom: str(flags.sbom) });
   const n = writeBaseline(root, result.detections);
   log(c.green('✓'), `Wrote ${BASELINE_FILE} with ${n} known finding(s) (${packs.join(', ')} rules).`);
   log(c.grey('Commit it. From now on only new findings block pushes and CI; the known ones stay visible in the dashboard.'));

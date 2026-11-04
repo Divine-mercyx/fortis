@@ -1,7 +1,7 @@
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { delimiter, dirname, join } from 'node:path';
 
 import { afterEach, describe, expect, it } from 'vitest';
 
@@ -101,6 +101,137 @@ describe('runScan', () => {
     expect(r.detections).toHaveLength(1);
     expect(r.detections[0]).toMatchObject({ ruleId: 'DEP-OSV', severity: 'high', file: 'package-lock.json' });
     expect(r.detections[0]!.snippet).toContain('CVE-2021-3749');
+    expect(r.incompleteChecks).toEqual([]);
+  });
+
+  /** OSV stand-in: every package is vulnerable, and it records what was asked. */
+  const fakeOsv = (asked: { name: string; ecosystem: string }[]): typeof fetch => async (url, init) => {
+    if (!String(url).endsWith('/v1/querybatch')) return new Response(JSON.stringify({ id: 'GHSA-1', summary: 'bad', database_specific: { severity: 'CRITICAL' } }));
+    const { queries } = JSON.parse(String(init!.body)) as { queries: { package: { name: string; ecosystem: string } }[] };
+    asked.push(...queries.map((q) => q.package));
+    return new Response(JSON.stringify({ results: queries.map(() => ({ vulns: [{ id: 'GHSA-1' }] })) }));
+  };
+
+  it('asks OSV with the right ecosystem and reports each lockfile that has the package', async () => {
+    const asked: { name: string; ecosystem: string }[] = [];
+    const { dir } = repo({
+      'api/composer.lock': JSON.stringify({ packages: [{ name: 'guzzlehttp/guzzle', version: '7.4.0' }] }),
+      'pay/go.mod': 'module x\n\nrequire golang.org/x/text v0.3.5\n',
+      'web/requirements.txt': 'django==3.2.0\n',
+      'admin/requirements.txt': 'django==3.2.0\n',
+    });
+    const r = await runScan({ root: dir, scope: 'full', packs: ['dependencies'], fetchImpl: fakeOsv(asked) });
+    expect(asked).toEqual(expect.arrayContaining([
+      { name: 'guzzlehttp/guzzle', ecosystem: 'Packagist' },
+      { name: 'golang.org/x/text', ecosystem: 'Go' },
+      { name: 'django', ecosystem: 'PyPI' },
+    ]));
+    expect(asked).toHaveLength(3);
+    expect(r.detections.map((d) => d.file).sort()).toEqual(['admin/requirements.txt', 'api/composer.lock', 'pay/go.mod', 'web/requirements.txt']);
+    expect(r.detections[0]!.severity).toBe('critical');
+  });
+
+  it('looks up severity past the old 60-advisory limit', async () => {
+    const ids = Array.from({ length: 80 }, (_, i) => `GHSA-${i}`);
+    const looked: string[] = [];
+    const fake: typeof fetch = async (url) => {
+      const u = String(url);
+      if (u.endsWith('/v1/querybatch')) return new Response(JSON.stringify({ results: [{ vulns: ids.map((id) => ({ id })) }] }));
+      looked.push(u);
+      return new Response(JSON.stringify({ id: u, database_specific: { severity: u.endsWith('GHSA-79') ? 'CRITICAL' : 'LOW' } }));
+    };
+    const { dir } = repo({ 'requirements.txt': 'django==3.2.0\n' });
+    const r = await runScan({ root: dir, scope: 'full', packs: ['dependencies'], fetchImpl: fake });
+    expect(looked).toHaveLength(80);
+    expect(r.detections[0]!.severity).toBe('critical');
+  });
+
+  it('marks the check incomplete when OSV is down, so its findings stay open', async () => {
+    const { dir } = repo({ 'requirements.txt': 'django==3.2.0\n' });
+    const down: typeof fetch = async () => new Response('nope', { status: 503 });
+    const r = await runScan({ root: dir, scope: 'full', packs: ['dependencies'], fetchImpl: down });
+    expect(r.detections).toEqual([]);
+    expect(r.incompleteChecks).toEqual(['dependencies']);
+    expect(r.notes.join()).toContain('OSV responded 503');
+  });
+
+  it('survives a malformed lockfile and still checks the others', async () => {
+    const asked: { name: string; ecosystem: string }[] = [];
+    const { dir } = repo({ 'composer.lock': '{ not json', 'requirements.txt': 'django==3.2.0\n' });
+    const r = await runScan({ root: dir, scope: 'full', packs: ['dependencies'], fetchImpl: fakeOsv(asked) });
+    expect(asked).toHaveLength(1);
+    expect(r.detections).toHaveLength(1);
+    expect(r.incompleteChecks).toEqual(['dependencies']);
+    expect(r.notes.join()).toContain('Could not read composer.lock');
+  });
+
+  it('says what pom.xml could not cover, and uses the SBOM instead when given one', async () => {
+    const pom = '<project><dependencies><dependency><groupId>a</groupId><artifactId>direct</artifactId><version>1.0</version></dependency><dependency><groupId>b</groupId><artifactId>from-bom</artifactId></dependency></dependencies></project>';
+    const bom = JSON.stringify({ bomFormat: 'CycloneDX', components: [{ purl: 'pkg:maven/a/direct@1.0' }, { purl: 'pkg:maven/c/transitive@2.0' }] });
+    const { dir } = repo({ 'pom.xml': pom, 'target-bom.json': bom });
+
+    const plain = await runScan({ root: dir, scope: 'full', packs: ['dependencies'], fetchImpl: fakeOsv([]) });
+    expect(plain.packagesChecked).toBe(1);
+    expect(plain.notes.join()).toContain('checked 1 of 2 declared dependencies');
+
+    const withSbom = await runScan({ root: dir, scope: 'full', packs: ['dependencies'], sbom: 'target-bom.json', fetchImpl: fakeOsv([]) });
+    expect(withSbom.packagesChecked).toBe(2);
+    expect(withSbom.detections.map((d) => d.file)).toEqual(['target-bom.json', 'target-bom.json']);
+    expect(withSbom.notes.join()).not.toContain('pom.xml');
+    expect(withSbom.incompleteChecks).toEqual([]);
+  });
+
+  it('treats a missing SBOM as an incomplete check, not a failure', async () => {
+    const { dir } = repo({ 'requirements.txt': 'django==3.2.0\n' });
+    const r = await runScan({ root: dir, scope: 'full', packs: ['dependencies'], sbom: 'nope.json', fetchImpl: fakeOsv([]) });
+    expect(r.detections).toHaveLength(1);
+    expect(r.incompleteChecks).toEqual(['dependencies']);
+    expect(r.notes.join()).toContain('Could not read the SBOM nope.json');
+  });
+
+  it('notes a project with no lockfile, and keeps its findings open', async () => {
+    const { dir } = repo({ 'composer.json': '{}', 'index.php': '<?php\n' });
+    const r = await runScan({ root: dir, scope: 'full', packs: ['dependencies'], fetchImpl: fakeOsv([]) });
+    expect(r.notes.join()).toContain('commit composer.lock');
+    expect(r.incompleteChecks).toEqual(['dependencies']);
+  });
+
+  it('pre-push checks a lockfile in any language only when it changed', async () => {
+    const asked: { name: string; ecosystem: string }[] = [];
+    const { dir, g } = repo({ 'composer.lock': JSON.stringify({ packages: [{ name: 'a/b', version: '1.0.0' }] }), 'src/app.php': '<?php\n' });
+    writeFileSync(join(dir, 'src/app.php'), '<?php echo 1;\n');
+    g('add', '-A');
+    g('commit', '-q', '-m', 'code only');
+    await runScan({ root: dir, scope: 'changed', packs: ['dependencies'], fetchImpl: fakeOsv(asked) });
+    expect(asked).toHaveLength(0);
+
+    writeFileSync(join(dir, 'composer.lock'), JSON.stringify({ packages: [{ name: 'a/b', version: '2.0.0' }] }));
+    g('add', '-A');
+    g('commit', '-q', '-m', 'upgrade');
+    await runScan({ root: dir, scope: 'changed', packs: ['dependencies'], fetchImpl: fakeOsv(asked) });
+    expect(asked).toEqual([{ name: 'a/b', ecosystem: 'Packagist' }]);
+  });
+
+  it('says which languages the fintech rules skipped, on full scans only', async () => {
+    const { dir, g } = repo({ 'src/Wallet.java': 'class Wallet {}\n', 'src/Pay.java': 'class Pay {}\n', 'api/pay.php': '<?php\n', 'src/test/WalletTest.java': 'class T {}\n', 'web/app.ts': 'export {};\n' });
+    const full = await runScan({ root: dir, scope: 'full', packs: ['fintech'], offline: true });
+    expect(full.notes.join()).toContain('2 Java/Kotlin, 1 PHP files had secrets and dependency checks only');
+    writeFileSync(join(dir, 'src/Pay.java'), 'class Pay { }\n');
+    g('add', '-A');
+    g('commit', '-q', '-m', 'edit');
+    const push = await runScan({ root: dir, scope: 'changed', packs: ['fintech'], offline: true });
+    expect(push.notes.join()).not.toContain('Fintech code rules');
+  });
+
+  it('skips build output and vendored code in other languages', async () => {
+    const { dir } = repo({
+      'target/classes/application.yml': `k: '${PAYSTACK_LIVE}'\n`,
+      'api/vendor/lib/x.php': `<?php $k = '${PAYSTACK_LIVE}';\n`,
+      '.venv/lib/x.py': `k = '${PAYSTACK_LIVE}'\n`,
+      'src/config.py': `k = '${PAYSTACK_LIVE}'\n`,
+    });
+    const r = await runScan({ root: dir, scope: 'full', packs: ['fintech'], offline: true });
+    expect(r.detections.map((d) => d.file)).toEqual(['src/config.py']);
   });
 });
 

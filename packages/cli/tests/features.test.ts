@@ -98,6 +98,32 @@ describe('fortis ci init', () => {
     expect(writeCi(root, 'github', { stagingBranch: 'staging' }).written).toBe(false);
   });
 
+  it('needs no Node in GitHub Actions, whatever the project is written in', () => {
+    const yml = githubWorkflow({ stagingBranch: 'staging' });
+    expect(yml).not.toContain('setup-node');
+    expect(yml).not.toContain('npx');
+    expect(yml).toContain('uses: Divine-mercyx/fortis@cli-v');
+    expect(yml).not.toContain('--sbom');
+  });
+
+  it('adds an SBOM step for Maven projects, so transitive dependencies are covered', () => {
+    const root = tmp();
+    writeFileSync(join(root, 'pom.xml'), '<project/>');
+    const github = readFileSync(join(root, writeCi(root, 'github', { stagingBranch: 'staging' }).path), 'utf8');
+    expect(github).toContain('makeAggregateBom');
+    expect(github).toContain('continue-on-error: true');
+    expect(github).toContain('--sbom target/bom.json');
+    const gitlab = readFileSync(join(root, writeCi(root, 'gitlab', { stagingBranch: 'staging' }).path), 'utf8');
+    expect(gitlab).toContain('makeAggregateBom');
+  });
+
+  it('runs the GitLab scan in the Fortis image, with no Node', () => {
+    const yml = gitlabJobs({ stagingBranch: 'dev' });
+    const scanJob = yml.slice(yml.indexOf('fortis-scan:'), yml.indexOf('fortis-staging:'));
+    expect(scanJob).toContain('image: ghcr.io/divine-mercyx/fortis:');
+    expect(scanJob).not.toContain('npx');
+  });
+
   const hasPyYaml = (() => {
     try {
       execFileSync('python3', ['-c', 'import yaml'], { stdio: 'ignore' });
