@@ -27,7 +27,7 @@ describe('FX-SEC-001 payment-provider keys', () => {
 
 describe('SEC-GEN-001 generic secrets', () => {
   it('flags private keys and random-looking hard-coded secrets', () => {
-    const d = run(genericSecretRule, 'src/a.ts', `${['-----BEGIN RSA PRIVATE', 'KEY-----'].join(' ')}\nconst apiKey = "Zx9Qm2Lp7Vt4Rk8Wn3Yb6Hc1";`);
+    const d = run(genericSecretRule, 'src/a.ts', `${['-----BEGIN RSA PRIVATE', 'KEY-----'].join(' ')}\nconst apiKey = "${['Zx9Qm2Lp7Vt4', 'Rk8Wn3Yb6Hc1'].join('')}";`);
     expect(d.map((x) => x.line)).toEqual([1, 2]);
   });
   it('skips placeholders, low-entropy values and env lookups', () => {
