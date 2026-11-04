@@ -5,11 +5,13 @@ import { rulesFor } from './rules/index';
 import { findLockfiles } from './rules/lockfiles';
 import { JS_TS, TEST_PATH, type Detection, type ProjectContext, type SourceFile } from './rules/types';
 import { loadFiles } from './files';
-import { allFiles, changedFiles } from './git';
+import { allFiles, changedFiles, type PushedRef } from './git';
 
 export type ScanOptions = {
   root: string;
   scope: 'changed' | 'full';
+  /** From the git hook's stdin: the refs being pushed (pre-push scope only). */
+  pushed?: PushedRef[];
   packs: readonly RulePack[];
   ignore?: string[];
   offline?: boolean;
@@ -50,7 +52,7 @@ function uncoveredLanguagesNote(files: SourceFile[]): string | null {
 export async function runScan(opts: ScanOptions): Promise<ScanResult> {
   const started = Date.now();
   const notes: string[] = [];
-  const paths = opts.scope === 'changed' ? changedFiles(opts.root) : allFiles(opts.root);
+  const paths = opts.scope === 'changed' ? changedFiles(opts.root, opts.pushed) : allFiles(opts.root);
   const files = loadFiles(opts.root, paths, opts.ignore);
   const rules = rulesFor(opts.packs);
   // Repository-wide facts (e.g. idempotency middleware defined elsewhere), even for pre-push scans.

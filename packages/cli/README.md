@@ -75,7 +75,7 @@ fortis scan --sbom target/bom.json
 | `fortis scan --pre-push` | Checks only the files in the commits being pushed (the hook runs this) |
 | `fortis scan --ci` | Full scan for CI; findings it no longer sees are closed as fixed in the dashboard |
 | `fortis scan --fail-on high` | Block at high or above (default: critical) |
-| `fortis scan --json` / `--no-upload` / `--offline` | Machine output, keep results local, or skip the network |
+| `fortis scan --json` / `--no-upload` / `--offline` | Machine output (secrets masked, like every other output), keep results local, or skip the network |
 | `fortis scan --sbom bom.json` | Also check a CycloneDX JSON SBOM |
 | `fortis login <key>` / `fortis logout` | Save or remove the key for this machine |
 | `fortis whoami` | Project, workspace and plan for the key |
@@ -87,9 +87,9 @@ If the dependency check can't finish (OSV is down, or a lockfile can't be read),
 ## In CI
 
 ```yaml
-- uses: Divine-mercyx/fortis@cli-v0.1.0-beta.8
+- uses: Divine-mercyx/fortis@cli-v0.1.0-beta.9
   with:
-    version: 0.1.0-beta.8
+    version: 0.1.0-beta.9
 - run: fortis scan --ci
   env:
     FORTIS_KEY: ${{ secrets.FORTIS_KEY }}
@@ -213,6 +213,9 @@ Then on npmjs.com: package → Settings → Trusted publishing → GitHub Action
 
 To build a binary for your own machine, run `pnpm --filter fortis-watchdog build:binary`. The result goes in `dist-sea/`. A tag on a fork runs everything except npm, which makes a safe dry run; set `FORTIS_REPO` to install from it.
 
+Publishing a tarball by hand: `npm pack` rebuilds `dist/` first, so the packed CLI always reports
+the version in `package.json`. Publish it with `npm publish fortis-watchdog-<version>.tgz --tag beta`.
+
 ## Configuration
 
 `.fortis.json` (committed; never contains the key):
@@ -222,3 +225,24 @@ To build a binary for your own machine, run `pnpm --filter fortis-watchdog build
 ```
 
 Keys are read from `FORTIS_KEY`, then from `~/.config/fortis/credentials.json` (written by `fortis login`, mode 0600).
+
+## Changelog
+
+**0.1.0-beta.9**
+- The dependency check now covers PHP, Python, Java, Go, .NET and Ruby as well as JavaScript, in any folder of the repository, and reads CycloneDX SBOMs with `--sbom`.
+- Standalone binaries, a Docker image and a GitHub Action, so non-JavaScript teams don't need Node. `fortis ci init` uses them.
+- More secrets are caught in non-JavaScript code and config files, including unquoted values in `.env`, `.properties` and YAML.
+- When the dependency check can't finish, its open findings stay open instead of being marked fixed. A full scan that finds no files now fails instead of passing.
+
+**0.1.0-beta.7**
+- The dependency check reads `pnpm-lock.yaml` (v5, v6 and v9, workspaces included) and `yarn.lock` (Yarn 1 and Yarn 2+), as well as `package-lock.json`. Dev-only packages are still skipped by default.
+- Dependency findings point at the lockfile and line where the package appears.
+- A scan where the dependency check could not run says "Nothing found · the dependency check did not run" instead of "All checks passed", and an unreachable OSV is reported as "could not reach api.osv.dev".
+
+**0.1.0-beta.6**
+- Paystack, Flutterwave and Monnify secret keys are caught on the free plan. Before this they were only reported on paid plans.
+- `fortis scan --json` masks secrets in flagged lines, like every other output.
+- A full scan with no lockfile says the dependency check was skipped instead of reporting a clean result.
+
+**0.1.0-beta.5**
+- Published from a stale build, so it reports itself as `0.1.0-beta.4`. Upgrade to beta.6 or later.

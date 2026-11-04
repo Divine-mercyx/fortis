@@ -67,6 +67,7 @@ const NAV: { id: string; title: string; group: string }[] = [
   { id: 'http-api', title: 'HTTP API', group: 'Reference' },
   { id: 'privacy', title: 'What leaves your machine', group: 'Reference' },
   { id: 'troubleshooting', title: 'Troubleshooting', group: 'Reference' },
+  { id: 'changelog', title: 'Changelog', group: 'Reference' },
 ];
 
 /* ---------- Small building blocks ---------- */
@@ -434,7 +435,7 @@ export default function DocsPage() {
             ['--history', 'Also search every commit on every branch for secrets. A deleted key is still readable in history and must be rotated.'],
             ['--since <rev>', 'With --history, only search commits after this revision.'],
             ['--sarif <file>', 'Write SARIF 2.1.0 for GitHub code scanning, GitLab and IDEs.'],
-            ['--json', 'Print machine-readable results instead of the report.'],
+            ['--json', 'Print machine-readable results instead of the report. Secrets in flagged lines are masked, as everywhere else.'],
             ['--no-upload', 'Keep results on this machine.'],
             ['--no-baseline', 'Report and block on every finding, ignoring .fortis-baseline.json.'],
             ['--offline', 'No network: skips the dependency check and the upload, and uses the free rule packs.'],
@@ -685,7 +686,7 @@ export default function DocsPage() {
       "title": "Money record read without an ownership check",
       "file": "src/routes/transfers.ts",
       "line": 41,
-      "snippet": "const t = await Transfer.findById(req.params.id)"
+      "snippet": "const t = await Transfer.${'findById'}(req.params.id)"
     }
   ]
 }`} />
@@ -716,6 +717,12 @@ export default function DocsPage() {
           <dl className="doc-faq">
             <dt>“No Fortis key found, so only the free checks ran”</dt>
             <dd>Run <C>{run('login fts_…')}</C>, or set <C>FORTIS_KEY</C>. Check with <C>{run('whoami')}</C>.</dd>
+            <dt>“found but no lockfile, so those dependencies weren&apos;t checked”</dt>
+            <dd>Fortis needs exact versions. Commit the lockfile the message names, in any folder of the repository. Bun lockfiles are not read yet; pass <C>--sbom</C> with a CycloneDX file instead.</dd>
+            <dt>“pom.xml: checked 3 of 28 declared dependencies”</dt>
+            <dd><C>pom.xml</C> lists only direct dependencies, and a parent POM or BOM often sets their versions. Generate a CycloneDX SBOM with Maven and pass <C>--sbom target/bom.json</C> to check them all, including transitive ones. <C>{CLI_COMMAND} ci init</C> adds this step on GitHub Actions.</dd>
+            <dt>“Dependency check skipped: could not reach api.osv.dev”</dt>
+            <dd>The machine or CI runner can&apos;t reach the OSV database. Allow <C>https://api.osv.dev</C> through your proxy or firewall. The scan then shows “Nothing found · the dependency check did not run” rather than a full pass.</dd>
             <dt>“Docker is installed but not running”</dt>
             <dd>Start Docker Desktop (or the docker service), or run ZAP yourself and pass <C>--zap-report report.json</C>.</dd>
             <dt>“… is not a target on this project” / “Verify the domain…”</dt>
@@ -724,6 +731,19 @@ export default function DocsPage() {
             <dd>Re-run <C>{run('init')}</C>. If you use a custom <C>core.hooksPath</C> (Husky), Fortis installs into that folder.</dd>
             <dt>A finding is wrong</dt>
             <dd>Mark it as a false positive in the dashboard with a reason. That feeds each rule&apos;s false-positive rate, which is how we decide what to tune next.</dd>
+          </dl>
+        </Section>
+
+        <Section id="changelog" title="Changelog">
+          <dl className="doc-faq">
+            <dt>0.1.0-beta.9</dt>
+            <dd>The dependency check now covers PHP, Python, Java, Go, .NET and Ruby as well as JavaScript, in any folder, and reads CycloneDX SBOMs with <C>--sbom</C>. Standalone binaries, a Docker image and a GitHub Action mean non-JavaScript teams don&apos;t need Node. More secrets are caught in non-JavaScript code and config files. When the dependency check can&apos;t finish, its open findings stay open instead of being marked fixed.</dd>
+            <dt>0.1.0-beta.7</dt>
+            <dd>The dependency check reads <C>pnpm-lock.yaml</C> (v5, v6 and v9, workspaces included) and <C>yarn.lock</C> (Yarn 1 and Yarn 2+), as well as <C>package-lock.json</C>. Findings point at the lockfile line. When the dependency check can&apos;t run, the scan says so instead of “All checks passed”.</dd>
+            <dt>0.1.0-beta.6</dt>
+            <dd>Paystack, Flutterwave and Monnify secret keys are caught on the free plan. <C>--json</C> output masks secrets. A scan with no lockfile says the dependency check was skipped.</dd>
+            <dt>0.1.0-beta.5</dt>
+            <dd>Reports itself as 0.1.0-beta.4 (published from a stale build). Upgrade to beta.6 or later.</dd>
           </dl>
         </Section>
       </main>

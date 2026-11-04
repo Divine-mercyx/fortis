@@ -13,7 +13,7 @@ import { githubAnnotations, toSarif } from './sarif';
 import { dockerAvailable, isLocalHost, parseZapReport, reportOrigins, runZap, waitForTarget, ZAP_IMAGE, type DastFinding, type ZapAuth, type ZapReport } from './dast';
 import { PROJECT_CONFIG, readProjectConfig, removeKey, resolveKey, saveKey, writeProjectConfig } from './config';
 import { apiUrl, VERSION } from './env';
-import { currentBranch, currentCommit, repoRoot } from './git';
+import { currentBranch, currentCommit, parsePushRefs, repoRoot, type PushedRef } from './git';
 import { installHook } from './hook';
 import { explain, printDastReport, printReport } from './report';
 import { meetsThreshold, runScan } from './scan';
@@ -127,7 +127,16 @@ async function cmdScan(flags: Flags): Promise<number> {
   }
 
   const sbom = str(flags.sbom);
-  const result = await runScan({ root, scope: prePush ? 'changed' : 'full', packs, ignore: config.ignore, offline, sbom });
+  // The hook passes --stdin: git lists the refs being pushed there, so a first push covers every new commit.
+  let pushed: PushedRef[] | undefined;
+  if (prePush && flags.stdin && !process.stdin.isTTY) {
+    try {
+      pushed = parsePushRefs(readFileSync(0, 'utf8'));
+    } catch {
+      /* no stdin: fall back to comparing with the remote branch */
+    }
+  }
+  const result = await runScan({ root, scope: prePush ? 'changed' : 'full', packs, ignore: config.ignore, offline, pushed, sbom });
   result.notes.unshift(...notes);
 
   // Git errors look like an empty repository. Passing here would also close every open finding.
@@ -622,7 +631,9 @@ async function cmdInit(flags: Flags): Promise<number> {
     }
   }
   log('');
-  log(c.grey(`Next: push as usual. For CI, run: fortis ci init${existsSync(pkgPath) ? ' (or set FORTIS_KEY and run: npm run security:scan)' : ''}`));
+  const has = (f: string) => existsSync(join(root, f));
+  const runScript = has('pnpm-lock.yaml') ? 'pnpm run security:scan' : has('yarn.lock') ? 'yarn security:scan' : has('bun.lock') || has('bun.lockb') ? 'bun run security:scan' : 'npm run security:scan';
+  log(c.grey(`Next: push as usual. For CI, run: fortis ci init${existsSync(pkgPath) ? ` (or set FORTIS_KEY and run: ${runScript})` : ''}`));
   return 0;
 }
 

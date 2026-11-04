@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { toUpload } from '../src/api';
 import { installHook } from '../src/hook';
+import { changedFiles, parsePushRefs } from '../src/git';
 import { printReport } from '../src/report';
 import { runScan } from '../src/scan';
 
@@ -71,8 +72,13 @@ describe('runScan', () => {
     expect((await scan({ 'main.go': 'package main\n' })).notes.join()).not.toContain('no lockfile');
   });
 
-  it('pre-push scope checks only files changed since the last commit', async () => {
+  it('pre-push scope skips files already on the remote', async () => {
     const { dir, g } = repo({ 'src/old.ts': `const k = '${PAYSTACK_LIVE}';\n` });
+    const remote = mkdtempSync(join(tmpdir(), 'fortis-remote-'));
+    dirs.push(remote);
+    execFileSync('git', ['init', '-q', '--bare', remote]);
+    g('remote', 'add', 'origin', remote);
+    g('push', '-q', '--no-verify', '-u', 'origin', 'main');
     writeFileSync(join(dir, 'src/new.ts'), `logger.info({ bvn: customer.bvn });\n`);
     g('add', '-A');
     g('commit', '-q', '-m', 'add');
@@ -221,14 +227,17 @@ describe('runScan', () => {
     const { dir, g } = repo({ 'composer.lock': JSON.stringify({ packages: [{ name: 'a/b', version: '1.0.0' }] }), 'src/app.php': '<?php\n' });
     writeFileSync(join(dir, 'src/app.php'), '<?php echo 1;\n');
     g('add', '-A');
+    const sha = (ref: string) => execFileSync('git', ['rev-parse', ref], { cwd: dir, encoding: 'utf8' }).trim();
+    // What the hook sees: the remote already has the commit before this one.
+    const pushed = () => parsePushRefs(`refs/heads/main ${sha('HEAD')} refs/heads/main ${sha('HEAD~1')}\n`);
     g('commit', '-q', '-m', 'code only');
-    await runScan({ root: dir, scope: 'changed', packs: ['dependencies'], fetchImpl: fakeOsv(asked) });
+    await runScan({ root: dir, scope: 'changed', packs: ['dependencies'], pushed: pushed(), fetchImpl: fakeOsv(asked) });
     expect(asked).toHaveLength(0);
 
     writeFileSync(join(dir, 'composer.lock'), JSON.stringify({ packages: [{ name: 'a/b', version: '2.0.0' }] }));
     g('add', '-A');
     g('commit', '-q', '-m', 'upgrade');
-    await runScan({ root: dir, scope: 'changed', packs: ['dependencies'], fetchImpl: fakeOsv(asked) });
+    await runScan({ root: dir, scope: 'changed', packs: ['dependencies'], pushed: pushed(), fetchImpl: fakeOsv(asked) });
     expect(asked).toEqual([{ name: 'a/b', ecosystem: 'Packagist' }]);
   });
 
@@ -301,7 +310,7 @@ describe('upload payload and hook', () => {
   it('upgrades hooks that older versions wrote with npx, keeping anything else in them', () => {
     const { dir } = repo({ 'a.txt': 'x' });
     writeFileSync(join(dir, '.git/hooks/pre-push'), '#!/bin/sh\nnpm test\n\n# fortis-pre-push\nnpx --no-install fortis scan --pre-push || exit 1\n');
-    expect(installHook(dir).status).toBe('upgraded');
+    expect(installHook(dir).status).toBe('updated');
     const hook = readFileSync(join(dir, '.git/hooks/pre-push'), 'utf8');
     expect(hook).toContain('npm test');
     expect(hook).not.toContain('npx');
@@ -317,7 +326,7 @@ describe('upload payload and hook', () => {
       'elif command -v fortis >/dev/null 2>&1; then fortis scan --pre-push',
       'else npx --no-install fortis scan --pre-push; fi', '',
     ].join('\n'));
-    expect(installHook(dir).status).toBe('upgraded');
+    expect(installHook(dir).status).toBe('updated');
     const hook = readFileSync(join(dir, '.git/hooks/pre-push'), 'utf8');
     expect(hook).not.toContain('npx');
     expect(hook).toContain('command -v fortis');
@@ -354,5 +363,59 @@ describe('upload payload and hook', () => {
     const found = sh(`${bin}${delimiter}${shDir}`);
     expect(found.stdout).toContain('ran: scan --pre-push');
     expect(found.status).toBe(0);
+  });
+
+  it('upgrades hooks from earlier versions to pass the pushed refs, keeping the user\'s own lines', () => {
+    const OLD_RUN = 'if [ -x ./node_modules/.bin/fortis ]; then ./node_modules/.bin/fortis scan --pre-push\nelif command -v fortis >/dev/null 2>&1; then fortis scan --pre-push\nelse npx --no-install fortis scan --pre-push; fi';
+    const { dir } = repo({ 'a.txt': 'x' });
+    writeFileSync(join(dir, '.git/hooks/pre-push'), `#!/bin/sh\n# fortis-pre-push\n# Installed by Fortis.\n${OLD_RUN}\n`);
+    expect(installHook(dir).status).toBe('updated');
+    expect(readFileSync(join(dir, '.git/hooks/pre-push'), 'utf8')).toContain('scan --pre-push --stdin');
+    expect(installHook(dir).status).toBe('already');
+
+    const { dir: other } = repo({ 'a.txt': 'x' });
+    writeFileSync(join(other, '.git/hooks/pre-push'), `#!/bin/sh\nnpm test\n\n# fortis-pre-push\n( ${OLD_RUN.replace(/\n/g, '\n  ')} ) || exit 1\necho after\n`);
+    expect(installHook(other).status).toBe('updated');
+    const hook = readFileSync(join(other, '.git/hooks/pre-push'), 'utf8');
+    expect(hook).toMatch(/^#!\/bin\/sh\nnpm test\n[\s\S]*scan --pre-push --stdin[\s\S]*\) \|\| exit 1\necho after\n$/);
+    expect(hook.match(/fortis-pre-push/g)).toHaveLength(1);
+  });
+});
+
+describe('first push of a new repository or branch', () => {
+  // Two commits, nothing on any remote: the key is in the FIRST commit.
+  function newRepo() {
+    const { dir, g } = repo({ 'src/config.ts': `export const k = '${PAYSTACK_LIVE}';\n` });
+    writeFileSync(join(dir, 'README.md'), 'hello\n');
+    g('add', '-A');
+    g('commit', '-q', '-m', 'docs');
+    const sha = (ref: string) => execFileSync('git', ['rev-parse', ref], { cwd: dir, encoding: 'utf8' }).trim();
+    return { dir, g, sha };
+  }
+
+  it('run by hand: checks every commit not on a remote, not just the last one', () => {
+    const { dir } = newRepo();
+    expect(changedFiles(dir).sort()).toEqual(['README.md', 'src/config.ts']);
+  });
+
+  it('from the hook: a push to an empty remote covers every commit being pushed', async () => {
+    const { dir, sha } = newRepo();
+    const pushed = parsePushRefs(`refs/heads/main ${sha('HEAD')} refs/heads/main ${'0'.repeat(40)}\n`);
+    const r = await runScan({ root: dir, scope: 'changed', packs: ['secrets'], offline: true, pushed });
+    expect(r.detections.map((d) => `${d.ruleId}@${d.file}`)).toEqual(['FX-SEC-001@src/config.ts']);
+  });
+
+  it('from the hook: an update push covers only the commits the remote does not have', () => {
+    const { dir, g, sha } = newRepo();
+    const remoteHad = sha('HEAD');
+    writeFileSync(join(dir, 'b.ts'), 'export const b = 1;\n');
+    g('add', '-A');
+    g('commit', '-q', '-m', 'b');
+    const pushed = parsePushRefs(`refs/heads/main ${sha('HEAD')} refs/heads/main ${remoteHad}\n`);
+    expect(changedFiles(dir, pushed)).toEqual(['b.ts']);
+  });
+
+  it('ignores branch deletions', () => {
+    expect(parsePushRefs(`(delete) ${'0'.repeat(40)} refs/heads/old ${'a'.repeat(40)}\n`)).toEqual([]);
   });
 });
