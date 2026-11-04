@@ -226,6 +226,9 @@ Keys are read from `FORTIS_KEY`, then from `~/.config/fortis/credentials.json` (
 ## Changelog
 
 **0.1.0-beta.8**
+- Any language: the dependency check reads PHP, Python, Java (Gradle, `pom.xml`, or a CycloneDX SBOM with `--sbom`), Go, .NET and Ruby lockfiles as well as npm, pnpm and Yarn, anywhere in a monorepo, and says which projects have no lockfile. Secret scanning understands PHP, Go, Java/Spring, Python and `.env`/`.properties`/YAML config. (John Imeobong)
+- Standalone binaries, install scripts, a Docker image and a GitHub Action, for projects without Node. (John Imeobong)
+- A scan that couldn't run the dependency check no longer closes its open findings, and a scan that finds no files fails instead of passing. (John Imeobong)
 - The first push of a new repository or branch checks every commit being pushed, not only the last one. Before this, a key leaked in an earlier commit got through on a first push.
 - The git hook works with Yarn Plug'n'Play, and says clearly when the CLI isn't installed instead of failing with an npm error.
 - `fortis init` upgrades a hook installed by an earlier version (your own lines in the hook are kept), and its CI hint matches your package manager.

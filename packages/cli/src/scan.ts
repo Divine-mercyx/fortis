@@ -1,9 +1,6 @@
-import { existsSync } from 'node:fs';
-import { join } from 'node:path';
 import { SEVERITY_RANK, type RulePack, type Severity } from '@fortis/shared';
 
 import { scanDependencies } from './rules/dependencies';
-import { SUPPORTED_LOCKFILES } from './rules/lockfiles';
 import { rulesFor } from './rules/index';
 import { findLockfiles } from './rules/lockfiles';
 import { JS_TS, TEST_PATH, type Detection, type ProjectContext, type SourceFile } from './rules/types';
@@ -13,11 +10,11 @@ import { allFiles, changedFiles, type PushedRef } from './git';
 export type ScanOptions = {
   root: string;
   scope: 'changed' | 'full';
-  /** From the git hook's stdin: the refs being pushed (pre-push scope only). */
-  pushed?: PushedRef[];
   packs: readonly RulePack[];
   ignore?: string[];
   offline?: boolean;
+  /** From the git hook's stdin: the refs being pushed (pre-push scope only). */
+  pushed?: PushedRef[];
   /** A CycloneDX JSON SBOM to check as well as the lockfiles. */
   sbom?: string;
   fetchImpl?: typeof fetch;
@@ -77,11 +74,8 @@ export async function runScan(opts: ScanOptions): Promise<ScanResult> {
   }
 
   let packagesChecked = 0;
-  if (opts.packs.includes('dependencies') && opts.scope === 'full') {
-    const missing = missingLockfileNote(opts.root);
-    if (missing) notes.push(missing);
-  }
-  const lockTouched = opts.scope === 'full' || paths.some((f) => (SUPPORTED_LOCKFILES as readonly string[]).includes(f));
+  const incompleteChecks: ScanResult['incompleteChecks'] = [];
+  const lockTouched = opts.scope === 'full' || Boolean(opts.sbom) || findLockfiles(paths, opts.ignore).length > 0;
   if (opts.packs.includes('dependencies') && lockTouched) {
     if (opts.offline) {
       notes.push('Dependency check skipped (--offline).');
@@ -124,13 +118,3 @@ export function buildContext(files: SourceFile[]): ProjectContext {
 }
 
 export const meetsThreshold = (sev: Severity, failOn: Severity) => SEVERITY_RANK[sev] >= SEVERITY_RANK[failOn];
-
-/** When there is no lockfile we can read, say so instead of reporting a clean result. */
-export function missingLockfileNote(root: string): string | null {
-  const has = (f: string) => existsSync(join(root, f));
-  if (SUPPORTED_LOCKFILES.some(has) || !has('package.json')) return null;
-  const other = ['bun.lock', 'bun.lockb'].find(has);
-  return other
-    ? `Dependency check skipped: ${other} is not supported yet (npm, pnpm and yarn lockfiles are).`
-    : 'Dependency check skipped: no lockfile. Run npm, pnpm or yarn install to create one.';
-}
