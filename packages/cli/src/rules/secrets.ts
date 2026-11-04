@@ -62,7 +62,9 @@ function scan(file: SourceFile, patterns: Pattern[]): Detection[] {
 
 export const paymentKeyRule: FileRule = {
   id: 'FX-SEC-001',
-  pack: 'fintech',
+  // In the free secrets pack: genericSecretRule skips payment-key values because this rule
+  // reports them, so gating it behind the fintech pack left free users with no detection at all.
+  pack: 'secrets',
   appliesTo: ANY_TEXT,
   run: (file) => scan(file, PAYMENT_KEYS),
 };

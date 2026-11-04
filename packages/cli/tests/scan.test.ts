@@ -7,7 +7,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 
 import { toUpload } from '../src/api';
 import { installHook } from '../src/hook';
-import { runScan } from '../src/scan';
+import { missingLockfileNote, runScan } from '../src/scan';
 
 const PAYSTACK_LIVE = ['sk', 'live', 'a1B2c3D4e5F6g7H8i9J0k1L2m3N4'].join('_');
 const dirs: string[] = [];
@@ -50,7 +50,18 @@ describe('runScan', () => {
   it('runs only the packs the plan allows', async () => {
     const { dir } = repo(VULN);
     const r = await runScan({ root: dir, scope: 'full', packs: ['secrets', 'dependencies'], offline: true });
-    expect(r.detections).toHaveLength(0);
+    // Free plan: leaked payment keys are secrets, so they are caught; fintech code rules are not run.
+    expect(r.detections.map((d) => d.ruleId)).toEqual(['FX-SEC-001']);
+  });
+
+  it('says when the dependency check could not run instead of reporting a clean result', () => {
+    const none = repo({ 'package.json': '{}' }).dir;
+    expect(missingLockfileNote(none)).toMatch(/no package-lock\.json/);
+    const pnpm = repo({ 'package.json': '{}', 'pnpm-lock.yaml': "lockfileVersion: '9.0'\n" }).dir;
+    expect(missingLockfileNote(pnpm)).toMatch(/pnpm-lock\.yaml is not supported/);
+    const npm = repo({ 'package.json': '{}', 'package-lock.json': '{}' }).dir;
+    expect(missingLockfileNote(npm)).toBeNull();
+    expect(missingLockfileNote(repo({ 'main.go': 'package main\n' }).dir)).toBeNull();
   });
 
   it('pre-push scope checks only files changed since the last commit', async () => {
@@ -64,7 +75,7 @@ describe('runScan', () => {
 
   it('respects ignore globs from .fortis.json', async () => {
     const { dir } = repo(VULN);
-    const r = await runScan({ root: dir, scope: 'full', packs: ['fintech'], ignore: ['src/routes/**'], offline: true });
+    const r = await runScan({ root: dir, scope: 'full', packs: ['secrets', 'fintech'], ignore: ['src/routes/**'], offline: true });
     expect(r.detections.map((d) => d.ruleId)).toEqual(['FX-SEC-001']);
   });
 

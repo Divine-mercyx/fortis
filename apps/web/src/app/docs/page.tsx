@@ -218,7 +218,7 @@ const ACCESS_JSON = `{
 
 const PACK_LABEL: Record<RulePack, string> = { fintech: 'Fintech', secrets: 'Secrets', dependencies: 'Dependencies' };
 const RULE_LANG: Record<string, string> = {
-  'FX-SEC-001': 'Any file', 'SEC-GEN-001': 'Any file', 'DEP-OSV': 'npm lockfile',
+  'FX-SEC-001': 'Any file', 'SEC-GEN-001': 'Any file', 'DEP-OSV': 'package-lock.json (pnpm and yarn lockfiles not yet)',
   'FX-BOLA-001': 'Any language (running app)', 'FX-AUTH-001': 'Any language (running app)',
 };
 
@@ -354,7 +354,7 @@ export default function DocsPage() {
             <table className="table">
               <thead><tr><th>Plan</th><th>Code checks</th><th>Dashboard</th><th>ZAP</th><th>Access checks</th><th>Evidence pack</th></tr></thead>
               <tbody>
-                <tr><td>Free</td><td>Secrets, dependencies</td><td>Local only</td><td>—</td><td>—</td><td>—</td></tr>
+                <tr><td>Free</td><td>Secrets (including Paystack, Flutterwave and Monnify keys), dependencies</td><td>Local only</td><td>—</td><td>—</td><td>—</td></tr>
                 <tr><td>Core</td><td>+ fintech rules</td><td>Yes</td><td>Baseline, 2 targets</td><td>—</td><td>Summary</td></tr>
                 <tr><td>Plus</td><td>+ fintech rules</td><td>Yes</td><td>Baseline and full, 10 targets</td><td>Yes</td><td>Full</td></tr>
                 <tr><td>Enterprise</td><td>+ fintech rules</td><td>Yes</td><td>Unlimited targets</td><td>Yes</td><td>Full</td></tr>
