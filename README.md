@@ -109,7 +109,7 @@ Render's free plan puts a service to sleep after 15 minutes without traffic, and
 | Variable | Default | |
 |---|---|---|
 | `KEEPALIVE` | on when on Render | `off` disables it |
-| `KEEPALIVE_HOURS` | `8-20` | daily window, 24-hour clock; `0-24` = always |
+| `KEEPALIVE_HOURS` | `9-21` | daily window, 24-hour clock; `0-24` = always |
 | `KEEPALIVE_TZ` | `Africa/Lagos` | |
 | `KEEPALIVE_URLS` | this service + the other one | comma-separated override |
 

@@ -9,7 +9,7 @@ describe('keep-alive', () => {
     expect(inWindow(20, parseHours('8-20'))).toBe(false);
     expect(inWindow(23, parseHours('20-8'))).toBe(true);
     expect(inWindow(12, parseHours('0-24'))).toBe(true);
-    expect(parseHours('nonsense')).toEqual([8, 20]);
+    expect(parseHours('nonsense')).toEqual([9, 21]);
   });
 
   it('only turns on on Render (or when asked) and can be switched off', () => {

@@ -27,7 +27,8 @@ export type RuleMeta = {
 export const RULE_CATALOG: readonly RuleMeta[] = [
   {
     id: 'FX-SEC-001',
-    pack: 'fintech',
+    // Free: a leaked payment key is a secret, and the free plan promises secret scanning.
+    pack: 'secrets',
     title: 'Payment-provider secret key in code',
     severity: 'critical',
     summary: 'A Paystack, Flutterwave or Monnify secret key is committed to the repository or config.',

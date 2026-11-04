@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-import { MAX_FINDINGS_PER_SCAN, RULE_CATALOG, SEVERITIES, type RulePack, type Severity } from '@fortis/shared';
+import { MAX_FINDINGS_PER_SCAN, RULE_CATALOG, maskSnippet, SEVERITIES, type RulePack, type Severity } from '@fortis/shared';
 
 import { ApiError, client, toUpload, type CliTarget, type WhoAmI } from './api';
 import { ACCESS_CONFIG, checksFromOpenApi, readAccessConfig, runAccessChecks, writeAccessTemplate } from './access';
@@ -190,7 +190,9 @@ async function cmdScan(flags: Flags): Promise<number> {
 
   const blocking = fresh.filter((d) => meetsThreshold(d.severity, failOn));
   if (json) {
-    log(JSON.stringify({ ...result, packs, failOn, blocking: blocking.length, baselined: known.length, upload: uploaded }, null, 2));
+    // Masked like every other output: --json usually lands in CI logs.
+    const detections = result.detections.map((d) => ({ ...d, snippet: maskSnippet(d.snippet).slice(0, 300) }));
+    log(JSON.stringify({ ...result, detections, packs, failOn, blocking: blocking.length, baselined: known.length, upload: uploaded }, null, 2));
   } else {
     printReport({ ...result, detections: fresh }, { failOn, prePush, packs });
     if (uploaded) {

@@ -41,7 +41,8 @@
     "test": "vitest run",
     "fortis": "tsx src/index.ts",
     "prepublishOnly": "node build.mjs",
-    "bench": "tsx bench/run.ts"
+    "bench": "tsx bench/run.ts",
+    "prepack": "node build.mjs"
   },
   "devDependencies": {
     "@fortis/shared": "workspace:*",

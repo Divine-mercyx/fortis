@@ -11,5 +11,5 @@ export async function register() {
   const opts = keepAliveFromEnv(process.env, [self ? `${self}/api/health` : '', api ? `${api}/health` : '']);
   if (!opts) return;
   startKeepAlive({ ...opts, log: (m) => console.warn(m) });
-  console.log(`keep-alive on (${opts.hours ?? '8-20'} ${opts.timeZone ?? 'Africa/Lagos'})`);
+  console.log(`keep-alive on (${opts.hours ?? '9-21'} ${opts.timeZone ?? 'Africa/Lagos'})`);
 }

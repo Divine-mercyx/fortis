@@ -5,18 +5,11 @@ import { execFileSync } from 'node:child_process';
 import { INSTALL_URL } from './env';
 
 const MARKER = '# fortis-pre-push';
-/** Uses the project's own copy when it has one (npm), otherwise the installed binary. Works in any language's repo. */
-const RUN = `if [ -x node_modules/.bin/fortis ]; then
-  node_modules/.bin/fortis scan --pre-push || exit 1
-elif command -v fortis >/dev/null 2>&1; then
-  fortis scan --pre-push || exit 1
-else
-  echo "Fortis isn't installed on this machine, so this push wasn't checked and has been stopped." >&2
-  echo "Install it: curl -fsSL ${INSTALL_URL}/install.sh | sh" >&2
-  echo "On Windows: irm ${INSTALL_URL}/install.ps1 | iex" >&2
-  echo "Or skip once: git push --no-verify" >&2
-  exit 1
-fi`;
+/** Finds the CLI wherever it was installed: in this project (npm, pnpm, yarn), or globally (any language). */
+const RUN = `if [ -x ./node_modules/.bin/fortis ]; then ./node_modules/.bin/fortis scan --pre-push
+elif command -v fortis >/dev/null 2>&1; then fortis scan --pre-push
+else npx --no-install fortis scan --pre-push; fi`;
+
 const HOOK = `#!/bin/sh
 ${MARKER}
 # Installed by Fortis. Checks the files you are about to push. Skip once with: git push --no-verify
@@ -47,7 +40,7 @@ export function installHook(root: string): { path: string; status: 'installed' |
       return { path, status: 'upgraded' };
     }
     if (current.includes(MARKER)) return { path, status: 'already' };
-    writeFileSync(path, `${current.trimEnd()}\n\n${MARKER}\n${RUN}\n`);
+    writeFileSync(path, `${current.trimEnd()}\n\n${MARKER}\n( ${RUN.replace(/\n/g, '\n  ')} ) || exit 1\n`);
     chmodSync(path, 0o755);
     return { path, status: 'appended' };
   }

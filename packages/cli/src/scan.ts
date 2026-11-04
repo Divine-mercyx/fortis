@@ -1,3 +1,5 @@
+import { existsSync } from 'node:fs';
+import { join } from 'node:path';
 import { SEVERITY_RANK, type RulePack, type Severity } from '@fortis/shared';
 
 import { scanDependencies } from './rules/dependencies';
@@ -72,8 +74,11 @@ export async function runScan(opts: ScanOptions): Promise<ScanResult> {
   }
 
   let packagesChecked = 0;
-  const incompleteChecks: ScanResult['incompleteChecks'] = [];
-  const lockTouched = opts.scope === 'full' || Boolean(opts.sbom) || findLockfiles(paths, opts.ignore).length > 0;
+  if (opts.packs.includes('dependencies') && opts.scope === 'full') {
+    const missing = missingLockfileNote(opts.root);
+    if (missing) notes.push(missing);
+  }
+  const lockTouched = opts.scope === 'full' || paths.includes('package-lock.json');
   if (opts.packs.includes('dependencies') && lockTouched) {
     if (opts.offline) {
       notes.push('Dependency check skipped (--offline).');
@@ -116,3 +121,13 @@ export function buildContext(files: SourceFile[]): ProjectContext {
 }
 
 export const meetsThreshold = (sev: Severity, failOn: Severity) => SEVERITY_RANK[sev] >= SEVERITY_RANK[failOn];
+
+/** The dependency check reads package-lock.json only; say so instead of reporting a clean result. */
+export function missingLockfileNote(root: string): string | null {
+  const has = (f: string) => existsSync(join(root, f));
+  if (has('package-lock.json') || !has('package.json')) return null;
+  const other = ['pnpm-lock.yaml', 'yarn.lock', 'bun.lockb'].find(has);
+  return other
+    ? `Dependency check skipped: ${other} is not supported yet (package-lock.json only).`
+    : 'Dependency check skipped: no package-lock.json. Run npm install to create one.';
+}
