@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 
 import { toUpload } from '../src/api';
 import { installHook } from '../src/hook';
+import { changedFiles, parsePushRefs } from '../src/git';
 import { missingLockfileNote, runScan } from '../src/scan';
 
 const PAYSTACK_LIVE = ['sk', 'live', 'a1B2c3D4e5F6g7H8i9J0k1L2m3N4'].join('_');
@@ -66,8 +67,13 @@ describe('runScan', () => {
     expect(missingLockfileNote(repo({ 'main.go': 'package main\n' }).dir)).toBeNull();
   });
 
-  it('pre-push scope checks only files changed since the last commit', async () => {
+  it('pre-push scope skips files already on the remote', async () => {
     const { dir, g } = repo({ 'src/old.ts': `const k = '${PAYSTACK_LIVE}';\n` });
+    const remote = mkdtempSync(join(tmpdir(), 'fortis-remote-'));
+    dirs.push(remote);
+    execFileSync('git', ['init', '-q', '--bare', remote]);
+    g('remote', 'add', 'origin', remote);
+    g('push', '-q', '--no-verify', '-u', 'origin', 'main');
     writeFileSync(join(dir, 'src/new.ts'), `logger.info({ bvn: customer.bvn });\n`);
     g('add', '-A');
     g('commit', '-q', '-m', 'add');
@@ -264,41 +270,57 @@ describe('upload payload and hook', () => {
     expect(readFileSync(join(other, '.git/hooks/pre-push'), 'utf8')).toMatch(/npm test[\s\S]*fortis scan --pre-push/);
   });
 
-  it('writes a hook that needs no Node: the local copy first, then the installed binary', () => {
+  it('upgrades hooks from earlier versions to pass the pushed refs, keeping the user\'s own lines', () => {
+    const OLD_RUN = 'if [ -x ./node_modules/.bin/fortis ]; then ./node_modules/.bin/fortis scan --pre-push\nelif command -v fortis >/dev/null 2>&1; then fortis scan --pre-push\nelse npx --no-install fortis scan --pre-push; fi';
     const { dir } = repo({ 'a.txt': 'x' });
-    installHook(dir);
-    const hook = readFileSync(join(dir, '.git/hooks/pre-push'), 'utf8');
-    expect(hook).not.toContain('npx');
-    expect(hook.indexOf('node_modules/.bin/fortis')).toBeLessThan(hook.indexOf('command -v fortis'));
-  });
-
-  it('upgrades hooks that older versions wrote with npx, keeping anything else in them', () => {
-    const { dir } = repo({ 'a.txt': 'x' });
-    writeFileSync(join(dir, '.git/hooks/pre-push'), '#!/bin/sh\nnpm test\n\n# fortis-pre-push\nnpx --no-install fortis scan --pre-push || exit 1\n');
-    expect(installHook(dir).status).toBe('upgraded');
-    const hook = readFileSync(join(dir, '.git/hooks/pre-push'), 'utf8');
-    expect(hook).toContain('npm test');
-    expect(hook).not.toContain('npx');
-    expect(hook).toContain('command -v fortis');
+    writeFileSync(join(dir, '.git/hooks/pre-push'), `#!/bin/sh\n# fortis-pre-push\n# Installed by Fortis.\n${OLD_RUN}\n`);
+    expect(installHook(dir).status).toBe('updated');
+    expect(readFileSync(join(dir, '.git/hooks/pre-push'), 'utf8')).toContain('scan --pre-push --stdin');
     expect(installHook(dir).status).toBe('already');
+
+    const { dir: other } = repo({ 'a.txt': 'x' });
+    writeFileSync(join(other, '.git/hooks/pre-push'), `#!/bin/sh\nnpm test\n\n# fortis-pre-push\n( ${OLD_RUN.replace(/\n/g, '\n  ')} ) || exit 1\necho after\n`);
+    expect(installHook(other).status).toBe('updated');
+    const hook = readFileSync(join(other, '.git/hooks/pre-push'), 'utf8');
+    expect(hook).toMatch(/^#!\/bin\/sh\nnpm test\n[\s\S]*scan --pre-push --stdin[\s\S]*\) \|\| exit 1\necho after\n$/);
+    expect(hook.match(/fortis-pre-push/g)).toHaveLength(1);
+  });
+});
+
+describe('first push of a new repository or branch', () => {
+  // Two commits, nothing on any remote: the key is in the FIRST commit.
+  function newRepo() {
+    const { dir, g } = repo({ 'src/config.ts': `export const k = '${PAYSTACK_LIVE}';\n` });
+    writeFileSync(join(dir, 'README.md'), 'hello\n');
+    g('add', '-A');
+    g('commit', '-q', '-m', 'docs');
+    const sha = (ref: string) => execFileSync('git', ['rev-parse', ref], { cwd: dir, encoding: 'utf8' }).trim();
+    return { dir, g, sha };
+  }
+
+  it('run by hand: checks every commit not on a remote, not just the last one', () => {
+    const { dir } = newRepo();
+    expect(changedFiles(dir).sort()).toEqual(['README.md', 'src/config.ts']);
   });
 
-  it('the hook runs the installed binary, and a missing CLI stops the push with instructions', () => {
-    const { dir } = repo({ 'a.txt': 'x' });
-    installHook(dir);
-    const hookPath = join(dir, '.git/hooks/pre-push');
-    const sh = (path: string) => spawnSync('sh', [hookPath], { cwd: dir, encoding: 'utf8', env: { ...process.env, PATH: path } });
-    const shDir = dirname(execFileSync(process.platform === 'win32' ? 'where' : 'which', ['sh'], { encoding: 'utf8' }).split(/\r?\n/)[0]!);
+  it('from the hook: a push to an empty remote covers every commit being pushed', async () => {
+    const { dir, sha } = newRepo();
+    const pushed = parsePushRefs(`refs/heads/main ${sha('HEAD')} refs/heads/main ${'0'.repeat(40)}\n`);
+    const r = await runScan({ root: dir, scope: 'changed', packs: ['secrets'], offline: true, pushed });
+    expect(r.detections.map((d) => `${d.ruleId}@${d.file}`)).toEqual(['FX-SEC-001@src/config.ts']);
+  });
 
-    const missing = sh(shDir);
-    expect(missing.status).toBe(1);
-    expect(missing.stderr).toContain('install.sh');
+  it('from the hook: an update push covers only the commits the remote does not have', () => {
+    const { dir, g, sha } = newRepo();
+    const remoteHad = sha('HEAD');
+    writeFileSync(join(dir, 'b.ts'), 'export const b = 1;\n');
+    g('add', '-A');
+    g('commit', '-q', '-m', 'b');
+    const pushed = parsePushRefs(`refs/heads/main ${sha('HEAD')} refs/heads/main ${remoteHad}\n`);
+    expect(changedFiles(dir, pushed)).toEqual(['b.ts']);
+  });
 
-    const bin = join(dir, 'fake-bin');
-    mkdirSync(bin);
-    writeFileSync(join(bin, 'fortis'), '#!/bin/sh\necho "ran: $*"\n', { mode: 0o755 });
-    const found = sh(`${bin}${delimiter}${shDir}`);
-    expect(found.stdout).toContain('ran: scan --pre-push');
-    expect(found.status).toBe(0);
+  it('ignores branch deletions', () => {
+    expect(parsePushRefs(`(delete) ${'0'.repeat(40)} refs/heads/old ${'a'.repeat(40)}\n`)).toEqual([]);
   });
 });

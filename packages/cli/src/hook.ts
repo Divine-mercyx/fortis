@@ -6,9 +6,11 @@ import { INSTALL_URL } from './env';
 
 const MARKER = '# fortis-pre-push';
 /** Finds the CLI wherever it was installed: in this project (npm, pnpm, yarn), or globally (any language). */
-const RUN = `if [ -x ./node_modules/.bin/fortis ]; then ./node_modules/.bin/fortis scan --pre-push
-elif command -v fortis >/dev/null 2>&1; then fortis scan --pre-push
-else npx --no-install fortis scan --pre-push; fi`;
+// --stdin: git writes the refs being pushed to the hook's stdin; the CLI reads them so a first
+// push (new branch, empty remote) checks every new commit, not just the last one.
+const RUN = `if [ -x ./node_modules/.bin/fortis ]; then ./node_modules/.bin/fortis scan --pre-push --stdin
+elif command -v fortis >/dev/null 2>&1; then fortis scan --pre-push --stdin
+else npx --no-install fortis scan --pre-push --stdin; fi`;
 
 const HOOK = `#!/bin/sh
 ${MARKER}
@@ -28,18 +30,25 @@ function hooksDir(root: string): string {
   return join(root, '.git', 'hooks');
 }
 
-export function installHook(root: string): { path: string; status: 'installed' | 'already' | 'appended' | 'upgraded' } {
+export function installHook(root: string): { path: string; status: 'installed' | 'already' | 'appended' | 'updated' } {
   const dir = hooksDir(root);
   mkdirSync(dir, { recursive: true });
   const path = join(dir, 'pre-push');
   if (existsSync(path)) {
     const current = readFileSync(path, 'utf8');
-    if (OLD_RUN.test(current)) {
-      writeFileSync(path, current.replace(OLD_RUN, RUN));
+    if (current.includes(MARKER)) {
+      if (current.includes('scan --pre-push --stdin')) return { path, status: 'already' };
+      // A hook from an earlier version: swap in the current Fortis lines, keep everything else.
+      const ours = current.startsWith(`#!/bin/sh\n${MARKER}`);
+      const start = current.indexOf(MARKER);
+      const endTok = 'fi ) || exit 1';
+      const end = current.indexOf(endTok, start);
+      const block = `${MARKER}\n( ${RUN.replace(/\n/g, '\n  ')} ) || exit 1`;
+      const updated = ours ? HOOK : end === -1 ? `${current.trimEnd()}\n\n${block}\n` : `${current.slice(0, start)}${block}${current.slice(end + endTok.length)}`;
+      writeFileSync(path, updated);
       chmodSync(path, 0o755);
-      return { path, status: 'upgraded' };
+      return { path, status: 'updated' };
     }
-    if (current.includes(MARKER)) return { path, status: 'already' };
     writeFileSync(path, `${current.trimEnd()}\n\n${MARKER}\n( ${RUN.replace(/\n/g, '\n  ')} ) || exit 1\n`);
     chmodSync(path, 0o755);
     return { path, status: 'appended' };
