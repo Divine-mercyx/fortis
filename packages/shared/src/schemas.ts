@@ -69,6 +69,8 @@ export const cliScanSchema = z.object({
   dastMode: z.enum(['baseline', 'full']).optional(),
   /** "changed" scans only cover changed files, so they never auto-close findings. */
   scope: z.enum(['changed', 'full']),
+  /** Checks that couldn't finish (say, OSV was down): a full scan must not close their findings. */
+  incompleteChecks: z.array(z.enum(['dependencies'])).max(5).optional(),
   commit: z.string().trim().max(64).optional(),
   branch: z.string().trim().max(200).optional(),
   cliVersion: z.string().trim().max(40),

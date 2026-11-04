@@ -1,4 +1,4 @@
-import { and, eq, inArray, notInArray, sql } from 'drizzle-orm';
+import { and, eq, inArray, ne, notInArray, sql } from 'drizzle-orm';
 
 import { findRule, type CliScanInput } from '@fortis/shared';
 
@@ -186,6 +186,8 @@ export async function ingestScan(auth: CliAuth, input: CliScanInput): Promise<In
           conditions.push(sql`${findings.lastScanId} in (select id from scans where dast_mode = 'baseline')`);
         }
       }
+      // "Couldn't check" is not "fixed": a failed dependency check leaves its findings open.
+      if (input.incompleteChecks?.includes('dependencies')) conditions.push(ne(findings.ruleId, 'DEP-OSV'));
       if (fingerprints.length) conditions.push(notInArray(findings.fingerprint, fingerprints));
       const closed = await tx
         .update(findings)

@@ -1,0 +1,29 @@
+name: Install Fortis
+description: Installs the Fortis CLI (security checks for fintech code). Any language; no Node needed.
+branding:
+  icon: shield
+  color: green
+
+inputs:
+  version:
+    description: The version to install, for example 0.1.0. Defaults to the latest release.
+    required: false
+    default: ''
+
+runs:
+  using: composite
+  steps:
+    - name: Install the Fortis CLI
+      shell: bash
+      env:
+        FORTIS_VERSION: ${{ inputs.version }}
+        FORTIS_REPO: ${{ github.action_repository || 'Divine-mercyx/fortis' }}
+        FORTIS_INSTALL_DIR: ${{ runner.temp }}/fortis-bin
+        INSTALLERS: ${{ github.action_path }}/packages/cli/install
+      run: |
+        if [ "$RUNNER_OS" = "Windows" ]; then
+          pwsh -NoProfile -File "$INSTALLERS/install.ps1"
+        else
+          sh "$INSTALLERS/install.sh"
+        fi
+        echo "$FORTIS_INSTALL_DIR" >> "$GITHUB_PATH"

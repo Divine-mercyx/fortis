@@ -1,10 +1,16 @@
 name: Release CLI
 
-# Publishes fortis-watchdog to npm when a tag like cli-v0.1.1 is pushed.
-# Uses npm trusted publishing (OIDC): no npm token is stored in GitHub, and every
-# release carries a signed provenance statement linking it to this workflow run.
+# Publishes the CLI when a tag like cli-v0.1.1 is pushed:
+#   - standalone binaries and install scripts on a GitHub Release, with build attestations
+#   - a Docker image on ghcr.io
+#   - fortis-watchdog on npm
+#
+# npm uses trusted publishing (OIDC): no npm token is stored in GitHub, and every release carries
+# a signed provenance statement linking it to this workflow run.
 # One-time setup on npmjs.com: package → Settings → Trusted publishing → GitHub Actions,
 # repository Divine-mercyx/fortis, workflow release-cli.yml.
+#
+# A fork can dry-run all of this: only the npm job is limited to the main repository.
 
 on:
   push:
@@ -12,11 +18,152 @@ on:
 
 permissions:
   contents: read
-  id-token: write
 
 jobs:
-  publish:
+  check:
     runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter fortis-watchdog typecheck
+      - run: pnpm --filter fortis-watchdog test
+      - name: Check the tag matches the package version
+        working-directory: packages/cli
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          if [ "cli-v$VERSION" != "$GITHUB_REF_NAME" ]; then
+            echo "Tag $GITHUB_REF_NAME does not match package version $VERSION"; exit 1
+          fi
+
+  binaries:
+    needs: check
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - { runner: ubuntu-24.04, name: linux-x64 }
+          - { runner: ubuntu-24.04-arm, name: linux-arm64 }
+          - { runner: macos-15, name: macos-arm64 }
+          - { runner: macos-15-intel, name: macos-x64 }
+          - { runner: windows-2025, name: windows-x64 }
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter fortis-watchdog build:binary
+      - name: Smoke test
+        shell: bash
+        run: |
+          EXE=packages/cli/dist-sea/fortis
+          [ "$RUNNER_OS" = "Windows" ] && EXE=$EXE.exe
+          bash packages/cli/scripts/smoke.sh "$EXE"
+      - name: Package
+        shell: bash
+        working-directory: packages/cli/dist-sea
+        run: |
+          mkdir ../out
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            pwsh -NoProfile -Command "Compress-Archive -Path fortis.exe -DestinationPath ../out/fortis-${{ matrix.name }}.zip"
+          else
+            tar -czf "../out/fortis-${{ matrix.name }}.tar.gz" fortis
+          fi
+          ls -l ../out
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.name }}
+          path: packages/cli/out/*
+          if-no-files-found: error
+
+  github-release:
+    needs: binaries
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: release
+          merge-multiple: true
+      - name: Add install scripts and checksums
+        working-directory: release
+        run: |
+          cp ../packages/cli/install/install.sh ../packages/cli/install/install.ps1 .
+          sha256sum * > SHA256SUMS
+          cat SHA256SUMS
+      - uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: release/*
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        # Not marked as a prerelease, even for betas: install.sh downloads from releases/latest,
+        # which skips prereleases.
+        run: gh release create "$GITHUB_REF_NAME" release/* --verify-tag --latest --title "$GITHUB_REF_NAME" --generate-notes
+
+  docker:
+    needs: binaries
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      - name: Unpack the Linux binaries
+        working-directory: packages/cli
+        run: |
+          mkdir -p bin/amd64 bin/arm64
+          tar -xzf "$GITHUB_WORKSPACE/artifacts/linux-x64/fortis-linux-x64.tar.gz" -C bin/amd64
+          tar -xzf "$GITHUB_WORKSPACE/artifacts/linux-arm64/fortis-linux-arm64.tar.gz" -C bin/arm64
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+      - name: Build and test the image
+        working-directory: packages/cli
+        run: |
+          docker buildx build --load --platform linux/amd64 -t fortis:test .
+          docker run --rm fortis:test sh -c '! command -v node && fortis --version'
+          # A repository owned by another user must still scan: this is what safe.directory is for.
+          mkdir repo && cd repo
+          git init -q -b main && git config user.email ci@example.com && git config user.name CI
+          echo 'class Wallet {}' > Wallet.java
+          git add -A && git commit -qm init
+          sudo chown -R 12345 .
+          docker run --rm -v "$PWD:/src" -w /src fortis:test fortis scan --offline
+      - name: Publish the image
+        working-directory: packages/cli
+        run: |
+          VERSION="${GITHUB_REF_NAME#cli-v}"
+          IMAGE="ghcr.io/$(echo "$GITHUB_REPOSITORY" | tr '[:upper:]' '[:lower:]')"
+          sudo rm -rf repo
+          docker buildx build --push --platform linux/amd64,linux/arm64 -t "$IMAGE:$VERSION" -t "$IMAGE:latest" .
+
+  npm:
+    needs: [github-release, docker]
+    if: github.repository == 'Divine-mercyx/fortis'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -28,15 +175,6 @@ jobs:
       - name: Trusted publishing needs npm 11.5 or later
         run: npm install -g npm@latest
       - run: pnpm install --frozen-lockfile
-      - run: pnpm --filter fortis-watchdog typecheck
-      - run: pnpm --filter fortis-watchdog test
-      - name: Check the tag matches the package version
-        working-directory: packages/cli
-        run: |
-          VERSION=$(node -p "require('./package.json').version")
-          if [ "cli-v$VERSION" != "$GITHUB_REF_NAME" ]; then
-            echo "Tag $GITHUB_REF_NAME does not match package version $VERSION"; exit 1
-          fi
       - name: Build
         working-directory: packages/cli
         run: node build.mjs
