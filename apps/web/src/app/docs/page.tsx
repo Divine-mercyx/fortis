@@ -739,6 +739,8 @@ export default function DocsPage() {
 
         <Section id="changelog" title="Changelog">
           <dl className="doc-faq">
+            <dt>0.1.0-beta.10</dt>
+            <dd>The one-line installer shows download progress, retries dropped connections and stops clearly if a download stalls. On Apple-silicon Macs running Terminal under Rosetta it installs the native build.</dd>
             <dt>0.1.0-beta.9</dt>
             <dd>Any language: the dependency check reads PHP, Python, Java, Go, .NET and Ruby lockfiles (and a CycloneDX SBOM with <C>--sbom</C>) as well as npm, pnpm and Yarn, in any folder, and secret scanning understands those languages&apos; code and config files. Standalone binaries, a Docker image and a GitHub Action mean non-JavaScript teams don&apos;t need Node. The first push of a new repository or branch checks every commit being pushed, not only the last one. The git hook works with Yarn Plug&apos;n&apos;Play and without Node; run <C>{run('init')}</C> again to upgrade an existing hook. A scan that couldn&apos;t finish the dependency check no longer closes its findings. (beta.8 was not published; its changes are here.)</dd>
             <dt>0.1.0-beta.7</dt>

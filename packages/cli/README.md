@@ -87,9 +87,9 @@ If the dependency check can't finish (OSV is down, or a lockfile can't be read),
 ## In CI
 
 ```yaml
-- uses: Divine-mercyx/fortis@cli-v0.1.0-beta.9
+- uses: Divine-mercyx/fortis@cli-v0.1.0-beta.10
   with:
-    version: 0.1.0-beta.9
+    version: 0.1.0-beta.10
 - run: fortis scan --ci
   env:
     FORTIS_KEY: ${{ secrets.FORTIS_KEY }}
@@ -227,6 +227,10 @@ the version in `package.json`. Publish it with `npm publish fortis-watchdog-<ver
 Keys are read from `FORTIS_KEY`, then from `~/.config/fortis/credentials.json` (written by `fortis login`, mode 0600).
 
 ## Changelog
+
+**0.1.0-beta.10**
+- The installer shows a progress bar while it downloads (about 40 MB), retries dropped connections, and stops with a clear message if the download stalls, instead of looking stuck.
+- On an Apple-silicon Mac whose Terminal runs under Rosetta, the installer now picks the native Apple-silicon build.
 
 **0.1.0-beta.9** (beta.8 was not published; its changes are here)
 - Any language: the dependency check reads PHP, Python, Java (Gradle, `pom.xml`, or a CycloneDX SBOM with `--sbom`), Go, .NET and Ruby lockfiles as well as npm, pnpm and Yarn, in any folder of the repository, and says which projects have no lockfile.

@@ -23,6 +23,10 @@ case "$(uname -m)" in
   arm64 | aarch64) ARCH=arm64 ;;
   *) fail "no build for $(uname -m). Use npm (npm i -D fortis-watchdog) or the Docker image." ;;
 esac
+# A Terminal running under Rosetta reports x86_64 on an Apple-silicon Mac: install the native build.
+if [ "$OS" = macos ] && [ "$ARCH" = x64 ] && [ "$(sysctl -n sysctl.proc_translated 2>/dev/null || echo 0)" = 1 ]; then
+  ARCH=arm64
+fi
 if [ "$OS" = linux ] && { [ -f /etc/alpine-release ] || ldd --version 2>&1 | grep -qi musl; }; then
   fail "the binary needs glibc, and this system uses musl. Use the Docker image, or npm (npm i -D fortis-watchdog)."
 fi
@@ -34,11 +38,17 @@ else
 fi
 ASSET="fortis-$OS-$ARCH.tar.gz"
 
+# Small files quietly; the binary with a progress bar (about 40 MB), so a slow line doesn't look
+# like a hang. Retries dropped connections, and gives up if nothing arrives for a minute.
 fetch() {
   if command -v curl >/dev/null 2>&1; then
-    curl -fsSL "$1" -o "$2"
+    if [ "${3:-}" = progress ]; then
+      curl -fL --progress-bar --retry 3 --connect-timeout 20 --speed-limit 1024 --speed-time 60 "$1" -o "$2"
+    else
+      curl -fsSL --retry 3 --connect-timeout 20 "$1" -o "$2"
+    fi
   elif command -v wget >/dev/null 2>&1; then
-    wget -q "$1" -O "$2"
+    if [ "${3:-}" = progress ]; then wget --tries=3 --timeout=60 -q --show-progress "$1" -O "$2"; else wget --tries=3 --timeout=60 -q "$1" -O "$2"; fi
   else
     fail "needs curl or wget."
   fi
@@ -47,8 +57,8 @@ fetch() {
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 
-echo "Downloading $ASSET ..."
-fetch "$BASE/$ASSET" "$TMP/$ASSET" || fail "could not download $BASE/$ASSET"
+echo "Downloading $ASSET (about 40 MB) ..."
+fetch "$BASE/$ASSET" "$TMP/$ASSET" progress || fail "could not download $BASE/$ASSET (check your connection and run this again)"
 fetch "$BASE/SHA256SUMS" "$TMP/SHA256SUMS" || fail "could not download the checksums"
 
 cd "$TMP"

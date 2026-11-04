@@ -17,7 +17,7 @@ if ($env:PROCESSOR_ARCHITECTURE -ne 'AMD64') {
 $tmp = Join-Path ([IO.Path]::GetTempPath()) ("fortis-" + [Guid]::NewGuid())
 New-Item -ItemType Directory -Path $tmp | Out-Null
 try {
-  Write-Host "Downloading $asset ..."
+  Write-Host "Downloading $asset (about 35 MB; this can take a few minutes on a slow connection) ..."
   Invoke-WebRequest -UseBasicParsing "$base/$asset" -OutFile (Join-Path $tmp $asset)
   Invoke-WebRequest -UseBasicParsing "$base/SHA256SUMS" -OutFile (Join-Path $tmp 'SHA256SUMS')
 
