@@ -6,7 +6,7 @@ $ProgressPreference = 'SilentlyContinue'
 
 $repo = if ($env:FORTIS_REPO) { $env:FORTIS_REPO } else { 'Divine-mercyx/fortis' }
 $dir = if ($env:FORTIS_INSTALL_DIR) { $env:FORTIS_INSTALL_DIR } else { Join-Path $HOME '.fortis\bin' }
-$base = if ($env:FORTIS_VERSION) { "https://github.com/$repo/releases/download/cli-v$env:FORTIS_VERSION" } else { "https://github.com/$repo/releases/latest/download" }
+$base = if ($env:FORTIS_DOWNLOAD_BASE) { $env:FORTIS_DOWNLOAD_BASE } elseif ($env:FORTIS_VERSION) { "https://github.com/$repo/releases/download/cli-v$env:FORTIS_VERSION" } else { "https://github.com/$repo/releases/latest/download" }
 $asset = 'fortis-windows-x64.zip'
 
 if ($env:PROCESSOR_ARCHITECTURE -ne 'AMD64') {

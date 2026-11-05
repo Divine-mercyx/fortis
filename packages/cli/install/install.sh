@@ -31,7 +31,10 @@ if [ "$OS" = linux ] && { [ -f /etc/alpine-release ] || ldd --version 2>&1 | gre
   fail "the binary needs glibc, and this system uses musl. Use the Docker image, or npm (npm i -D fortis-watchdog)."
 fi
 
-if [ -n "$VERSION" ]; then
+# FORTIS_DOWNLOAD_BASE: a mirror (or, in Fortis's own tests, a local folder as file://...).
+if [ -n "${FORTIS_DOWNLOAD_BASE:-}" ]; then
+  BASE="$FORTIS_DOWNLOAD_BASE"
+elif [ -n "$VERSION" ]; then
   BASE="https://github.com/$REPO/releases/download/cli-v$VERSION"
 else
   BASE="https://github.com/$REPO/releases/latest/download"

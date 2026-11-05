@@ -40,8 +40,12 @@ jobs:
             echo "Tag $GITHUB_REF_NAME does not match package version $VERSION"; exit 1
           fi
 
+  # Every install method on every system must pass before anything is published.
+  e2e:
+    uses: ./.github/workflows/e2e.yml
+
   binaries:
-    needs: check
+    needs: [check, e2e]
     strategy:
       fail-fast: true
       matrix:

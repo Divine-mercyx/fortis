@@ -234,6 +234,7 @@ Then on npmjs.com: package → Settings → Trusted publishing → GitHub Action
 `packages/cli/package.json` and push a matching tag (for example `cli-v0.1.0`). GitHub Actions then:
 
 - tests, and builds and smoke-tests a binary on each platform;
+- runs the install-and-push check (`scripts/e2e.sh`) for npm, pnpm, Yarn 1, Yarn 4 Plug'n'Play, Bun, a global install, the binary, the install script and the Docker image, on Linux, macOS (arm64 and x64) and Windows. Nothing is published unless all of them pass. Run one locally with `bash scripts/e2e.sh npm fortis-watchdog-<version>.tgz`;
 - publishes a GitHub Release with the binaries, install scripts, checksums and build attestations;
 - pushes the Docker image to `ghcr.io`;
 - publishes to npm with provenance. Versions with a pre-release suffix go to the `beta` tag.
