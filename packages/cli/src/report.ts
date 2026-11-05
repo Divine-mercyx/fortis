@@ -1,4 +1,4 @@
-import { findRule, maskSnippet, type Severity } from '@fortis/shared';
+import { findRule, fixFor, maskSnippet, type Severity } from '@fortis/shared';
 
 import type { Detection } from './rules/types';
 import type { ScanResult } from './scan';
@@ -34,7 +34,8 @@ export function printReport(result: ScanResult, opts: { failOn: Severity; prePus
   log('');
   if (blocking.length) {
     log(c.grey('Fix the issues above and push again.'));
-    log(c.grey('Reviewed and safe? Add  // fortis-ignore  to the line. Emergency only: git push --no-verify'));
+    const comment = detections.every((d) => /\.py$/i.test(d.file)) ? '# fortis-ignore' : detections.some((d) => /\.py$/i.test(d.file)) ? '// fortis-ignore (# in Python)' : '// fortis-ignore';
+    log(c.grey(`Reviewed and safe? Add  ${comment}  to the line. Emergency only: git push --no-verify`));
   }
 }
 
@@ -43,7 +44,7 @@ function printDetection(d: Detection) {
   log(`  ${sevColour[d.severity]!(LABEL[d.severity].padEnd(8))} ${c.white(c.bold(d.ruleId))}  ${d.title}`);
   log(`  ${' '.repeat(8)} ${c.cyan(d.line ? `${d.file}:${d.line}` : d.file)}`);
   log(`  ${' '.repeat(8)} ${c.grey(maskSnippet(d.snippet).slice(0, 140))}`);
-  if (d.fix ?? rule) log(`  ${' '.repeat(8)} ${c.green('fix')} ${d.fix ?? rule!.fix}`);
+  if (d.fix ?? rule) log(`  ${' '.repeat(8)} ${c.green('fix')} ${d.fix ?? fixFor(rule!, d.file)}`);
   log('');
 }
 
@@ -84,7 +85,8 @@ export function explain(ruleId: string): boolean {
   log('');
   log(c.bold('How to fix it'));
   log(`  ${rule.fix}`);
+  if (rule.fixPython) log(`  In Python: ${rule.fixPython}`);
   log('');
-  log(c.grey('Silence a reviewed line with  // fortis-ignore'));
+  log(c.grey('Silence a reviewed line with  // fortis-ignore  (# fortis-ignore in Python)'));
   return true;
 }

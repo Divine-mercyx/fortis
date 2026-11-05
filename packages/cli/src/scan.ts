@@ -3,6 +3,7 @@ import { SEVERITY_RANK, type RulePack, type Severity } from '@fortis/shared';
 import { scanDependencies } from './rules/dependencies';
 import { rulesFor } from './rules/index';
 import { findLockfiles } from './rules/lockfiles';
+import { PYTHON } from './rules/python';
 import { JS_TS, TEST_PATH, type Detection, type ProjectContext, type SourceFile } from './rules/types';
 import { loadFiles } from './files';
 import { allFiles, changedFiles, type PushedRef } from './git';
@@ -38,7 +39,6 @@ export type ScanResult = {
 const UNCOVERED_LANGUAGES: [RegExp, string][] = [
   [/\.(java|kt|kts|scala|groovy)$/i, 'Java/Kotlin'],
   [/\.php$/i, 'PHP'],
-  [/\.py$/i, 'Python'],
   [/\.go$/i, 'Go'],
   [/\.cs$/i, 'C#'],
   [/\.rb$/i, 'Ruby'],
@@ -50,7 +50,7 @@ function uncoveredLanguagesNote(files: SourceFile[]): string | null {
   const counts = UNCOVERED_LANGUAGES.map(([re, label]) => ({ label, n: files.filter((f) => re.test(f.path) && !TEST_PATH.test(f.path)).length })).filter((c) => c.n);
   if (!counts.length) return null;
   const list = counts.sort((a, b) => b.n - a.n).map((c) => `${c.n} ${c.label}`).join(', ');
-  return `Fintech code rules cover JavaScript and TypeScript only so far: ${list} files had secrets and dependency checks only.`;
+  return `Fintech code rules cover JavaScript, TypeScript and Python so far: ${list} files had secrets and dependency checks only.`;
 }
 
 export async function runScan(opts: ScanOptions): Promise<ScanResult> {
@@ -115,9 +115,13 @@ export async function runScan(opts: ScanOptions): Promise<ScanResult> {
 export function buildContext(files: SourceFile[]): ProjectContext {
   const idempotencyHelpers = new Set<string>();
   for (const f of files) {
-    if (!JS_TS.test(f.path) || TEST_PATH.test(f.path) || !/idempoten/i.test(f.text)) continue;
-    for (const m of f.text.matchAll(/\b(?:export\s+)?(?:async\s+)?function\s+([A-Za-z_$][\w$]*)|\bexport\s+(?:const|let)\s+([A-Za-z_$][\w$]*)/g)) {
-      idempotencyHelpers.add((m[1] ?? m[2])!);
+    if (TEST_PATH.test(f.path) || !/idempoten/i.test(f.text)) continue;
+    if (PYTHON.test(f.path)) {
+      for (const m of f.text.matchAll(/^(?:async\s+)?def\s+([A-Za-z_]\w*)/gm)) idempotencyHelpers.add(m[1]!);
+    } else if (JS_TS.test(f.path)) {
+      for (const m of f.text.matchAll(/\b(?:export\s+)?(?:async\s+)?function\s+([A-Za-z_$][\w$]*)|\bexport\s+(?:const|let)\s+([A-Za-z_$][\w$]*)/g)) {
+        idempotencyHelpers.add((m[1] ?? m[2])!);
+      }
     }
   }
   return { idempotencyHelpers };

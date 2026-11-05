@@ -6,11 +6,11 @@ import { controlsFor, FRAMEWORKS, RULE_CATALOG, TARGET_AUTHORIZATION_TEXT, type 
 
 import { Search } from '@/components/icons';
 import { CodeLine, CopyButton, SeverityPill } from '@/components/ui';
-import { API_BASE, CLI_COMMAND, CLI_INSTALL_URL, CLI_PACKAGE, CLI_VERSION } from '@/lib/cli';
+import { API_BASE, CLI_COMMAND, CLI_INSTALL_URL, CLI_PACKAGE, CLI_PYTHON_PACKAGE, CLI_VERSION } from '@/lib/cli';
 
 /* ---------- Stack and CI choices: every command on the page follows them ---------- */
 
-type StackId = 'npm' | 'pnpm' | 'yarn' | 'bun' | 'other';
+type StackId = 'npm' | 'pnpm' | 'yarn' | 'bun' | 'python' | 'other';
 type CiId = 'github' | 'gitlab';
 
 const STACKS: Record<StackId, { label: string; install: string; run: string; note?: string }> = {
@@ -33,11 +33,17 @@ const STACKS: Record<StackId, { label: string; install: string; run: string; not
     run: `bunx ${CLI_COMMAND}`,
     note: 'The dependency check reads npm, pnpm and yarn lockfiles, so it does not run on bun.lock / bun.lockb yet. Every other check works.',
   },
+  python: {
+    label: 'Python (pip, pipx, uv, Poetry)',
+    install: `pip install ${CLI_PYTHON_PACKAGE}`,
+    run: CLI_COMMAND,
+    note: 'A standalone binary: no Node.js needed. Also works with pipx install, uv tool install, or as a dev dependency with uv and Poetry. Install it in your virtual environment or globally; the git hook finds it even when the environment is not active. The fintech rules cover Django, Django REST, Flask and FastAPI.',
+  },
   other: {
-    label: 'Other languages (Python, Go, Java, PHP…)',
+    label: 'Other languages (Go, Java, PHP…)',
     install: `curl -fsSL ${CLI_INSTALL_URL}/install.sh | sh`,
     run: CLI_COMMAND,
-    note: `A standalone binary: no Node.js needed. On Windows, in PowerShell: irm ${CLI_INSTALL_URL}/install.ps1 | iex. Secrets, dependencies, staging tests (ZAP) and access checks work for your language. The fintech code rules read JavaScript and TypeScript so far, and the scan tells you which files they skipped.`,
+    note: `A standalone binary: no Node.js needed. On Windows, in PowerShell: irm ${CLI_INSTALL_URL}/install.ps1 | iex. Secrets, dependencies, staging tests (ZAP) and access checks work for your language. The fintech code rules read JavaScript, TypeScript and Python so far, and the scan tells you which files they skipped.`,
   },
 };
 
@@ -348,7 +354,7 @@ export default function DocsPage() {
 
         <Section id="requirements" title="Requirements">
           <ul className="doc-list">
-            <li><b>Node.js 18.17 or newer</b> if you install from npm. The standalone binary needs no Node.</li>
+            <li><b>Node.js 18.17 or newer</b> if you install from npm. The standalone binary and the PyPI package need no Node.</li>
             <li><b>git</b>, for the pre-push hook and changed-file scans.</li>
             <li><b>Docker</b>, only for <C>fortis test</C> (ZAP runs in the official <C>zaproxy/zap-stable</C> image).</li>
             <li>A <b>Fortis key</b> for the fintech rules, dashboard sync, staging tests and access checks. Secrets and dependency checks run without one.</li>
@@ -647,7 +653,7 @@ export default function DocsPage() {
                     <td className="mono nowrap">{r.id}<span className="small" style={{ display: 'block' }}>{PACK_LABEL[r.pack]}</span></td>
                     <td><SeverityPill severity={r.severity} /></td>
                     <td><b>{r.title}</b><span className="small" style={{ display: 'block', marginTop: 4 }}>{r.summary}</span><span className="small doc-fix">Fix: {r.fix}</span></td>
-                    <td className="small">{RULE_LANG[r.id] ?? 'JavaScript, TypeScript'}</td>
+                    <td className="small">{RULE_LANG[r.id] ?? 'JavaScript, TypeScript, Python'}</td>
                     <td className="small">{[...new Set(controlsFor(r.id).filter((c) => c.framework !== 'cbn').map((c) => `${FRAMEWORKS[c.framework].short} ${c.ref}`))].join(', ')}</td>
                   </tr>
                 ))}
@@ -739,6 +745,8 @@ export default function DocsPage() {
 
         <Section id="changelog" title="Changelog">
           <dl className="doc-faq">
+            <dt>0.1.0-beta.12</dt>
+            <dd>Python is fully supported: <C>pip install {CLI_PYTHON_PACKAGE}</C>, the fintech rules for Django, Django REST, Flask and FastAPI, and dev packages told apart in uv and Poetry lockfiles. Install with pip, pipx or uv: no Node needed.</dd>
             <dt>0.1.0-beta.11</dt>
             <dd>The dependency check reads Rust (<C>Cargo.lock</C>) and Dart/Flutter (<C>pubspec.lock</C>). Projects whose dependencies can&apos;t be checked (no lockfile, or Swift, CocoaPods and Elixir, not read yet) are reported instead of passing as clean. Obviously fake values in tests are no longer flagged.</dd>
             <dt>0.1.0-beta.10</dt>

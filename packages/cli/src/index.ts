@@ -603,6 +603,16 @@ async function cmdCi(args: string[], flags: Flags): Promise<number> {
   return 0;
 }
 
+const PRE_COMMIT_CONFIG = `  - repo: local
+    hooks:
+      - id: fortis
+        name: Fortis security scan
+        entry: fortis scan --pre-push
+        language: system
+        pass_filenames: false
+        always_run: true
+        stages: [pre-push]`;
+
 async function cmdInit(flags: Flags): Promise<number> {
   const root = repoRoot(process.cwd());
   if (!root) {
@@ -634,6 +644,11 @@ async function cmdInit(flags: Flags): Promise<number> {
   if (!flags['no-hook']) {
     const hook = installHook(root);
     log(c.green('✓'), hook.status === 'already' ? 'Pre-push hook already installed' : `Pre-push hook ${hook.status} (${hook.path.replace(root + '/', '')})`);
+  }
+
+  if (existsSync(join(root, '.pre-commit-config.yaml'))) {
+    log(c.yellow('!'), 'This repo uses pre-commit. To run Fortis through it instead, add this to .pre-commit-config.yaml:');
+    log(c.grey(PRE_COMMIT_CONFIG));
   }
 
   const pkgPath = join(root, 'package.json');
