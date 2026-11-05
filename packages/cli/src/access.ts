@@ -48,7 +48,7 @@ const defaultHttp: Http = async (url, headers) => {
 export function readAccessConfig(root: string, file = ACCESS_CONFIG): AccessConfig | null {
   const p = join(root, file);
   if (!existsSync(p)) return null;
-  const cfg = JSON.parse(readFileSync(p, 'utf8')) as AccessConfig;
+  const cfg = JSON.parse(readFileSync(p, 'utf8').replace(/^\uFEFF/, '')) as AccessConfig;
   if (!Array.isArray(cfg.checks) || !cfg.checks.length) throw new Error(`${file} needs at least one entry in "checks".`);
   for (const c of cfg.checks) {
     if (!c.name || !c.get?.includes('{id}')) throw new Error(`${file}: every check needs a "name" and a "get" path containing {id}.`);

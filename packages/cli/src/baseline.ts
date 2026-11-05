@@ -26,7 +26,7 @@ export function readBaseline(root: string): Set<string> | null {
   const p = join(root, BASELINE_FILE);
   if (!existsSync(p)) return null;
   try {
-    const b = JSON.parse(readFileSync(p, 'utf8')) as Baseline;
+    const b = JSON.parse(readFileSync(p, 'utf8').replace(/^\uFEFF/, '')) as Baseline;
     return new Set(b.fingerprints);
   } catch {
     throw new Error(`${BASELINE_FILE} is not valid JSON`);

@@ -8,9 +8,15 @@ const MARKER = '# fortis-pre-push';
 /** Finds the CLI wherever it was installed: in this project (npm, pnpm, yarn, Yarn Plug'n'Play), or globally (any language, no Node needed). */
 // --stdin: git writes the refs being pushed to the hook's stdin; the CLI reads them so a first
 // push (new branch, empty remote) checks every new commit, not just the last one.
+// Windows: Git runs hooks with its own sh. npm, pnpm and Yarn put a sh shim at .bin/fortis; Bun
+// puts fortis.exe there. GUI clients (GitHub Desktop, VS Code) often lack ~/.fortis/bin on PATH, so
+// the standalone install is also looked up directly.
 const RUN = `if [ -x ./node_modules/.bin/fortis ]; then ./node_modules/.bin/fortis scan --pre-push --stdin
+elif [ -f ./node_modules/.bin/fortis.exe ]; then ./node_modules/.bin/fortis.exe scan --pre-push --stdin
 elif [ -f ./.pnp.cjs ] && command -v yarn >/dev/null 2>&1; then yarn fortis scan --pre-push --stdin
 elif command -v fortis >/dev/null 2>&1; then fortis scan --pre-push --stdin
+elif [ -x "$HOME/.fortis/bin/fortis" ]; then "$HOME/.fortis/bin/fortis" scan --pre-push --stdin
+elif [ -f "$HOME/.fortis/bin/fortis.exe" ]; then "$HOME/.fortis/bin/fortis.exe" scan --pre-push --stdin
 elif npx --no-install fortis --version >/dev/null 2>&1; then npx --no-install fortis scan --pre-push --stdin
 else
   echo "Fortis: the CLI isn't installed in this repo, so this push wasn't checked and has been stopped." >&2

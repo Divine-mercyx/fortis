@@ -57,7 +57,7 @@ export function readPackages(root: string, files: string[], opts: { sbom?: strin
     if (!existsSync(abs)) continue;
     try {
       const manifestPath = join(root, dirname(file), 'package.json');
-      const manifest = /(^|\/)yarn\.lock$/.test(file) && existsSync(manifestPath) ? readFileSync(manifestPath, 'utf8') : undefined;
+      const manifest = /(^|\/)yarn\.lock$/.test(file) && existsSync(manifestPath) ? readFileSync(manifestPath, 'utf8').replace(/^\uFEFF/, '') : undefined;
       const parsed = parseLockfile(file, readFileSync(abs, 'utf8'), manifest);
       packages.push(...parsed.packages.map((p) => ({ ...p, file })));
       seen.add(ecosystemOf(file));

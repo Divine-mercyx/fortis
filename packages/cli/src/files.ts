@@ -28,8 +28,12 @@ export function globToRegExp(glob: string): RegExp {
 }
 
 export function makeFilter(extra: string[] = []) {
-  const patterns = [...DEFAULT_IGNORES, ...extra].map(globToRegExp);
-  return (path: string) => !BINARY.test(path) && !patterns.some((p) => p.test(path));
+  // Globs and paths written on Windows (src\\legacy\\**) mean the same as with forward slashes.
+  const patterns = [...DEFAULT_IGNORES, ...extra].map((g) => globToRegExp(g.replace(/\\/g, '/')));
+  return (path: string) => {
+    const p = path.replace(/\\/g, '/');
+    return !BINARY.test(p) && !patterns.some((re) => re.test(p));
+  };
 }
 
 export function loadFiles(root: string, paths: string[], ignore: string[] = []): SourceFile[] {

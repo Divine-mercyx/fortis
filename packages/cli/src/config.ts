@@ -20,7 +20,11 @@ export function readProjectConfig(root: string): ProjectConfig {
   const p = join(root, PROJECT_CONFIG);
   if (!existsSync(p)) return {};
   try {
-    return JSON.parse(readFileSync(p, 'utf8')) as ProjectConfig;
+    // Windows editors often save JSON with a byte-order mark, which JSON.parse rejects.
+    const config = JSON.parse(readFileSync(p, 'utf8').replace(/^\uFEFF/, '')) as ProjectConfig;
+    // `src\\legacy\\**` written on Windows means the same as `src/legacy/**`.
+    if (Array.isArray(config.ignore)) config.ignore = config.ignore.map((g) => String(g).replace(/\\/g, '/'));
+    return config;
   } catch {
     throw new Error(`${PROJECT_CONFIG} is not valid JSON`);
   }

@@ -146,3 +146,61 @@ jobs:
           fi
           echo 'export const key = process.env.KEY;' > config.js && git add -A && git commit -qm fix
           docker run --rm -v "$PWD:/src" -w /src -e FORTIS_API_URL=http://127.0.0.1:9 fortis-e2e fortis scan --ci --no-upload
+
+  windows-shells:
+    needs: pack
+    runs-on: windows-latest
+    name: PowerShell and cmd · windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: actions/download-artifact@v4
+        with:
+          name: tarball
+          path: pack
+      - name: e2e from PowerShell and cmd
+        shell: pwsh
+        run: ./packages/cli/scripts/e2e.ps1 pack/fortis-watchdog.tgz
+
+  baseline:
+    needs: pack
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-15, windows-latest]
+    runs-on: ${{ matrix.os }}
+    name: baseline · ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: actions/download-artifact@v4
+        with:
+          name: tarball
+          path: pack
+      - shell: bash
+        run: bash packages/cli/scripts/baseline-parity.sh pack/fortis-watchdog.tgz "fingerprints-${{ matrix.os }}.txt"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: fingerprints-${{ matrix.os }}
+          path: fingerprints-${{ matrix.os }}.txt
+
+  baseline-parity:
+    needs: baseline
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: fingerprints-*
+          merge-multiple: true
+      - name: Windows, macOS and Linux write the same baseline
+        run: |
+          ls fingerprints-*.txt
+          [ -s fingerprints-ubuntu-latest.txt ] || { echo 'no fingerprints from Linux'; exit 1; }
+          for f in fingerprints-macos-15.txt fingerprints-windows-latest.txt; do
+            diff -u fingerprints-ubuntu-latest.txt "$f" || { echo "FAILED: $f differs from Linux"; exit 1; }
+          done
+          echo "identical: $(wc -l < fingerprints-ubuntu-latest.txt) fingerprints"

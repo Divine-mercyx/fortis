@@ -638,7 +638,7 @@ async function cmdInit(flags: Flags): Promise<number> {
 
   const pkgPath = join(root, 'package.json');
   if (existsSync(pkgPath)) {
-    const pkg = JSON.parse(readFileSync(pkgPath, 'utf8')) as { scripts?: Record<string, string> };
+    const pkg = JSON.parse(readFileSync(pkgPath, 'utf8').replace(/^\uFEFF/, '')) as { scripts?: Record<string, string> };
     if (!pkg.scripts?.['security:scan']) {
       pkg.scripts = { ...pkg.scripts, 'security:scan': 'fortis scan --ci' };
       writeFileSync(pkgPath, `${JSON.stringify(pkg, null, 2)}\n`);

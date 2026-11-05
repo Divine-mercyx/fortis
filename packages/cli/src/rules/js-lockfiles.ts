@@ -42,7 +42,7 @@ type Manifest = { dependencies?: Record<string, string>; optionalDependencies?: 
 
 function readManifest(root: string): Manifest {
   try {
-    return JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')) as Manifest;
+    return JSON.parse(readFileSync(join(root, 'package.json'), 'utf8').replace(/^\uFEFF/, '')) as Manifest;
   } catch {
     return {};
   }

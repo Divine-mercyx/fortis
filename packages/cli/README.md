@@ -172,6 +172,14 @@ If either request gets A's record back, that's **FX-BOLA-001** or **FX-AUTH-001*
 
 Every rule is measured against a labelled benchmark in `bench/cases`. A line marked `@hit` must be flagged, and a flag on any other line is a false positive. `pnpm bench` prints precision and recall per rule. The test suite fails if any rule drops below its recorded floor. When a rule is wrong on real code, we add that code to the benchmark first, then fix the rule.
 
+## Windows
+
+The pre-push hook is run by Git's own `sh`, whichever shell or app starts the push, so it behaves the same in Git Bash, PowerShell, cmd and WSL.
+
+- **Finding the CLI:** the hook looks in `node_modules/.bin` (npm, pnpm and Yarn shims, Bun's `fortis.exe`), Yarn Plug'n'Play, your PATH, then `%USERPROFILE%\.fortis\bin` where `install.ps1` puts it. That last step is for apps that don't load your shell's PATH.
+- **GitHub Desktop, VS Code and Visual Studio:** a blocked push fails with the Fortis report as the error. GitHub Desktop shows it in the error dialog, VS Code under *Git: Show Git Output*, and Visual Studio in the Git output pane. Fix the finding and push again. Skipping once needs a terminal: `git push --no-verify`.
+- **Line endings and paths:** CRLF files give the same line numbers and snippets as LF ones. `ignore` globs can use `\` or `/`, `.fortis.json` may be saved with a byte-order mark, and a baseline written on Windows is identical to one written on a Mac or Linux for the same repository.
+
 ## Behind a proxy
 
 Fortis reads the same variables as curl, upper or lower case:
