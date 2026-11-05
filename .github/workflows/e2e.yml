@@ -205,6 +205,32 @@ jobs:
           done
           echo "identical: $(wc -l < fingerprints-ubuntu-24.04.txt) fingerprints"
 
+  # fortis test with ZAP installed on the machine, not in Docker, on each system.
+  zap-local:
+    name: fortis test with a local ZAP · ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-15, windows-2025]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: pnpm
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '21'
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter fortis-watchdog build
+      - name: Run fortis test against the sample API
+        shell: bash
+        run: bash packages/cli/scripts/zap-local-check.sh
+
   large-repo:
     runs-on: ubuntu-24.04
     name: 100,000-file scan under 30 s

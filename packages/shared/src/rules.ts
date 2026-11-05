@@ -113,6 +113,14 @@ export const RULE_CATALOG: readonly RuleMeta[] = [
     fix: "Scope every lookup to the signed-in customer (WHERE id = $1 AND customer_id = $2) and return 404 when the record isn't theirs.",
   },
   {
+    id: 'FX-BOLA-002',
+    pack: 'fintech',
+    title: "One customer can change or delete another customer's records",
+    severity: 'critical',
+    summary: "Found by `fortis access --writes` on staging: test user B sent an update or delete for a throwaway record owned by test user A, and A's record changed. This is broken object-level authorisation (BOLA/IDOR) on a write.",
+    fix: "Check that the record belongs to the signed-in customer before writing (UPDATE … WHERE id = $1 AND customer_id = $2) and return 404 when it isn't theirs.",
+  },
+  {
     id: 'FX-AUTH-001',
     pack: 'fintech',
     title: 'Customer records readable without logging in',
