@@ -57,7 +57,10 @@ describe('pre-push hook', () => {
     expect(spawnSync('sh', ['-n', join(dir, '.git', 'hooks', 'pre-push')]).status).toBe(0);
   });
 
-  it('finds the standalone install in ~/.fortis/bin when PATH does not have it (GUI git clients)', () => {
+  // The machine's own PATH, so sh and git are found on Windows too. The hook checks PATH before
+  // ~/.fortis/bin, so this only means something where fortis isn't installed globally.
+  const fortisOnPath = spawnSync('sh', ['-c', 'command -v fortis'], { encoding: 'utf8' }).status === 0;
+  it.skipIf(fortisOnPath)('finds the standalone install in ~/.fortis/bin when PATH does not have it (GUI git clients)', () => {
     const dir = repo();
     installHook(dir);
     const home = mkdtempSync(join(tmpdir(), 'fortis-home-'));
@@ -65,8 +68,7 @@ describe('pre-push hook', () => {
     const stub = join(home, '.fortis', 'bin', 'fortis');
     writeFileSync(stub, '#!/bin/sh\necho "ran: $*"\n');
     chmodSync(stub, 0o755);
-    // A PATH with git and sh only: no fortis, no npx.
-    const r = spawnSync('sh', [join(dir, '.git', 'hooks', 'pre-push')], { cwd: dir, env: { HOME: home, PATH: '/usr/bin:/bin' }, encoding: 'utf8', input: '' });
+    const r = spawnSync('sh', [join(dir, '.git', 'hooks', 'pre-push')], { cwd: dir, env: { ...process.env, HOME: home, USERPROFILE: home }, encoding: 'utf8', input: '' });
     expect(r.stdout).toContain('ran: scan --pre-push --stdin');
   });
 });
