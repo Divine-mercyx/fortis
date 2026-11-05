@@ -91,6 +91,7 @@ export function readPackages(root: string, files: string[], opts: { sbom?: strin
   let pomChecked = 0;
   let pomSkipped = 0;
   let skippedElsewhere = 0;
+  const skippedByFile: { file: string; names: string[]; count: number }[] = [];
   let directOnlyFiles = 0;
   for (const file of findLockfiles(files, opts.ignore)) {
     if (sbomRead && (isPomXml(file) || isRequirements(file))) continue; // the SBOM already has this, and more
@@ -110,6 +111,7 @@ export function readPackages(root: string, files: string[], opts: { sbom?: strin
         pomSkipped += parsed.skipped;
       } else {
         skippedElsewhere += parsed.skipped;
+        if (parsed.skipped) skippedByFile.push({ file, names: parsed.skippedNames ?? [], count: parsed.skipped });
       }
     } catch (e) {
       notes.push(`Could not read ${file}: ${(e as Error).message}.`);
@@ -123,7 +125,10 @@ export function readPackages(root: string, files: string[], opts: { sbom?: strin
     notes.push(`pom.xml: checked ${pomChecked} of ${declared} declared dependencies${versions}. Transitive dependencies aren't covered: generate a CycloneDX SBOM and pass --sbom for those.`);
   }
   if (directOnlyFiles) notes.push(`requirements files: only the packages they list were checked. Unless they're a full pip freeze, transitive dependencies aren't covered: use uv, Poetry or pip-compile, or pass --sbom for those.`);
-  if (skippedElsewhere) notes.push(`${skippedElsewhere === 1 ? '1 dependency has' : `${skippedElsewhere} dependencies have`} no exact version (unpinned or installed from a branch), so ${skippedElsewhere === 1 ? "it wasn't" : "they weren't"} checked.`);
+  if (skippedElsewhere) {
+    notes.push(`${skippedElsewhere === 1 ? '1 dependency has' : `${skippedElsewhere} dependencies have`} no exact version (pinned by range, unpinned or installed from a branch), so ${skippedElsewhere === 1 ? "it wasn't" : "they weren't"} checked.`);
+    for (const s of skippedByFile) notes.push(`  ${s.file}: ${skippedList(s.names, s.count)}. ${pinAdvice(s.file)}`);
+  }
 
   if (opts.allPaths) {
     const missing = missingLockfiles(opts.allPaths, opts.ignore ?? [], seen);
@@ -131,6 +136,23 @@ export function readPackages(root: string, files: string[], opts: { sbom?: strin
     notes.push(...missing);
   }
   return { packages, notes, incomplete };
+}
+
+/** "fastapi, pydantic, uvicorn and 17 more" */
+function skippedList(names: string[], count: number): string {
+  const shown = names.slice(0, 5);
+  if (!shown.length) return `${count} not checked`;
+  const rest = count - shown.length;
+  return `${shown.join(', ')}${rest > 0 ? ` and ${rest} more` : ''}`;
+}
+
+/** How to get exact versions for this kind of file. */
+export function pinAdvice(file: string): string {
+  const base = file.slice(file.lastIndexOf('/') + 1);
+  if (/^Pipfile\.lock$/.test(base)) return 'Run pipenv lock so every package has an exact version.';
+  if (/^composer\.lock$/.test(base)) return 'Branch installs have no release to check: require a tagged version (composer require vendor/pkg:^x).';
+  if (/\.(txt|in)$/.test(base)) return 'Lock exact versions to check them: uv lock or poetry lock, or pip-compile (uv pip compile requirements.in -o requirements.txt), or pip freeze > requirements.txt.';
+  return 'Pin exact versions in the lockfile to check them.';
 }
 
 async function inPool<T>(items: T[], size: number, run: (item: T) => Promise<void>) {

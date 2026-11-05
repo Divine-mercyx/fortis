@@ -153,16 +153,16 @@ export function pylockToml(text: string): Parsed {
 export function pipfileLock(text: string): Parsed {
   const lock = JSON.parse(text) as { default?: Record<string, { version?: string }>; develop?: Record<string, { version?: string }> };
   const packages: Locked[] = [];
-  let skipped = 0;
+  const skippedNames: string[] = [];
   const add = (section: Record<string, { version?: string }> | undefined, dev: boolean) => {
     for (const [name, meta] of Object.entries(section ?? {})) {
       if (meta.version?.startsWith('==')) packages.push(pypi(name, meta.version.slice(2), dev));
-      else skipped++;
+      else skippedNames.push(name);
     }
   };
   add(lock.default, false);
   add(lock.develop, true);
-  return { packages, skipped };
+  return { packages, skipped: skippedNames.length, skippedNames };
 }
 
 /** Output of pip-compile or `uv pip compile` lists every package, not only the direct ones. */
@@ -172,7 +172,7 @@ export function requirementsTxt(text: string, file: string): Parsed {
   const base = file.slice(file.lastIndexOf('/') + 1);
   const dev = /dev|test/i.test(base);
   const packages: Locked[] = [];
-  let skipped = 0;
+  const skippedNames: string[] = [];
   for (const [i, raw] of text.split(/\r?\n/).entries()) {
     const line = raw.replace(/\s#.*$/, '').trim();
     // Options, includes, comments and the `--hash` lines that continue a requirement.
@@ -180,8 +180,8 @@ export function requirementsTxt(text: string, file: string): Parsed {
     const m = /^([A-Za-z0-9][A-Za-z0-9._-]*)(?:\[[^\]]*\])?\s*===?\s*([^\s;,\\]+)\s*(?:[;\\].*)?$/.exec(line);
     // `django==3.2.*` doesn't name one version, so there's nothing exact to look up.
     if (m && !m[2]!.includes('*')) packages.push(pypi(m[1]!, m[2]!, dev, i + 1));
-    else if (/^[A-Za-z0-9]/.test(line) && !line.includes('://')) skipped++;
+    else if (/^[A-Za-z0-9]/.test(line) && !line.includes('://')) skippedNames.push(/^[A-Za-z0-9][A-Za-z0-9._-]*/.exec(line)![0]);
   }
   const directOnly = packages.length > 0 && !/^constraints/i.test(base) && !FULLY_COMPILED.test(text);
-  return { packages, skipped, directOnly };
+  return { packages, skipped: skippedNames.length, directOnly, skippedNames };
 }

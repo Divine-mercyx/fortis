@@ -265,3 +265,20 @@ describe('Rust and Dart', () => {
     expect(missingLockfiles(['Cargo.toml', 'Cargo.lock'], [], new Set(['crates.io']))).toEqual([]);
   });
 });
+
+describe('packages without an exact version', () => {
+  it('names them and says how to pin them', async () => {
+    const { readPackages } = await import('../src/rules/dependencies');
+    const { mkdtempSync, writeFileSync } = await import('node:fs');
+    const { tmpdir } = await import('node:os');
+    const { join } = await import('node:path');
+    const dir = mkdtempSync(join(tmpdir(), 'fortis-ranges-'));
+    writeFileSync(join(dir, 'requirements.txt'), ['fastapi>=0.110', 'pydantic~=2.6', 'uvicorn[standard]', 'sqlalchemy<3', 'httpx>0.25', 'celery', 'requests==2.31.0', ''].join('\n'));
+    const r = readPackages(dir, ['requirements.txt']);
+    expect(r.packages.map((p) => p.name)).toEqual(['requests']);
+    const notes = r.notes.join('\n');
+    expect(notes).toContain('6 dependencies have no exact version (pinned by range');
+    expect(notes).toContain('requirements.txt: fastapi, pydantic, uvicorn, sqlalchemy, httpx and 1 more.');
+    expect(notes).toMatch(/uv lock or poetry lock, or pip-compile/);
+  });
+});

@@ -12,7 +12,7 @@ export type Ecosystem = 'npm' | 'Packagist' | 'PyPI' | 'Maven' | 'Go' | 'NuGet' 
 /** `line`: where the package is in its lockfile (npm-family lockfiles), so findings point at it. */
 export type Locked = { name: string; version: string; ecosystem: Ecosystem; dev: boolean; line?: number; direct?: boolean; via?: string };
 /** `skipped` counts declared packages with no exact version to check. `directOnly`: the file doesn't list what those packages need. */
-export type Parsed = { packages: Locked[]; skipped: number; directOnly?: boolean };
+export type Parsed = { packages: Locked[]; skipped: number; directOnly?: boolean; /** Names of the skipped packages, where the format shows them. */ skippedNames?: string[] };
 
 const pkg = (ecosystem: Ecosystem, name: string, version: string, dev = false, line = 0): Locked => ({ name, version, ecosystem, dev, line });
 
@@ -38,17 +38,17 @@ const yarnLock = (text: string, _file: string, manifest?: string): Parsed => {
 function composerLock(text: string): Parsed {
   const lock = JSON.parse(text) as { packages?: { name: string; version: string }[]; 'packages-dev'?: { name: string; version: string }[] };
   const packages: Locked[] = [];
-  let skipped = 0;
+  const skippedNames: string[] = [];
   const add = (list: { name: string; version: string }[] | undefined, dev: boolean) => {
     for (const p of list ?? []) {
       // Branch installs (dev-main, 1.x-dev) have no release version to look up.
-      if (/^dev-|-dev$/.test(p.version)) skipped++;
+      if (/^dev-|-dev$/.test(p.version)) skippedNames.push(p.name);
       else packages.push(pkg('Packagist', p.name, p.version, dev));
     }
   };
   add(lock.packages, false);
   add(lock['packages-dev'], true);
-  return { packages, skipped };
+  return { packages, skipped: skippedNames.length, skippedNames };
 }
 
 /** `group:name:version=compileClasspath,runtimeClasspath`. */
