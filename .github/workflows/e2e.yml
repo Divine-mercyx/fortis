@@ -224,14 +224,16 @@ jobs:
         run: |
           set +e
           start=$(date +%s%N)
-          node "$GITHUB_WORKSPACE/packages/cli/dist/fortis.js" scan --offline --no-upload > out.txt 2>&1
+          # Output goes outside the repository: an untracked file in it would be scanned too.
+          out="$RUNNER_TEMP/large-scan.txt"
+          node "$GITHUB_WORKSPACE/packages/cli/dist/fortis.js" scan --offline --no-upload > "$out" 2>&1
           code=$?
           ms=$(( ($(date +%s%N) - start) / 1000000 ))
-          head -3 out.txt
+          grep -m1 "^fortis" "$out"
           echo "took ${ms} ms"
           echo "### 100,000-file scan: ${ms} ms" >> "$GITHUB_STEP_SUMMARY"
           # The generator plants 5 AWS-format keys; the scan must find them all (and so fail with 1).
-          [ "$code" = 1 ] || { echo "FAILED: expected exit 1 (keys found), got $code"; cat out.txt; exit 1; }
-          [ "$(grep -c 'CRITICAL SEC-GEN-001' out.txt)" = 5 ] || { echo 'FAILED: did not find the 5 planted keys'; cat out.txt; exit 1; }
-          grep -q '100000 files' out.txt || { echo 'FAILED: did not scan every file'; exit 1; }
+          [ "$code" = 1 ] || { echo "FAILED: expected exit 1 (keys found), got $code"; cat "$out"; exit 1; }
+          [ "$(grep -c 'CRITICAL SEC-GEN-001' "$out")" = 5 ] || { echo 'FAILED: did not find the 5 planted keys'; cat "$out"; exit 1; }
+          grep -q '100000 files' "$out" || { echo 'FAILED: did not scan every file'; exit 1; }
           [ "$ms" -lt 30000 ] || { echo "FAILED: ${ms} ms is over the 30 s target"; exit 1; }
