@@ -17,11 +17,11 @@ permissions:
 
 jobs:
   pack:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         with:
           node-version: 22
           cache: pnpm
@@ -32,7 +32,7 @@ jobs:
           mkdir ../../pack
           npm pack --pack-destination ../../pack
           mv ../../pack/fortis-watchdog-*.tgz ../../pack/fortis-watchdog.tgz
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         with:
           name: tarball
           path: pack/fortis-watchdog.tgz
@@ -43,20 +43,20 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-15, macos-15-intel, windows-latest]
+        os: [ubuntu-24.04, macos-15, macos-15-intel, windows-2025]
         method: [npm, pnpm, yarn1, yarn-pnp, bun, global]
     runs-on: ${{ matrix.os }}
     name: ${{ matrix.method }} · ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v6
         with:
           node-version: 22
       - if: matrix.method == 'pnpm'
         uses: pnpm/action-setup@v4
       - if: matrix.method == 'bun'
         uses: oven-sh/setup-bun@v2
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v7
         with:
           name: tarball
           path: pack
@@ -75,16 +75,16 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { os: ubuntu-latest, name: linux-x64 }
+          - { os: ubuntu-24.04, name: linux-x64 }
           - { os: macos-15, name: macos-arm64 }
           - { os: macos-15-intel, name: macos-x64 }
-          - { os: windows-latest, name: windows-x64 }
+          - { os: windows-2025, name: windows-x64 }
     runs-on: ${{ matrix.os }}
     name: binary and installer · ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         with:
           node-version: 22
           cache: pnpm
@@ -119,11 +119,11 @@ jobs:
         run: bash packages/cli/scripts/e2e.sh installer packages/cli/release
 
   docker:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         with:
           node-version: 22
           cache: pnpm
@@ -149,14 +149,14 @@ jobs:
 
   windows-shells:
     needs: pack
-    runs-on: windows-latest
-    name: PowerShell and cmd · windows-latest
+    runs-on: windows-2025
+    name: PowerShell and cmd · windows-2025
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v6
         with:
           node-version: 22
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v7
         with:
           name: tarball
           path: pack
@@ -169,49 +169,49 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-15, windows-latest]
+        os: [ubuntu-24.04, macos-15, windows-2025]
     runs-on: ${{ matrix.os }}
     name: baseline · ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v6
         with:
           node-version: 22
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v7
         with:
           name: tarball
           path: pack
       - shell: bash
         run: bash packages/cli/scripts/baseline-parity.sh pack/fortis-watchdog.tgz "fingerprints-${{ matrix.os }}.txt"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         with:
           name: fingerprints-${{ matrix.os }}
           path: fingerprints-${{ matrix.os }}.txt
 
   baseline-parity:
     needs: baseline
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v7
         with:
           pattern: fingerprints-*
           merge-multiple: true
       - name: Windows, macOS and Linux write the same baseline
         run: |
           ls fingerprints-*.txt
-          [ -s fingerprints-ubuntu-latest.txt ] || { echo 'no fingerprints from Linux'; exit 1; }
-          for f in fingerprints-macos-15.txt fingerprints-windows-latest.txt; do
-            diff -u fingerprints-ubuntu-latest.txt "$f" || { echo "FAILED: $f differs from Linux"; exit 1; }
+          [ -s fingerprints-ubuntu-24.04.txt ] || { echo 'no fingerprints from Linux'; exit 1; }
+          for f in fingerprints-macos-15.txt fingerprints-windows-2025.txt; do
+            diff -u fingerprints-ubuntu-24.04.txt "$f" || { echo "FAILED: $f differs from Linux"; exit 1; }
           done
-          echo "identical: $(wc -l < fingerprints-ubuntu-latest.txt) fingerprints"
+          echo "identical: $(wc -l < fingerprints-ubuntu-24.04.txt) fingerprints"
 
   large-repo:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     name: 100,000-file scan under 30 s
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         with:
           node-version: 22
           cache: pnpm
