@@ -36,21 +36,21 @@ export function makeFilter(extra: string[] = []) {
   };
 }
 
+/** One file, ready for the rules; null when it is missing, a folder, too big (over 1 MB) or binary. */
+export function readSource(root: string, path: string): SourceFile | null {
+  try {
+    const abs = join(root, path);
+    const st = statSync(abs);
+    if (!st.isFile() || st.size > MAX_BYTES) return null;
+    const text = readFileSync(abs, 'utf8');
+    if (text.includes('\u0000')) return null;
+    return { path, text, lines: text.split(/\r?\n/) };
+  } catch {
+    return null; // deleted or unreadable
+  }
+}
+
 export function loadFiles(root: string, paths: string[], ignore: string[] = []): SourceFile[] {
   const keep = makeFilter(ignore);
-  const out: SourceFile[] = [];
-  for (const path of paths) {
-    if (!keep(path)) continue;
-    const abs = join(root, path);
-    try {
-      const st = statSync(abs);
-      if (!st.isFile() || st.size > MAX_BYTES) continue;
-      const text = readFileSync(abs, 'utf8');
-      if (text.includes('\u0000')) continue;
-      out.push({ path, text, lines: text.split(/\r?\n/) });
-    } catch {
-      /* deleted or unreadable */
-    }
-  }
-  return out;
+  return paths.filter(keep).map((p) => readSource(root, p)).filter((f): f is SourceFile => f !== null);
 }

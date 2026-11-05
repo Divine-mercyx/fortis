@@ -13,7 +13,7 @@ import { githubAnnotations, toSarif } from './sarif';
 import { dockerAvailable, isLocalHost, parseZapReport, reportOrigins, runZap, waitForTarget, ZAP_IMAGE, type DastFinding, type ZapAuth, type ZapReport } from './dast';
 import { PROJECT_CONFIG, readProjectConfig, removeKey, resolveKey, saveKey, writeProjectConfig } from './config';
 import { apiUrl, VERSION } from './env';
-import { currentBranch, currentCommit, parsePushRefs, repoRoot, type PushedRef } from './git';
+import { checkoutInfo, currentBranch, currentCommit, parsePushRefs, repoRoot, type PushedRef } from './git';
 import { installHook } from './hook';
 import { explain, printDastReport, printReport } from './report';
 import { meetsThreshold, runScan } from './scan';
@@ -36,7 +36,7 @@ ${c.bold('Usage')}
   fortis access --target <url>                       can test user B read test user A's records? (BOLA)
   fortis access init [--openapi URL]                 write ${ACCESS_CONFIG} (from your OpenAPI spec if given)
   fortis baseline                                    accept today's findings so only new ones block
-  fortis ci init [--provider github|gitlab]          write a CI workflow (scan on PRs, test staging)
+  fortis ci init [--provider github|gitlab] [--history]  write a CI workflow (scan on PRs, test staging)
   fortis explain <RULE-ID>                           why a rule matters and how to fix it
   fortis rules                                       list every rule
 
@@ -51,6 +51,7 @@ ${c.bold('Scan options')}
   --sarif <file>   write SARIF for GitHub code scanning, GitLab and IDEs
   --sbom <file>    also check a CycloneDX JSON SBOM (full Maven coverage, including transitive)
   --no-baseline    block on every finding, ignoring ${BASELINE_FILE}
+  --submodules     also scan git submodules (skipped by default: they are separate repositories)
   --osv-db <dir>   check dependencies against OSV's downloaded exports (air-gapped networks)
   --no-cache       ask OSV again instead of using answers cached in the last 6 hours
 
@@ -145,7 +146,7 @@ async function cmdScan(flags: Flags): Promise<number> {
       /* no stdin: fall back to comparing with the remote branch */
     }
   }
-  const result = await runScan({ root, scope: prePush ? 'changed' : 'full', packs, ignore: config.ignore, offline, pushed, sbom, ...osvOptions(flags) });
+  const result = await runScan({ root, scope: prePush ? 'changed' : 'full', packs, ignore: config.ignore, offline, pushed, sbom, submodules: Boolean(flags.submodules), ...osvOptions(flags) });
   result.notes.unshift(...notes);
 
   // Git errors look like an empty repository. Passing here would also close every open finding.
@@ -161,6 +162,9 @@ async function cmdScan(flags: Flags): Promise<number> {
   }
 
   if (flags.history) {
+    if (checkoutInfo(root).shallow) {
+      result.notes.push(`This is a shallow clone, so --history only saw the commits fetched. In CI, set fetch-depth: 0 on actions/checkout (GitLab: GIT_DEPTH: 0), or run fortis ci init --history.`);
+    }
     const h = await scanHistory(root, { since: str(flags.since), ignore: config.ignore });
     result.detections.push(...h.detections);
     result.notes.push(`Searched ${h.commitsScanned} commits that added code: ${h.detections.length} found in history. Rotate every one, even if the file was deleted.`);
@@ -183,7 +187,8 @@ async function cmdScan(flags: Flags): Promise<number> {
       uploaded = await client(api, key!).upload({
         scanId: randomUUID(),
         trigger: prePush ? 'pre-push' : ci ? 'ci' : 'manual',
-        scope: prePush ? 'changed' : 'full',
+        // A full scan that couldn't read every file (sparse checkout, time budget) mustn't close findings.
+        scope: prePush || result.partial.length ? 'changed' : 'full',
         incompleteChecks: result.incompleteChecks.length ? result.incompleteChecks : undefined,
         commit: currentCommit(root),
         branch: currentBranch(root),
@@ -569,7 +574,7 @@ async function cmdBaseline(flags: Flags): Promise<number> {
 
 async function cmdCi(args: string[], flags: Flags): Promise<number> {
   if (args[0] !== 'init') {
-    err('Usage: fortis ci init [--provider github|gitlab] [--staging-branch staging] [--target URL] [--force]');
+    err('Usage: fortis ci init [--provider github|gitlab] [--staging-branch staging] [--target URL] [--history] [--force]');
     return 2;
   }
   const root = repoRoot(process.cwd());
@@ -583,7 +588,7 @@ async function cmdCi(args: string[], flags: Flags): Promise<number> {
     return 2;
   }
   const stagingBranch = str(flags['staging-branch']) ?? 'staging';
-  const res = writeCi(root, provider, { stagingBranch, target: str(flags.target) ?? readProjectConfig(root).target, force: Boolean(flags.force) });
+  const res = writeCi(root, provider, { stagingBranch, target: str(flags.target) ?? readProjectConfig(root).target, force: Boolean(flags.force), history: Boolean(flags.history) });
   if (!res.written) {
     err(c.yellow(`! ${res.path} already exists. Use --force to overwrite it.`));
     return 2;

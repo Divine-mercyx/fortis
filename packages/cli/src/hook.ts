@@ -48,6 +48,14 @@ ${RUN}
 const OLD_RUN = /^npx --no-install fortis scan --pre-push(?: --stdin)?(?: \|\| exit 1)?$|^(?:\( )?if \[ -x \.\/node_modules\/\.bin\/fortis \];[\s\S]*?\bfi(?: \) \|\| exit 1)?$/m;
 
 function hooksDir(root: string): string {
+  // Git's own answer covers core.hooksPath and worktrees, where .git is a file pointing at the
+  // main repository and hooks live in the shared folder. Needs git 2.31+ for --path-format.
+  try {
+    const p = execFileSync('git', ['rev-parse', '--path-format=absolute', '--git-path', 'hooks'], { cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+    if (p) return p;
+  } catch {
+    /* older git: work it out below */
+  }
   try {
     const custom = execFileSync('git', ['config', '--get', 'core.hooksPath'], { cwd: root, encoding: 'utf8' }).trim();
     if (custom) return join(root, custom);

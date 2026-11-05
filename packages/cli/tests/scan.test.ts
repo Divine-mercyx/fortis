@@ -166,7 +166,7 @@ describe('runScan', () => {
   it('does not call it a full pass when the dependency check did not finish', () => {
     const shown = (incompleteChecks: 'dependencies'[]) => {
       const write = vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
-      printReport({ detections: [], filesScanned: 1, packagesChecked: 0, durationMs: 1, notes: [], incompleteChecks }, { failOn: 'critical', prePush: false, packs: ['dependencies'] });
+      printReport({ detections: [], filesScanned: 1, packagesChecked: 0, durationMs: 1, notes: [], incompleteChecks, partial: [] }, { failOn: 'critical', prePush: false, packs: ['dependencies'] });
       const out = write.mock.calls.map((c) => String(c[0])).join('');
       write.mockRestore();
       return out;
