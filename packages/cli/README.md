@@ -183,6 +183,13 @@ Django session logins work too: set `"header": "Cookie"` in `.fortis-access.json
 
 Every rule is measured against a labelled benchmark in `bench/cases`. A line marked `@hit` must be flagged, and a flag on any other line is a false positive. `pnpm bench` prints precision and recall per rule. The test suite fails if any rule drops below its recorded floor. When a rule is wrong on real code, we add that code to the benchmark first, then fix the rule.
 
+## Git checkouts in CI and large repositories
+
+- **Shallow clones** (CI's default `fetch-depth: 1`): a full scan with `--ci` needs only the latest commit. `--history` and branch comparisons say when they could only see part of the history. `fortis ci init --history` adds `--history` together with `fetch-depth: 0` (GitLab: `GIT_DEPTH: 0`).
+- **Submodules** are separate repositories, so they're skipped with a note. Pass `--submodules` to scan them too.
+- **Worktrees, detached HEAD and sparse checkouts** work. In a sparse checkout, files that aren't on disk are counted in a note. Their findings stay open, since a scan that didn't read them can't say they're fixed.
+- **Large repositories:** files are read and checked one at a time, so memory stays flat. A full scan of 100,000 files takes about 11 seconds, and CI checks that it stays under 30. A scan stops after 10 minutes (`FORTIS_SCAN_BUDGET_SECONDS` to change it) with a note, and is then treated as partial. Ignore generated folders in `.fortis.json` to keep scans quick.
+
 ## Windows
 
 The pre-push hook is run by Git's own `sh`, whichever shell or app starts the push, so it behaves the same in Git Bash, PowerShell, cmd and WSL.
@@ -287,6 +294,10 @@ Keys are read from `FORTIS_KEY`, then from `~/.config/fortis/credentials.json` (
 - New token formats: SendGrid, Mailgun, Resend, Slack and Discord webhooks, Telegram, OpenAI, Anthropic, Azure Storage, DigitalOcean, Render, npm, PyPI, RubyGems, NuGet, Docker Hub, `.npmrc` tokens, Supabase `service_role` keys, Twilio auth tokens and Google service-account keys. `.npmrc`, `.pypirc`, `.netrc` and `.yarnrc` are now scanned.
 - SeerBit, OPay and Squad sandbox secret keys are named.
 - A repository with only lockfiles now shows why the dependency check failed, instead of "Found no files to scan".
+- Windows: the hook finds the CLI from GitHub Desktop, VS Code and other apps, and CRLF files, BOMs and backslash paths are handled. A Windows baseline matches a Mac or Linux one.
+- Shallow CI clones, submodules (`--submodules`), worktrees, detached HEAD and sparse checkouts are handled. Large repositories are read one file at a time, with a time budget.
+- Python: the fintech rules cover Django, Flask and FastAPI. More lockfiles are read (`pdm.lock`, `pylock.toml`), and packages without an exact version are named, with how to pin them. Install with pip, pipx or uv, or use the pre-commit hook.
+- Every install method is tested end to end on Linux, macOS and Windows before a release.
 
 **0.1.0-beta.11**
 - The dependency check reads Rust (`Cargo.lock`) and Dart/Flutter (`pubspec.lock`). A Rust or Flutter project without its lockfile, and Swift, CocoaPods or Elixir projects (not read yet), are now reported instead of passing as clean.

@@ -204,3 +204,34 @@ jobs:
             diff -u fingerprints-ubuntu-latest.txt "$f" || { echo "FAILED: $f differs from Linux"; exit 1; }
           done
           echo "identical: $(wc -l < fingerprints-ubuntu-latest.txt) fingerprints"
+
+  large-repo:
+    runs-on: ubuntu-latest
+    name: 100,000-file scan under 30 s
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter fortis-watchdog build
+      - name: Generate a 100,000-file repository
+        run: node packages/cli/scripts/gen-large-repo.mjs "$RUNNER_TEMP/large" 100000
+      - name: Full scan (secrets and dependencies) within the budget
+        working-directory: ${{ runner.temp }}/large
+        run: |
+          set +e
+          start=$(date +%s%N)
+          node "$GITHUB_WORKSPACE/packages/cli/dist/fortis.js" scan --offline --no-upload > out.txt 2>&1
+          code=$?
+          ms=$(( ($(date +%s%N) - start) / 1000000 ))
+          head -3 out.txt
+          echo "took ${ms} ms"
+          echo "### 100,000-file scan: ${ms} ms" >> "$GITHUB_STEP_SUMMARY"
+          # The generator plants 5 AWS-format keys; the scan must find them all (and so fail with 1).
+          [ "$code" = 1 ] || { echo "FAILED: expected exit 1 (keys found), got $code"; cat out.txt; exit 1; }
+          [ "$(grep -c 'CRITICAL SEC-GEN-001' out.txt)" = 5 ] || { echo 'FAILED: did not find the 5 planted keys'; cat out.txt; exit 1; }
+          grep -q '100000 files' out.txt || { echo 'FAILED: did not scan every file'; exit 1; }
+          [ "$ms" -lt 30000 ] || { echo "FAILED: ${ms} ms is over the 30 s target"; exit 1; }
