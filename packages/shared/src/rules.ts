@@ -87,7 +87,7 @@ export const RULE_CATALOG: readonly RuleMeta[] = [
     pack: 'secrets',
     title: 'Generic secret in code',
     severity: 'high',
-    summary: 'An API key, token or private key is committed to the repository.',
+    summary: 'An API key, token, private key or database password (in a connection URL or connection string) is committed to the repository.',
     fix: 'Move it to an environment variable or secret manager and rotate it.',
   },
   {

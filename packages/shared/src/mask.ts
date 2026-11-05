@@ -45,9 +45,15 @@ const PATTERNS: { re: RegExp; keepPrefix: (m: string) => number; when?: (m: stri
   { re: /(?<!\d)\d{11}(?!\d)/g, keepPrefix: () => 0 },
 ];
 
+/** Passwords inside connection strings: `scheme://user:PASSWORD@host`, `password=…` / `Pwd=…;`. */
+const URL_PASSWORD = /(\b[a-z][a-z0-9+.-]*:\/\/[^:/\s@'"`]+:)([^@\s'"`]+)(@)/gi;
+const KEY_PASSWORD = /((?:^|[?&;\s])(?:password|pwd)\s*=\s*)([^&;\s'"`]+)/gi;
+
 export function maskSnippet(snippet: string): string {
   if (/-----BEGIN [A-Z ]*PRIVATE KEY-----/.test(snippet)) return '[private key removed]';
-  let out = snippet;
+  let out = snippet
+    .replace(URL_PASSWORD, (m, pre: string, pass: string, at: string) => (pass.includes('••••') ? m : `${pre}${maskValue(pass)}${at}`))
+    .replace(KEY_PASSWORD, (m, pre: string, pass: string) => (pass.includes('••••') ? m : `${pre}${maskValue(pass)}`));
   for (const { re, keepPrefix, when } of PATTERNS) {
     out = out.replace(re, (m) => (m.includes('••••') || (when && !when(m)) ? m : maskValue(m, keepPrefix(m))));
   }

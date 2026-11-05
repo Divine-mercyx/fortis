@@ -35,6 +35,33 @@ const CONFIG_REFERENCE = /^(?:classpath|file|env|vault|secretref|arn):|^\.{0,2}\
 /** The value on this line comes from the environment, in any of the languages we scan. */
 const READS_ENV = /process\.env|import\.meta\.env|os\.environ|getenv\(|\benv\(|\$_ENV|\$_SERVER|System\.getProperty|GetEnvironmentVariable|\bENV\[|@Value\(/;
 
+/*
+ * Connection strings with a password in them. Three shapes:
+ *   postgres://user:PASSWORD@host/db   (also mysql, mongodb(+srv), redis(s), amqp(s), mssql, …)
+ *   jdbc:sqlserver://host;user=u;password=PASSWORD   or   jdbc:mysql://host/db?user=u&password=PASSWORD
+ *   Server=host;User Id=u;Password=PASSWORD;   (.NET / ADO connection strings)
+ * Local development databases and placeholders are not reported.
+ */
+const CONN_URL = /\b((?:postgres(?:ql)?|mysql|mariadb|mongodb(?:\+srv)?|rediss?|amqps?|mssql|sqlserver|cockroachdb|clickhouse)):\/\/([^:/\s@'"`]+):([^@\s'"`]+)@([^/\s:'"`?;,)]+)/gi;
+const JDBC = /\bjdbc:[a-z0-9]+(?::[a-z0-9]+)?:\/\/([^/\s;:?'"`]+)[^\s'"`]*?[?&;]password=([^&;\s'"`]+)/gi;
+const ADO = /(?:^|[;"'\s])(?:server|data source|host|address)\s*=\s*([^;'"`]+);[^'"`]*?\b(?:password|pwd)\s*=\s*([^;'"`]+)/gi;
+/** Hosts that only exist on a developer's machine or inside docker-compose. */
+const LOCAL_HOST = /^(?:localhost|127\.\d+\.\d+\.\d+|0\.0\.0\.0|\[?::1\]?|host\.docker\.internal|db|database|postgres(?:ql)?|mysql|mariadb|mongo(?:db)?|redis|rabbitmq|mssql|sqlserver)$/i;
+const PASSWORD_PLACEHOLDER = /^(?:\$\{.*\}|\$\(.*\)|\$[A-Za-z_]\w*|%\w+%?|<[^>]*>|\{\{.*\}\}|\*+|x+|\.\.\.|password|pass|pwd|secret|changeme|your[_-]?password)$/i;
+
+function connectionSecret(text: string): string | null {
+  const real = (host: string, pass: string) => {
+    const h = host.trim().replace(/:\d+$/, '');
+    let p = pass.trim();
+    try { p = decodeURIComponent(p); } catch { /* keep as written */ }
+    return p.length >= 3 && !PASSWORD_PLACEHOLDER.test(p) && !LOCAL_HOST.test(h);
+  };
+  for (const m of text.matchAll(CONN_URL)) if (real(m[4]!, m[3]!)) return 'Database password in a connection URL';
+  for (const m of text.matchAll(JDBC)) if (real(m[1]!, m[2]!)) return 'Database password in a JDBC URL';
+  for (const m of text.matchAll(ADO)) if (real(m[1]!, m[2]!)) return 'Database password in a connection string';
+  return null;
+}
+
 function entropy(s: string): number {
   const freq = new Map<string, number>();
   for (const ch of s) freq.set(ch, (freq.get(ch) ?? 0) + 1);
@@ -47,8 +74,8 @@ function entropy(s: string): number {
 }
 
 const PLACEHOLDER = /^(x+|\*+|<.*>|\$\{.*\}|\$[A-Za-z_]|%[\w(]|\{\{|\{cipher\}|ENC\(|your[_-]|changeme|example|placeholder|dummy|test|sample|redacted)/i;
-/** Routes, URLs without credentials, dashed-word labels and variable names (`:login-token="loginToken"`) are not secrets. */
-const NOT_SECRET = /^\/|^https?:\/\/[^@\s]+$|^[a-z]+(?:[-_./][a-z]+)+$|^[A-Za-z][a-z]*(?:[A-Z][a-z]+)+$/;
+/** Routes, URLs without credentials (any scheme; URLs with one are connectionSecret's job), dashed-word labels and variable names (`:login-token="loginToken"`) are not secrets. */
+const NOT_SECRET = /^\/|^[a-z][a-z0-9+.-]*:\/\/(?:[^:@/\s]+@)?[^@\s]+$|^[a-z]+(?:[-_./][a-z]+)+$|^[A-Za-z][a-z]*(?:[A-Z][a-z]+)+$/;
 
 /** Firebase config files hold client keys that ship inside every app build; they are public by design. */
 const FIREBASE_CONFIG = /(^|\/)(google-services\.json|GoogleService-Info\.plist)$/i;
@@ -100,6 +127,11 @@ export const genericSecretRule: FileRule = {
     };
     const unquotedAllowed = CONFIG_FILE.test(file.path) && !EXAMPLE_FILE.test(file.path);
     file.lines.forEach((text, i) => {
+      // Checked before READS_ENV: `process.env.DATABASE_URL || 'postgres://app:pw@db.prod…'` still leaks the fallback.
+      const conn = connectionSecret(text);
+      if (conn && !isIgnored(file, i + 1) && !out.some((d) => d.line === i + 1)) {
+        out.push({ ruleId: 'SEC-GEN-001', severity: 'critical', title: conn, file: file.path, line: i + 1, snippet: text.trim() });
+      }
       if (READS_ENV.test(text)) return;
       ASSIGNMENT.lastIndex = 0;
       for (const m of text.matchAll(ASSIGNMENT)) {

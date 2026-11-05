@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { FINTECH_RULES } from '../src/rules/fintech';
+import { maskSnippet } from '@fortis/shared';
 import { genericSecretRule, paymentKeyRule } from '../src/rules/secrets';
 import { emptyContext, type FileRule, type SourceFile } from '../src/rules/types';
 import { buildContext } from '../src/scan';
@@ -129,7 +130,49 @@ describe('SEC-GEN-001 in tests', () => {
   });
 
   it('still catches a real-looking secret in a test file', () => {
-    expect(run(genericSecretRule, 'backend/tests/test_payments.py', 'api_key = "Zx9Qm2Lp7Vt4Rk8Wn3Yb6Hc1"')).toHaveLength(1);
+    expect(run(genericSecretRule, 'backend/tests/test_payments.py', 'api_key = "Zx9Qm2Lp7Vt4Rk8Wn3Yb6Hc1"')).toHaveLength(1); // fortis-ignore: test input
   });
 });
 
+
+describe('SEC-GEN-001 connection strings', () => {
+  const PW = ['Zx9Qm2Lp', '7Vt4Rk8W'].join('');
+  it('reports passwords in database and broker URLs, JDBC URLs and .NET connection strings', () => {
+    const cases: [string, string][] = [
+      ['.env', `DATABASE_URL=postgres://app:${PW}@db.prod.internal:5432/app`],
+      ['.env', `MONGO_URI=mongodb+srv://ledger:${PW}@cluster0.ab12c.mongodb.net/ledger`],
+      ['app.properties', `spring.datasource.url=jdbc:sqlserver://sql01.bank.net:1433;databaseName=core;user=svc;password=${PW}`],
+      ['appsettings.json', `"Core": "Server=tcp:core.database.windows.net,1433;User ID=svc;Password=${PW};"`],
+      ['src/db.ts', `const url = process.env.DATABASE_URL ?? 'postgres://app:${PW}@10.0.3.12:5432/app';`],
+    ];
+    for (const [path, text] of cases) {
+      const d = run(genericSecretRule, path, text);
+      expect(d, text).toHaveLength(1);
+      expect(d[0]!.severity).toBe('critical');
+      expect(d[0]!.title).toMatch(/Database password/);
+    }
+  });
+
+  it('leaves local databases, placeholders and URLs without a password alone', () => {
+    for (const text of [
+      'DATABASE_URL=postgres://postgres:postgres@localhost:5432/app',
+      'DATABASE_URL=postgresql://app:app_dev_pw@db:5432/app',
+      'DATABASE_URL=postgres://app:${DB_PASSWORD}@db.prod.internal:5432/app',
+      'DATABASE_URL=postgres://app@db.prod.internal:5432/app',
+      '// postgres://USER:PASSWORD@HOST:5432/DB',
+      'const u = `mysql://${user}:${pass}@${host}/core`;',
+      'dev.url=jdbc:mysql://localhost:3306/dev?user=root&password=root',
+    ]) {
+      expect(run(genericSecretRule, '.env', text), text).toEqual([]);
+    }
+  });
+
+  it('masks the password in every snippet it reports', () => {
+    const d = run(genericSecretRule, '.env', `DATABASE_URL=postgres://app:${PW}@db.prod.internal:5432/app`);
+    const masked = maskSnippet(d[0]!.snippet);
+    expect(masked).not.toContain(PW);
+    expect(masked).toContain('postgres://app:••••••••');
+    expect(maskSnippet(`Server=x;Password=${PW};`)).not.toContain(PW);
+    expect(maskSnippet(`jdbc:mysql://h/db?user=u&password=${PW}&ssl=1`)).not.toContain(PW);
+  });
+});
