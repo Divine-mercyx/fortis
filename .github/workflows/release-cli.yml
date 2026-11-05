@@ -5,6 +5,7 @@ name: Release CLI
 #   - a Docker image on ghcr.io
 #   - fortis-watchdog on npm
 #   - fortis-watchdog on PyPI, as wheels holding the binary
+#   - Homebrew, Scoop and winget manifests
 #
 # npm uses trusted publishing (OIDC): no npm token is stored in GitHub, and every release carries
 # a signed provenance statement linking it to this workflow run.
@@ -50,6 +51,17 @@ jobs:
 
   binaries:
     needs: [check, e2e]
+    # Signing secrets live in this environment, which an admin limits to cli-v* tags.
+    # Without them, binaries are built as before, and macOS and Windows warn about them.
+    environment: release
+    env:
+      APPLE_CERT_P12_BASE64: ${{ secrets.APPLE_CERT_P12_BASE64 }}
+      APPLE_CERT_PASSWORD: ${{ secrets.APPLE_CERT_PASSWORD }}
+      APPLE_API_KEY_P8_BASE64: ${{ secrets.APPLE_API_KEY_P8_BASE64 }}
+      APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+      APPLE_API_ISSUER_ID: ${{ secrets.APPLE_API_ISSUER_ID }}
+      WINDOWS_CERT_PFX_BASE64: ${{ secrets.WINDOWS_CERT_PFX_BASE64 }}
+      WINDOWS_CERT_PASSWORD: ${{ secrets.WINDOWS_CERT_PASSWORD }}
     strategy:
       fail-fast: true
       matrix:
@@ -69,6 +81,13 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm --filter fortis-watchdog build:binary
+      - name: Sign and notarize (macOS)
+        if: runner.os == 'macOS' && env.APPLE_CERT_P12_BASE64 != ''
+        run: bash packages/cli/scripts/sign-macos.sh packages/cli/dist-sea/fortis
+      - name: Sign (Windows)
+        if: runner.os == 'Windows' && env.WINDOWS_CERT_PFX_BASE64 != ''
+        shell: pwsh
+        run: ./packages/cli/scripts/sign-windows.ps1 -Binary packages/cli/dist-sea/fortis.exe
       - name: Smoke test
         shell: bash
         run: |
@@ -105,8 +124,26 @@ jobs:
           path: wheels/*.whl
           if-no-files-found: error
 
+  musl:
+    needs: [check, e2e]
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - { runner: ubuntu-24.04, name: linux-x64-musl }
+          - { runner: ubuntu-24.04-arm, name: linux-arm64-musl }
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v5
+      - run: bash packages/cli/scripts/build-musl.sh ${{ matrix.name }} packages/cli/out
+      - uses: actions/upload-artifact@v6
+        with:
+          name: ${{ matrix.name }}
+          path: packages/cli/out/*
+          if-no-files-found: error
+
   github-release:
-    needs: binaries
+    needs: [binaries, musl]
     runs-on: ubuntu-24.04
     permissions:
       contents: write
@@ -124,6 +161,11 @@ jobs:
           path: release
           merge-multiple: true
           pattern: '*-arm64'
+      - uses: actions/download-artifact@v7
+        with:
+          path: release
+          merge-multiple: true
+          pattern: '*-musl'
       - name: Leave the wheels for PyPI
         run: rm -f release/*.whl
       - name: Add install scripts and checksums
@@ -251,3 +293,60 @@ jobs:
             exit 0
           fi
           npm publish --provenance --access public --tag "$TAG"
+
+  # A store without its secret or repository is skipped with a notice, so it never fails a release.
+  homebrew-scoop:
+    needs: github-release
+    if: github.repository == 'Divine-mercyx/fortis'
+    runs-on: ubuntu-24.04
+    environment: release
+    env:
+      PACKAGE_REPOS_TOKEN: ${{ secrets.PACKAGE_REPOS_TOKEN }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+      - name: Write the manifests
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release download "$GITHUB_REF_NAME" --pattern SHA256SUMS --dir "$RUNNER_TEMP"
+          node packages/cli/scripts/package-manifests.mjs --version "$GITHUB_REF_NAME" --sums "$RUNNER_TEMP/SHA256SUMS" --out "$RUNNER_TEMP/manifests"
+      - name: Update the Homebrew tap and the Scoop bucket
+        if: env.PACKAGE_REPOS_TOKEN != ''
+        run: bash packages/cli/scripts/publish-manifests.sh "$RUNNER_TEMP/manifests"
+      - name: Say what was skipped
+        if: env.PACKAGE_REPOS_TOKEN == ''
+        run: echo "::notice::PACKAGE_REPOS_TOKEN isn't set, so the Homebrew tap and Scoop bucket weren't updated."
+
+  winget:
+    needs: github-release
+    if: github.repository == 'Divine-mercyx/fortis'
+    runs-on: windows-2025
+    environment: release
+    env:
+      WINGET_TOKEN: ${{ secrets.WINGET_TOKEN }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+      - name: Open a pull request on microsoft/winget-pkgs
+        if: env.WINGET_TOKEN != ''
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          gh release download $env:GITHUB_REF_NAME --pattern SHA256SUMS --dir $env:RUNNER_TEMP
+          node packages/cli/scripts/package-manifests.mjs --version $env:GITHUB_REF_NAME --sums "$env:RUNNER_TEMP/SHA256SUMS" --out "$env:RUNNER_TEMP/manifests"
+          $exe = "$env:RUNNER_TEMP/wingetcreate.exe"
+          Invoke-WebRequest https://github.com/microsoft/winget-create/releases/download/v1.12.13.0/wingetcreate.exe -OutFile $exe
+          if ((Get-FileHash $exe -Algorithm SHA256).Hash -ine '24042bd37915805615e6cf969ac57c6439124c3fe85823327f5f3fb24bd9ffea') { throw 'wingetcreate.exe failed its checksum' }
+          & $exe submit --token $env:WINGET_TOKEN "$env:RUNNER_TEMP/manifests/winget"
+          if ($LASTEXITCODE -ne 0) { throw "wingetcreate exited with $LASTEXITCODE" }
+      - name: Say what was skipped
+        if: env.WINGET_TOKEN == ''
+        shell: bash
+        run: echo "::notice::WINGET_TOKEN isn't set, so no winget pull request was opened."

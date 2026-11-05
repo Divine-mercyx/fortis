@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 
 import { MAX_FINDINGS_PER_SCAN, RULE_CATALOG, maskSnippet, SEVERITIES, type RulePack, type Severity } from '@fortis/shared';
 
@@ -19,6 +19,7 @@ import { explain, printDastReport, printReport } from './report';
 import { meetsThreshold, runScan } from './scan';
 import { configureNetwork } from './net';
 import { osvCacheDir } from './rules/osv-cache';
+import { installKind, selfUpdate, UPDATE_HINT, updateCheckEnabled, updateNotice } from './update';
 import { c, err, log } from './ui';
 
 const FREE_PACKS: RulePack[] = ['secrets', 'dependencies'];
@@ -38,6 +39,7 @@ ${c.bold('Usage')}
   fortis baseline                                    accept today's findings so only new ones block
   fortis ci init [--provider github|gitlab] [--history]  write a CI workflow (scan on PRs, test staging)
   fortis explain <RULE-ID>                           why a rule matters and how to fix it
+  fortis update [version]                            update a binary install to the latest version, or this one
   fortis rules                                       list every rule
 
 ${c.bold('Scan options')}
@@ -74,6 +76,7 @@ ${c.bold('Access checks')}  ${c.grey('(Fortis Plus; GET requests only, nothing i
 ${c.bold('Environment')}
   FORTIS_KEY       CLI key (preferred in CI)
   FORTIS_API_URL   API address (default: ${apiUrl()})
+  FORTIS_NO_UPDATE_CHECK=1  turn off the once-a-day notice about a newer version (always off in CI)
   FORTIS_ZAP_DOCKER_ARGS  extra docker flags for fortis test (e.g. --add-host for private staging)
   HTTPS_PROXY, HTTP_PROXY, NO_PROXY  company proxy (localhost is never proxied)
   NODE_EXTRA_CA_CERTS or --ca <file>  extra CA certificates, for proxies that inspect TLS
@@ -551,6 +554,39 @@ async function cmdAccess(args: string[], flags: Flags): Promise<number> {
   return blocking.length ? 1 : 0;
 }
 
+/** A standalone binary is a copy of Node with the CLI inside, named fortis. An npm install runs as a script under Node. */
+const runningAsBinary = () => /^fortis(\.exe)?$/i.test(basename(process.execPath));
+
+async function cmdUpdate(args: string[]): Promise<number> {
+  const kind = installKind({ execPath: process.execPath, isBinary: runningAsBinary() });
+  if (kind !== 'binary') {
+    log(`This copy of Fortis was installed with ${kind}, so update it the same way:`);
+    log(`  ${UPDATE_HINT[kind]}`);
+    return 0;
+  }
+  try {
+    const result = await selfUpdate({ target: process.execPath, version: args[0], onProgress: (m) => log(c.grey(m)) });
+    if (result.status === 'current') log(c.green('✓'), `Fortis ${result.from} is the latest version.`);
+    else log(c.green('✓'), `Updated Fortis: ${result.from} → ${result.to}`);
+    return 0;
+  } catch (e) {
+    const error = e as NodeJS.ErrnoException;
+    if (error.code === 'EACCES' || error.code === 'EPERM') err(c.red(`✖ Can't write to ${dirname(process.execPath)}.`), c.grey('Run this again with permission to change that folder.'));
+    else err(c.red(`✖ ${error.message}`));
+    return 2;
+  }
+}
+
+/** The notice goes to stderr after a command, and never into --json output or a command that exits early. */
+async function showUpdateNotice() {
+  const { cmd, flags } = parseArgs(process.argv.slice(2));
+  if (!process.stderr.isTTY || !updateCheckEnabled() || flags.json || flags.offline || flags.version) return;
+  if (['update', 'help', '--help', '-h', '--version', '-v'].includes(cmd)) return;
+  const kind = installKind({ execPath: process.execPath, isBinary: runningAsBinary() });
+  const notice = await updateNotice({ hint: kind === 'binary' ? 'fortis update' : UPDATE_HINT[kind] }).catch(() => null);
+  if (notice) err(c.yellow(`! ${notice}`));
+}
+
 async function resolvePacks(api: string, key: string | undefined): Promise<RulePack[]> {
   if (!key) return FREE_PACKS;
   try {
@@ -740,6 +776,8 @@ async function main(): Promise<number> {
         return 2;
       }
     }
+    case 'update':
+      return cmdUpdate(args);
     case 'explain':
       if (!args[0] || !explain(args[0])) {
         err(`Unknown rule. Run ${c.bold('fortis rules')} to list them.`);
@@ -771,7 +809,10 @@ for (const stream of [process.stdout, process.stderr]) {
 }
 
 main().then(
-  (code) => process.exit(code),
+  async (code) => {
+    await showUpdateNotice().catch(() => undefined);
+    process.exit(code);
+  },
   (e) => {
     err(c.red(`✖ ${(e as Error).message}`));
     process.exit(2);
