@@ -17,6 +17,8 @@ import { currentBranch, currentCommit, parsePushRefs, repoRoot, type PushedRef }
 import { installHook } from './hook';
 import { explain, printDastReport, printReport } from './report';
 import { meetsThreshold, runScan } from './scan';
+import { configureNetwork } from './net';
+import { osvCacheDir } from './rules/osv-cache';
 import { c, err, log } from './ui';
 
 const FREE_PACKS: RulePack[] = ['secrets', 'dependencies'];
@@ -49,6 +51,8 @@ ${c.bold('Scan options')}
   --sarif <file>   write SARIF for GitHub code scanning, GitLab and IDEs
   --sbom <file>    also check a CycloneDX JSON SBOM (full Maven coverage, including transitive)
   --no-baseline    block on every finding, ignoring ${BASELINE_FILE}
+  --osv-db <dir>   check dependencies against OSV's downloaded exports (air-gapped networks)
+  --no-cache       ask OSV again instead of using answers cached in the last 6 hours
 
 ${c.bold('Test options')}  ${c.grey('(needs Docker; the target must be verified and authorised in the dashboard)')}
   --target <url>   staging URL to test (or set it once as "target" in .fortis.json)
@@ -70,6 +74,8 @@ ${c.bold('Environment')}
   FORTIS_KEY       CLI key (preferred in CI)
   FORTIS_API_URL   API address (default: ${apiUrl()})
   FORTIS_ZAP_DOCKER_ARGS  extra docker flags for fortis test (e.g. --add-host for private staging)
+  HTTPS_PROXY, HTTP_PROXY, NO_PROXY  company proxy (localhost is never proxied)
+  NODE_EXTRA_CA_CERTS or --ca <file>  extra CA certificates, for proxies that inspect TLS
 `;
 
 type Flags = Record<string, string | boolean>;
@@ -83,7 +89,7 @@ function parseArgs(argv: string[]): { cmd: string; args: string[]; flags: Flags 
     if (a.startsWith('--')) {
       const [k, v] = a.slice(2).split('=', 2) as [string, string | undefined];
       if (v !== undefined) flags[k] = v;
-      else if (['key', 'api', 'fail-on', 'target', 'mode', 'openapi', 'minutes', 'zap-report', 'sarif', 'since', 'provider', 'staging-branch', 'wait', 'config', 'sbom'].includes(k) && rest[i + 1] && !rest[i + 1]!.startsWith('--')) flags[k] = rest[++i]!;
+      else if (['key', 'api', 'fail-on', 'target', 'mode', 'openapi', 'minutes', 'zap-report', 'sarif', 'since', 'provider', 'staging-branch', 'wait', 'config', 'sbom', 'ca', 'osv-db'].includes(k) && rest[i + 1] && !rest[i + 1]!.startsWith('--')) flags[k] = rest[++i]!;
       else flags[k] = true;
     } else args.push(a);
   }
@@ -91,6 +97,9 @@ function parseArgs(argv: string[]): { cmd: string; args: string[]; flags: Flags 
 }
 
 const str = (v: string | boolean | undefined) => (typeof v === 'string' ? v : undefined);
+
+/** --osv-db and the OSV answer cache (on unless --no-cache). */
+const osvOptions = (flags: Flags) => ({ osvDb: str(flags['osv-db']), osvCacheDir: flags['no-cache'] ? undefined : osvCacheDir() });
 
 async function cmdScan(flags: Flags): Promise<number> {
   const root = repoRoot(process.cwd()) ?? process.cwd();
@@ -136,11 +145,17 @@ async function cmdScan(flags: Flags): Promise<number> {
       /* no stdin: fall back to comparing with the remote branch */
     }
   }
-  const result = await runScan({ root, scope: prePush ? 'changed' : 'full', packs, ignore: config.ignore, offline, pushed, sbom });
+  const result = await runScan({ root, scope: prePush ? 'changed' : 'full', packs, ignore: config.ignore, offline, pushed, sbom, ...osvOptions(flags) });
   result.notes.unshift(...notes);
 
   // Git errors look like an empty repository. Passing here would also close every open finding.
   if (!prePush && result.filesScanned === 0 && result.packagesChecked === 0) {
+    // Only lockfiles, and the dependency check couldn't run: say why, not "no files".
+    const depError = result.notes.find((n) => n.startsWith('Dependency check skipped:'));
+    if (depError) {
+      err(c.red(`✖ ${depError}`));
+      return 2;
+    }
     err(c.red('✖ Found no files to scan.'), c.grey('Run this inside a git repository. In a container, the repository may also need: git config --global --add safe.directory <path>'));
     return 2;
   }
@@ -545,7 +560,7 @@ async function cmdBaseline(flags: Flags): Promise<number> {
   const config = readProjectConfig(root);
   const api = apiUrl(str(flags.api) ?? config.apiUrl);
   const packs = await resolvePacks(api, resolveKey(api));
-  const result = await runScan({ root, scope: 'full', packs, ignore: config.ignore, offline: Boolean(flags.offline), sbom: str(flags.sbom) });
+  const result = await runScan({ root, scope: 'full', packs, ignore: config.ignore, offline: Boolean(flags.offline), sbom: str(flags.sbom), ...osvOptions(flags) });
   const n = writeBaseline(root, result.detections);
   log(c.green('✓'), `Wrote ${BASELINE_FILE} with ${n} known finding(s) (${packs.join(', ')} rules).`);
   log(c.grey('Commit it. From now on only new findings block pushes and CI; the known ones stay visible in the dashboard.'));
@@ -641,6 +656,13 @@ async function cmdInit(flags: Flags): Promise<number> {
 
 async function main(): Promise<number> {
   const { cmd, args, flags } = parseArgs(process.argv.slice(2));
+  try {
+    const net = await configureNetwork(process.env, str(flags.ca));
+    if (net && flags.verbose) err(c.grey(net));
+  } catch (e) {
+    err(c.red(`Could not set up the network: ${(e as Error).message}`));
+    return 2;
+  }
   if (flags.version || cmd === '--version' || cmd === '-v') {
     log(VERSION);
     return 0;

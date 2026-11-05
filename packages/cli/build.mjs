@@ -13,7 +13,8 @@ await build({
   platform: 'node',
   target: sea ? 'node22' : 'node18',
   format: sea ? 'cjs' : 'esm',
-  banner: sea ? {} : { js: '#!/usr/bin/env node' },
+  // Bundled CommonJS packages (undici) require() Node built-ins; ESM output needs a require for that.
+  banner: sea ? {} : { js: "#!/usr/bin/env node\nimport { createRequire as __fortisRequire } from 'node:module';\nconst require = __fortisRequire(import.meta.url);" },
   define: {
     __FORTIS_VERSION__: JSON.stringify(pkg.version),
     __FORTIS_API_URL__: JSON.stringify(process.env.FORTIS_DEFAULT_API_URL ?? 'https://fortis-api-prqr.onrender.com'),

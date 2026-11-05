@@ -13,6 +13,10 @@ export type ScanOptions = {
   packs: readonly RulePack[];
   ignore?: string[];
   offline?: boolean;
+  /** Read advisories from OSV's downloaded exports instead of the network (works with offline). */
+  osvDb?: string;
+  /** Where OSV answers are cached between scans; omitted means no cache. */
+  osvCacheDir?: string;
   /** From the git hook's stdin: the refs being pushed (pre-push scope only). */
   pushed?: PushedRef[];
   /** A CycloneDX JSON SBOM to check as well as the lockfiles. */
@@ -77,14 +81,16 @@ export async function runScan(opts: ScanOptions): Promise<ScanResult> {
   const incompleteChecks: ScanResult['incompleteChecks'] = [];
   const lockTouched = opts.scope === 'full' || Boolean(opts.sbom) || findLockfiles(paths, opts.ignore).length > 0;
   if (opts.packs.includes('dependencies') && lockTouched) {
-    if (opts.offline) {
-      notes.push('Dependency check skipped (--offline).');
+    if (opts.offline && !opts.osvDb) {
+      notes.push('Dependency check skipped (--offline). Use --osv-db <dir> to check against a downloaded OSV database.');
       incompleteChecks.push('dependencies');
     } else {
       const deps = await scanDependencies(opts.root, paths, {
         sbom: opts.sbom,
         ignore: opts.ignore,
         fetchImpl: opts.fetchImpl,
+        osvDb: opts.osvDb,
+        cacheDir: opts.osvCacheDir,
         // Only a full scan can say a lockfile is missing; a push may simply not have touched it.
         allPaths: opts.scope === 'full' ? paths : undefined,
       });

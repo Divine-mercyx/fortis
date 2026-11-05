@@ -172,6 +172,31 @@ If either request gets A's record back, that's **FX-BOLA-001** or **FX-AUTH-001*
 
 Every rule is measured against a labelled benchmark in `bench/cases`. A line marked `@hit` must be flagged, and a flag on any other line is a false positive. `pnpm bench` prints precision and recall per rule. The test suite fails if any rule drops below its recorded floor. When a rule is wrong on real code, we add that code to the benchmark first, then fix the rule.
 
+## Behind a proxy
+
+Fortis reads the same variables as curl, upper or lower case:
+
+```bash
+export HTTPS_PROXY=http://proxy.bank.local:8080      # or http://user:password@proxy:8080
+export NO_PROXY=.bank.local,10.0.0.0/8               # hosts that skip the proxy
+```
+
+- `localhost`, `127.0.0.1` and `::1` never go through the proxy, so `fortis test --local` and access checks against a local app keep working.
+- If the proxy inspects TLS with its own certificate, give Fortis the CA: `NODE_EXTRA_CA_CERTS=/path/ca.pem`, `FORTIS_CA_FILE=/path/ca.pem` or `--ca /path/ca.pem`.
+- `fortis scan --verbose` prints the proxy in use, with any password hidden.
+- Dependency answers from OSV are cached for 6 hours in `~/.cache/fortis` (`FORTIS_CACHE_DIR` to move it, `--no-cache` to skip it). So a pre-push check doesn't repeat the same questions, and keeps working for a while if the network drops.
+
+### No internet at all (air-gapped)
+
+Download OSV's exports for the ecosystems you use, copy them across, and point Fortis at the folder:
+
+```bash
+curl -O https://osv-vulnerabilities.storage.googleapis.com/npm/all.zip   # also PyPI, Maven, Go, crates.io, Packagist, NuGet, RubyGems, Pub
+fortis scan --offline --osv-db ./osv
+```
+
+The folder can hold the zips (in subfolders too) or the advisories already unzipped as `.json` files. Refresh it as often as you'd like new advisories, for example weekly.
+
 ## What leaves your machine
 
 Rules run locally. When your plan syncs findings, the CLI sends the rule ID, severity, file path,
@@ -229,6 +254,15 @@ the version in `package.json`. Publish it with `npm publish fortis-watchdog-<ver
 Keys are read from `FORTIS_KEY`, then from `~/.config/fortis/credentials.json` (written by `fortis login`, mode 0600).
 
 ## Changelog
+
+**0.1.0-beta.12** (unreleased)
+- Works behind company proxies (`HTTPS_PROXY`, `NO_PROXY`, extra CA with `--ca`), caches OSV answers for 6 hours, and checks dependencies with no internet using `--osv-db`. See "Behind a proxy".
+- Dependency findings name the version that fixes every advisory and the exact upgrade command for your package manager; for an indirect npm, pnpm or Yarn dependency, the direct one that pulls it in. Also in `--json`, SARIF and the dashboard.
+- Database passwords in connection URLs, JDBC URLs and .NET connection strings are reported as critical.
+- Stripe keys are named as Stripe (and Paystack as Paystack), with restricted keys and webhook secrets.
+- New token formats: SendGrid, Mailgun, Resend, Slack and Discord webhooks, Telegram, OpenAI, Anthropic, Azure Storage, DigitalOcean, Render, npm, PyPI, RubyGems, NuGet, Docker Hub, `.npmrc` tokens, Supabase `service_role` keys, Twilio auth tokens and Google service-account keys. `.npmrc`, `.pypirc`, `.netrc` and `.yarnrc` are now scanned.
+- SeerBit, OPay and Squad sandbox secret keys are named.
+- A repository with only lockfiles now shows why the dependency check failed, instead of "Found no files to scan".
 
 **0.1.0-beta.11**
 - The dependency check reads Rust (`Cargo.lock`) and Dart/Flutter (`pubspec.lock`). A Rust or Flutter project without its lockfile, and Swift, CocoaPods or Elixir projects (not read yet), are now reported instead of passing as clean.

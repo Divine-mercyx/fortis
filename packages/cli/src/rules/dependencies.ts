@@ -5,6 +5,8 @@ import type { Severity } from '@fortis/shared';
 
 import { cycloneDx, ecosystemOf, findLockfiles, isPomXml, missingLockfiles, parseLockfile, type Ecosystem, type Locked } from './lockfiles';
 import { fixedVersion, fixMessage, type OsvAffected } from './fix-version';
+import { OsvCache } from './osv-cache';
+import { lookupLocal } from './osv-db';
 import type { Detection } from './types';
 
 /*
@@ -99,7 +101,19 @@ async function inPool<T>(items: T[], size: number, run: (item: T) => Promise<voi
 export async function scanDependencies(
   root: string,
   files: string[],
-  opts: { sbom?: string; allPaths?: string[]; ignore?: string[]; includeDev?: boolean; fetchImpl?: typeof fetch; osvUrl?: string } = {},
+  opts: {
+    sbom?: string;
+    allPaths?: string[];
+    ignore?: string[];
+    includeDev?: boolean;
+    fetchImpl?: typeof fetch;
+    osvUrl?: string;
+    /** Folder of OSV exports: no network at all. */
+    osvDb?: string;
+    /** Cache folder for OSV answers; omitted means no cache. */
+    cacheDir?: string;
+    now?: () => number;
+  } = {},
 ): Promise<{ detections: Detection[]; checked: number; error?: string; notes: string[]; incomplete: boolean }> {
   const fetchImpl = opts.fetchImpl ?? fetch;
   const base = opts.osvUrl ?? 'https://api.osv.dev';
@@ -114,32 +128,64 @@ export async function scanDependencies(
 
   try {
     const hits: { pkg: Locked; ids: string[] }[] = [];
-    for (let i = 0; i < pkgs.length; i += 500) {
-      const chunk = pkgs.slice(i, i + 500);
-      const res = await fetchImpl(`${base}/v1/querybatch`, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ queries: chunk.map((p) => ({ package: { name: p.name, ecosystem: p.ecosystem }, version: p.version })) }),
-        signal: AbortSignal.timeout(15_000),
-      });
-      if (!res.ok) throw new Error(`OSV responded ${res.status}`);
-      const data = (await res.json()) as { results: { vulns?: { id: string }[] }[] };
-      data.results.forEach((r, k) => {
-        if (r.vulns?.length) hits.push({ pkg: chunk[k]!, ids: r.vulns.map((v) => v.id) });
-      });
-    }
-
     const details = new Map<string, OsvVuln>();
-    const allIds = [...new Set(hits.flatMap((h) => h.ids))];
-    await inPool(allIds.slice(0, MAX_ADVISORIES), ADVISORY_CONCURRENCY, async (id) => {
-      try {
-        const r = await fetchImpl(`${base}/v1/vulns/${encodeURIComponent(id)}`, { signal: AbortSignal.timeout(10_000) });
-        if (r.ok) details.set(id, (await r.json()) as OsvVuln);
-      } catch {
-        /* keep going without severity */
+
+    if (opts.osvDb) {
+      const local = lookupLocal(opts.osvDb, pkgs, keyOf);
+      for (const p of pkgs) {
+        const ids = local.hits.get(keyOf(p));
+        if (ids?.length) hits.push({ pkg: p, ids });
       }
-    });
-    if (allIds.length > MAX_ADVISORIES) notes.push(`Severity was looked up for the first ${MAX_ADVISORIES} of ${allIds.length} advisories; the rest show as medium.`);
+      for (const [id, v] of local.details) details.set(id, v);
+      notes.push(`Dependencies checked against the local OSV database in ${opts.osvDb} (${local.read} advisories read).`);
+    } else {
+      const cache = opts.cacheDir ? new OsvCache(opts.cacheDir, opts.now) : undefined;
+      const ask: Locked[] = [];
+      for (const p of pkgs) {
+        const known = cache?.query(keyOf(p));
+        if (known === undefined) ask.push(p);
+        else if (known.length) hits.push({ pkg: p, ids: known });
+      }
+      for (let i = 0; i < ask.length; i += 500) {
+        const chunk = ask.slice(i, i + 500);
+        const res = await fetchImpl(`${base}/v1/querybatch`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ queries: chunk.map((p) => ({ package: { name: p.name, ecosystem: p.ecosystem }, version: p.version })) }),
+          signal: AbortSignal.timeout(15_000),
+        });
+        if (!res.ok) throw new Error(`OSV responded ${res.status}`);
+        const data = (await res.json()) as { results: { vulns?: { id: string }[] }[] };
+        data.results.forEach((r, k) => {
+          const ids = (r.vulns ?? []).map((v) => v.id);
+          cache?.setQuery(keyOf(chunk[k]!), ids);
+          if (ids.length) hits.push({ pkg: chunk[k]!, ids });
+        });
+      }
+
+      const allIds = [...new Set(hits.flatMap((h) => h.ids))];
+      const missing: string[] = [];
+      for (const id of allIds) {
+        const v = cache?.vuln<OsvVuln>(id);
+        if (v) details.set(id, v);
+        else missing.push(id);
+      }
+      await inPool(missing.slice(0, MAX_ADVISORIES), ADVISORY_CONCURRENCY, async (id) => {
+        try {
+          const r = await fetchImpl(`${base}/v1/vulns/${encodeURIComponent(id)}`, { signal: AbortSignal.timeout(10_000) });
+          if (!r.ok) return;
+          const v = (await r.json()) as OsvVuln;
+          // Keep only what the CLI reads, so the cache stays small.
+          const slim: OsvVuln = { id: v.id, summary: v.summary, aliases: v.aliases, database_specific: { severity: v.database_specific?.severity }, affected: v.affected?.map((a) => ({ package: a.package, ranges: a.ranges })) };
+          details.set(id, slim);
+          cache?.setVuln(id, slim);
+        } catch {
+          /* keep going without severity */
+        }
+      });
+      if (missing.length > MAX_ADVISORIES) notes.push(`Severity was looked up for the first ${MAX_ADVISORIES} of ${missing.length} advisories; the rest show as medium.`);
+      cache?.save();
+    }
 
     const byKey = new Map(hits.map((h) => [keyOf(h.pkg), h]));
     const detections: Detection[] = [];
@@ -170,7 +216,9 @@ export async function scanDependencies(
   } catch (e) {
     const msg = (e as Error).message;
     // Node's fetch says only "fetch failed" when the host can't be reached (offline, proxy, firewall).
-    const error = /fetch failed|ENOTFOUND|ECONNREFUSED|ETIMEDOUT|aborted|timeout/i.test(msg) ? `could not reach ${new URL(base).host} (${msg})` : msg;
+    const unreachable = /fetch failed|ENOTFOUND|ECONNREFUSED|ETIMEDOUT|aborted|timeout|proxy/i.test(msg);
+    const hint = process.env.HTTPS_PROXY || process.env.https_proxy ? ' Check the proxy in HTTPS_PROXY, or add its CA with --ca.' : ' Behind a company proxy? Set HTTPS_PROXY. No internet at all? Use --osv-db.';
+    const error = unreachable ? `could not reach ${new URL(base).host} (${msg}).${hint}` : msg;
     return { detections: [], checked: 0, error, notes, incomplete: true };
   }
 }

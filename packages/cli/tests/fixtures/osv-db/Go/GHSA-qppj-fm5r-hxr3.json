@@ -1,0 +1,1 @@
+{"id": "GHSA-qppj-fm5r-hxr3", "summary": "HTTP/2 rapid reset can cause excessive work in net/http", "aliases": [], "database_specific": {"severity": "HIGH"}, "affected": [{"package": {"ecosystem": "Go", "name": "golang.org/x/net"}, "ranges": [{"type": "ECOSYSTEM", "events": [{"introduced": "0"}, {"fixed": "0.17.0"}]}]}]}

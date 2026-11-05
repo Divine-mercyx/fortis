@@ -51,6 +51,7 @@
     "postject": "1.0.0-alpha.6",
     "tsx": "^4.23.15",
     "typescript": "5.9.3",
+    "undici": "^6.29.1",
     "vitest": "^3.2.7"
   },
   "publishConfig": {
