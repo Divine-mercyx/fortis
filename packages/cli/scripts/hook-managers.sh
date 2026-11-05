@@ -40,7 +40,7 @@ check_pushes() {
   echo "const PAYSTACK = \"$KEY\";" > leak.js
   git add -A
   git commit -q -m leak
-  if git push -q origin main 2> "$work/$name.log"; then
+  if git push -q origin main > "$work/$name.log" 2>&1; then
     echo "FAILED ($name): a push with a live key went through"
     exit 1
   fi
