@@ -248,16 +248,12 @@ The git hook can be skipped once with `git push --no-verify`.
 
 ## Releasing (maintainers)
 
-First release, from a maintainer's machine (npm asks for a 2FA code):
+One-time setup, by the package owner on each registry:
 
-```bash
-pnpm install && pnpm --filter fortis-watchdog build
-cd packages/cli && pnpm publish --access public --tag beta
-```
+- **npm:** on npmjs.com, package → Settings → Trusted publishing → GitHub Actions, repository `Divine-mercyx/fortis`, workflow `release-cli.yml`. Until then the npm step fails with a 404, because no token is stored in GitHub.
+- **PyPI:** on pypi.org, add a pending publisher for `fortis-watchdog`, with repository `Divine-mercyx/fortis`, workflow `release-cli.yml`, environment `pypi`.
 
-Then on npmjs.com: package → Settings → Trusted publishing → GitHub Actions, repository
-`Divine-mercyx/fortis`, workflow `release-cli.yml`. After that, bump `version` in
-`packages/cli/package.json` and push a matching tag (for example `cli-v0.1.0`). GitHub Actions then:
+To release, bump `version` in `packages/cli/package.json` and push a matching tag (for example `cli-v0.1.0`). GitHub Actions then:
 
 - tests, and builds and smoke-tests a binary on each platform;
 - runs the install-and-push check (`scripts/e2e.sh`) for npm, pnpm, Yarn 1, Yarn 4 Plug'n'Play, Bun, a global install, the binary, the install script and the Docker image, on Linux, macOS (arm64 and x64) and Windows. Nothing is published unless all of them pass. Run one locally with `bash scripts/e2e.sh npm fortis-watchdog-<version>.tgz`;
@@ -266,6 +262,8 @@ Then on npmjs.com: package → Settings → Trusted publishing → GitHub Action
 - publishes to npm with provenance. Versions with a pre-release suffix go to the `beta` tag. A version that's already on npm (published by hand) is skipped, not treated as a failure;
 - uses this version's changelog section below as the release notes. Before tagging, change its heading from "(unreleased)" to the release date;
 - builds, tests and publishes the wheels to PyPI (TestPyPI on a fork). `packages/python/build_wheel.py` makes one by hand.
+
+Workflow actions are pinned to commit SHAs, and runners to image versions, so a release can't change because an action moved its tag. Dependabot proposes updates to the pins.
 
 To build a binary for your own machine, run `pnpm --filter fortis-watchdog build:binary`. The result goes in `dist-sea/`. A tag on a fork runs everything except npm, which makes a safe dry run; set `FORTIS_REPO` to install from it.
 
@@ -285,6 +283,7 @@ Keys are read from `FORTIS_KEY`, then from `~/.config/fortis/credentials.json` (
 ## Changelog
 
 **0.1.0-beta.12** (unreleased)
+- `fortis ci init` writes current major versions of GitHub's actions, so your workflow gets no Node.js 20 deprecation warnings.
 - Python is fully supported: `pip install fortis-watchdog`, the fintech rules for Django, Django REST, Flask and FastAPI, and dev packages told apart in uv and Poetry lockfiles.
 - `pip install` needs no Node, and the git hook finds the CLI in `.venv` or `venv` even when it isn't active, and through `uv run` and `poetry run`.
 - More secrets are caught in Python: real-looking defaults such as `os.getenv("KEY", "…")`, SQLAlchemy connection URLs, tokens in URLs, PyPI tokens and notebooks.
