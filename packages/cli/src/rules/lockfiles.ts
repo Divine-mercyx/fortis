@@ -9,7 +9,7 @@ import { lineOf, TEST_PATH } from './types';
 
 export type Ecosystem = 'npm' | 'Packagist' | 'PyPI' | 'Maven' | 'Go' | 'NuGet' | 'RubyGems' | 'crates.io' | 'Pub';
 /** `line`: where the package is in its lockfile (npm-family lockfiles), so findings point at it. */
-export type Locked = { name: string; version: string; ecosystem: Ecosystem; dev: boolean; line?: number };
+export type Locked = { name: string; version: string; ecosystem: Ecosystem; dev: boolean; line?: number; direct?: boolean; via?: string };
 /** `skipped` counts declared packages with no exact version to check. */
 export type Parsed = { packages: Locked[]; skipped: number };
 

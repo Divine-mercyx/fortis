@@ -13,7 +13,11 @@ import { join } from 'node:path';
  * workspace layout), every package is treated as production so nothing is hidden.
  */
 
-export type LockedPackage = { name: string; version: string; dev: boolean; line: number };
+/**
+ * `direct`: listed in package.json. `via`: for an indirect package, the direct dependency that pulls
+ * it in (the first one found). Both are left out when the lockfile doesn't show the graph.
+ */
+export type LockedPackage = { name: string; version: string; dev: boolean; line: number; direct?: boolean; via?: string };
 export type Lockfile = { file: string; packages: LockedPackage[] };
 
 /** Lockfiles we read, in the order we prefer them when a repo has more than one. */
@@ -52,7 +56,11 @@ function dedupe(list: LockedPackage[]): LockedPackage[] {
     const prev = out.get(key);
     // Needed in production anywhere → production.
     if (!prev) out.set(key, p);
-    else if (prev.dev && !p.dev) out.set(key, { ...prev, dev: false });
+    else {
+      const merged = { ...prev, dev: prev.dev && p.dev, direct: prev.direct || p.direct || undefined, via: prev.via ?? p.via };
+      if (merged.direct) delete merged.via;
+      out.set(key, merged);
+    }
   }
   return [...out.values()];
 }
@@ -61,6 +69,7 @@ function dedupe(list: LockedPackage[]): LockedPackage[] {
 function classify<T extends { name: string; version: string; line: number; deps: string[] }>(
   nodes: Map<string, T>,
   prodRoots: string[],
+  devRoots: string[] = [],
 ): LockedPackage[] {
   const prod = new Set<string>();
   const stack = prodRoots.filter((k) => nodes.has(k));
@@ -71,23 +80,78 @@ function classify<T extends { name: string; version: string; line: number; deps:
     for (const d of nodes.get(k)!.deps) if (nodes.has(d) && !prod.has(d)) stack.push(d);
   }
   const walked = prod.size > 0;
-  return dedupe([...nodes.entries()].map(([k, n]) => ({ name: n.name, version: n.version, line: n.line, dev: walked ? !prod.has(k) : false })));
+  const via = viaRoots(nodes, [...prodRoots, ...devRoots]);
+  const roots = new Set([...prodRoots, ...devRoots]);
+  return dedupe(
+    [...nodes.entries()].map(([k, n]) => ({
+      name: n.name,
+      version: n.version,
+      line: n.line,
+      dev: walked ? !prod.has(k) : false,
+      ...(roots.has(k) ? { direct: true } : via.has(k) ? { direct: false, via: via.get(k) } : {}),
+    })),
+  );
+}
+
+/** For each node reachable from a root, the name of the first root (in order) that reaches it. */
+function viaRoots(nodes: Map<string, { name: string; deps: string[] }>, roots: string[]): Map<string, string> {
+  const via = new Map<string, string>();
+  const isRoot = new Set(roots);
+  for (const r of roots) {
+    if (!nodes.has(r)) continue;
+    const rootName = nodes.get(r)!.name;
+    const queue = [...nodes.get(r)!.deps];
+    while (queue.length) {
+      const k = queue.shift()!;
+      if (via.has(k) || isRoot.has(k) || !nodes.has(k)) continue;
+      via.set(k, rootName);
+      queue.push(...nodes.get(k)!.deps);
+    }
+  }
+  return via;
 }
 
 // ---------------------------------------------------------------- npm
 
 export function parseNpmLock(text: string): LockedPackage[] {
+  type Deps = Record<string, string>;
+  type Entry = { version?: string; dev?: boolean; link?: boolean; name?: string; dependencies?: Deps; optionalDependencies?: Deps; devDependencies?: Deps; peerDependencies?: Deps };
   const lock = JSON.parse(text) as {
-    packages?: Record<string, { version?: string; dev?: boolean; link?: boolean; name?: string }>;
+    packages?: Record<string, Entry>;
     dependencies?: Record<string, { version: string; dev?: boolean }>;
   };
   const out: LockedPackage[] = [];
   if (lock.packages) {
-    for (const [path, meta] of Object.entries(lock.packages)) {
+    const pkgs = lock.packages;
+    // Node's lookup: from a package's folder, the nearest node_modules/<name> going up.
+    const resolveFrom = (from: string, name: string): string | undefined => {
+      for (let dir = from; ; ) {
+        const candidate = `${dir ? `${dir}/` : ''}node_modules/${name}`;
+        if (pkgs[candidate]) return candidate;
+        if (!dir) return undefined;
+        const cut = dir.lastIndexOf('/node_modules/');
+        dir = cut === -1 ? '' : dir.slice(0, cut);
+      }
+    };
+    const nodes = new Map<string, { name: string; deps: string[] }>();
+    for (const [path, meta] of Object.entries(pkgs)) {
+      if (!path.includes('node_modules/') || meta.link) continue;
+      const deps = Object.keys({ ...meta.dependencies, ...meta.optionalDependencies, ...meta.peerDependencies })
+        .map((d) => resolveFrom(path, d))
+        .filter((d): d is string => Boolean(d));
+      nodes.set(path, { name: meta.name ?? path.slice(path.lastIndexOf('node_modules/') + 'node_modules/'.length), deps });
+    }
+    const root = pkgs[''] ?? {};
+    const rootNames = [root.dependencies, root.optionalDependencies, root.peerDependencies, root.devDependencies].flatMap((d) => Object.keys(d ?? {}));
+    const roots = [...new Set(rootNames.map((n) => resolveFrom('', n)).filter((d): d is string => Boolean(d)))];
+    const isRoot = new Set(roots);
+    const via = roots.length ? viaRoots(nodes, roots) : new Map<string, string>();
+    for (const [path, meta] of Object.entries(pkgs)) {
       if (!path || !meta.version || meta.link) continue;
       if (!path.includes('node_modules/')) continue; // workspace folders, not installed packages
       const name = meta.name ?? path.slice(path.lastIndexOf('node_modules/') + 'node_modules/'.length);
-      out.push({ name, version: meta.version, dev: Boolean(meta.dev), line: 0 });
+      const graph = isRoot.has(path) ? { direct: true } : via.has(path) ? { direct: false, via: via.get(path) } : {};
+      out.push({ name, version: meta.version, dev: Boolean(meta.dev), line: 0, ...graph });
     }
   } else if (lock.dependencies) {
     for (const [name, meta] of Object.entries(lock.dependencies)) out.push({ name, version: meta.version, dev: Boolean(meta.dev), line: 0 });
@@ -234,8 +298,10 @@ export function parsePnpmLock(text: string): LockedPackage[] {
     if (kv && !covered.has(key)) nodes.set(key, { name: kv[0], version: kv[1], line, deps: [] });
   }
   const prodRoots: string[] = [];
+  const devRoots: string[] = [];
   for (const { body } of entries(secs.get('importers') ?? [])) {
-    for (const field of ['dependencies', 'optionalDependencies']) {
+    for (const field of ['dependencies', 'optionalDependencies', 'devDependencies']) {
+      const into = field === 'devDependencies' ? devRoots : prodRoots;
       const start = body.findIndex((l) => keyValue(l.text)[0] === field);
       if (start === -1) continue;
       const level = body[start]!.indent;
@@ -243,11 +309,11 @@ export function parsePnpmLock(text: string): LockedPackage[] {
       for (let i = start + 1; i < body.length && body[i]!.indent > level; i++) {
         const [k, v] = keyValue(body[i]!.text);
         if (body[i]!.indent === level + 2) name = k;
-        else if (k === 'version' && name && !v.startsWith('link:')) prodRoots.push(pnpmRef(name, v));
+        else if (k === 'version' && name && !v.startsWith('link:')) into.push(pnpmRef(name, v));
       }
     }
   }
-  return classify(nodes, prodRoots);
+  return classify(nodes, prodRoots, devRoots);
 }
 
 // ---------------------------------------------------------------- yarn
@@ -293,7 +359,10 @@ export function parseYarnLock(text: string, manifest: Manifest = {}): LockedPack
   const prodRoots = Object.entries(manifest.workspaces ? {} : { ...manifest.dependencies, ...manifest.optionalDependencies, ...manifest.peerDependencies })
     .map(([n, r]) => resolve(`${n}@${r}`) ?? '')
     .filter(Boolean);
-  return classify(nodes, prodRoots);
+  const devRoots = Object.entries(manifest.workspaces ? {} : { ...manifest.devDependencies })
+    .map(([n, r]) => resolve(`${n}@${r}`) ?? '')
+    .filter(Boolean);
+  return classify(nodes, prodRoots, devRoots);
 }
 
 function yarnChildren(body: Line[], field: string, berry: boolean): [string, string][] {

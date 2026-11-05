@@ -13,6 +13,10 @@ export type Detection = {
   snippet: string;
   /** For git-history findings: the commit that introduced it. */
   commit?: string;
+  /** How to fix this finding, when it is more specific than the rule's general advice. */
+  fix?: string;
+  /** Dependency findings: the version that clears every advisory, or null when there is no fix yet. */
+  fixedVersion?: string | null;
 };
 
 /** Facts gathered from the whole repository, so a rule can see protection defined in another file. */

@@ -35,7 +35,8 @@ export function toSarif(detections: Detection[]) {
           ruleId: d.ruleId,
           ruleIndex: ids.indexOf(d.ruleId),
           level: LEVEL[d.severity],
-          message: { text: `${d.title}${d.commit ? ` (introduced in commit ${d.commit.slice(0, 7)})` : ''}` },
+          message: { text: `${d.title}${d.commit ? ` (introduced in commit ${d.commit.slice(0, 7)})` : ''}${d.fix ? `\n\nFix: ${d.fix}` : ''}` },
+          ...(d.fixedVersion !== undefined ? { properties: { fixedVersion: d.fixedVersion } } : {}),
           locations: [
             {
               physicalLocation: {
@@ -59,11 +60,11 @@ const escProp = (s: string) => esc(s).replace(/:/g, '%3A').replace(/,/g, '%2C');
  * GitHub Actions workflow commands: findings show as annotations on the pull request's
  * "Files changed" tab. Works on every plan, unlike code scanning on private repositories.
  */
-export function githubAnnotations(items: { severity: Severity; ruleId: string; title: string; file?: string; line?: number; message?: string }[], max = 50): string[] {
+export function githubAnnotations(items: { severity: Severity; ruleId: string; title: string; file?: string; line?: number; message?: string; fix?: string }[], max = 50): string[] {
   return items.slice(0, max).map((d) => {
     const kind = d.severity === 'critical' || d.severity === 'high' ? 'error' : d.severity === 'medium' ? 'warning' : 'notice';
     const props = [d.file ? `file=${escProp(d.file)}` : '', d.file && d.line ? `line=${d.line}` : '', `title=${escProp(`Fortis ${d.ruleId}: ${d.title}`)}`].filter(Boolean).join(',');
     const rule = findRule(d.ruleId);
-    return `::${kind} ${props}::${esc(d.message ?? (rule ? `${rule.summary} Fix: ${rule.fix}` : d.title))}`;
+    return `::${kind} ${props}::${esc(d.message ?? (rule ? `${rule.summary} Fix: ${d.fix ?? rule.fix}` : d.fix ? `Fix: ${d.fix}` : d.title))}`;
   });
 }

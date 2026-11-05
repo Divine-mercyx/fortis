@@ -1,11 +1,11 @@
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { afterAll, describe, expect, it } from 'vitest';
 
 import { scanDependencies } from '../src/rules/dependencies';
-import { parsePnpmLock, readLockfile, splitPnpmKey } from '../src/rules/js-lockfiles';
+import { parsePnpmLock, parseYarnLock, readLockfile, splitPnpmKey } from '../src/rules/js-lockfiles';
 
 /*
  * Fixtures are real lockfiles generated from the same package.json by npm 10, pnpm 10
@@ -108,4 +108,16 @@ describe('dependency check on pnpm and yarn projects', () => {
     writeFileSync(join(dir, 'yarn.lock'), '# yarn lockfile v1\n\nlodash@^4.17.0:\n  version "4.17.15"\n');
     expect(readLockfile(dir)!.packages).toEqual([{ name: 'lodash', version: '4.17.15', dev: false, line: 3 }]);
   });
+});
+
+describe('direct and indirect dependencies', () => {
+  for (const f of ['pnpm9', 'yarn1', 'berry'] as const) {
+    it(`${f}: names the direct dependency an indirect one comes through`, () => {
+      const dir = join(FIXTURES, f);
+      const lock = readFileSync(join(dir, f === 'pnpm9' ? 'pnpm-lock.yaml' : 'yarn.lock'), 'utf8');
+      const list = f === 'pnpm9' ? parsePnpmLock(lock) : parseYarnLock(lock, JSON.parse(readFileSync(join(dir, 'package.json'), 'utf8')));
+      expect(list.find((p) => p.name === '@babel/code-frame')).toMatchObject({ direct: true });
+      expect(list.find((p) => p.name === 'chalk')).toMatchObject({ direct: false, via: '@babel/code-frame' });
+    });
+  }
 });

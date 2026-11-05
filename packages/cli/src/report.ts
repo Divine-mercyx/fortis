@@ -43,7 +43,7 @@ function printDetection(d: Detection) {
   log(`  ${sevColour[d.severity]!(LABEL[d.severity].padEnd(8))} ${c.white(c.bold(d.ruleId))}  ${d.title}`);
   log(`  ${' '.repeat(8)} ${c.cyan(d.line ? `${d.file}:${d.line}` : d.file)}`);
   log(`  ${' '.repeat(8)} ${c.grey(maskSnippet(d.snippet).slice(0, 140))}`);
-  if (rule) log(`  ${' '.repeat(8)} ${c.green('fix')} ${rule.fix}`);
+  if (d.fix ?? rule) log(`  ${' '.repeat(8)} ${c.green('fix')} ${d.fix ?? rule!.fix}`);
   log('');
 }
 

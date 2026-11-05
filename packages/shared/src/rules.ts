@@ -96,7 +96,7 @@ export const RULE_CATALOG: readonly RuleMeta[] = [
     title: 'Vulnerable dependency',
     severity: 'medium',
     summary: 'A package has a known vulnerability in public advisory data.',
-    fix: 'Upgrade to the fixed version shown in the advisory.',
+    fix: 'Upgrade to the fixed version. Each finding names the version that clears every advisory on the package and the command for your package manager; for an indirect dependency, it names the direct dependency that pulls it in.',
   },
   {
     id: 'FX-BOLA-001',

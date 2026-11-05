@@ -92,7 +92,8 @@ function FindingDrawer({ id, onClose, onChanged }: { id: string; onClose: () => 
                 <h4>Why it matters</h4>
                 <p>{data.rule.summary}</p>
                 <h4>How to fix it</h4>
-                <p>{data.rule.fix}</p>
+                {/* Code findings can carry advice for this exact finding, such as the version to upgrade to. */}
+                <p>{f.kind === 'code' && f.detail ? f.detail : data.rule.fix}</p>
               </div>
             ) : f.detail ? (
               <div className="rule-box">

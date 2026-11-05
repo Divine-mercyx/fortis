@@ -91,5 +91,6 @@ export function toUpload(d: Detection): CliFinding {
     file: d.file,
     line: d.line,
     snippet: maskSnippet(d.snippet).slice(0, 300),
+    ...(d.fix ? { detail: d.fix.slice(0, 4000) } : {}),
   };
 }

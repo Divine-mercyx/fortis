@@ -4,6 +4,7 @@ import { dirname, join, relative, resolve } from 'node:path';
 import type { Severity } from '@fortis/shared';
 
 import { cycloneDx, ecosystemOf, findLockfiles, isPomXml, missingLockfiles, parseLockfile, type Ecosystem, type Locked } from './lockfiles';
+import { fixedVersion, fixMessage, type OsvAffected } from './fix-version';
 import type { Detection } from './types';
 
 /*
@@ -21,7 +22,7 @@ const SEVERITY: Record<string, Severity> = { CRITICAL: 'critical', HIGH: 'high',
 const MAX_ADVISORIES = 500;
 const ADVISORY_CONCURRENCY = 8;
 
-type OsvVuln = { id: string; summary?: string; aliases?: string[]; database_specific?: { severity?: string } };
+type OsvVuln = { id: string; summary?: string; aliases?: string[]; database_specific?: { severity?: string }; affected?: OsvAffected[] };
 
 export function readPackages(root: string, files: string[], opts: { sbom?: string; allPaths?: string[]; ignore?: string[] } = {}): LockRead {
   const notes: string[] = [];
@@ -153,6 +154,8 @@ export async function scanDependencies(
       const severity = ranked[0] ?? 'medium';
       const top = vulns[0];
       const ref = top?.aliases?.find((a) => a.startsWith('CVE-')) ?? top?.id ?? vulnIds[0];
+      // Without every advisory's details the fix can't be trusted to clear them all.
+      const fix = vulns.length === vulnIds.length ? fixedVersion(vulns, pkg.ecosystem, pkg.name, pkg.version) : undefined;
       detections.push({
         ruleId: 'DEP-OSV',
         severity,
@@ -160,6 +163,7 @@ export async function scanDependencies(
         file: where.file,
         line: where.line ?? 0,
         snippet: `${pkg.name}@${pkg.version} · ${ref}`,
+        ...(fix ? { fix: fixMessage({ ...where, name: pkg.name, version: pkg.version }, fix), fixedVersion: fix.version } : {}),
       });
     }
     return { detections, checked: pkgs.length, notes, incomplete: read.incomplete };
