@@ -176,3 +176,22 @@ describe('SEC-GEN-001 connection strings', () => {
     expect(maskSnippet(`jdbc:mysql://h/db?user=u&password=${PW}&ssl=1`)).not.toContain(PW);
   });
 });
+
+describe('FX-SEC-001 names the right provider', () => {
+  const hex = 'a3f9c2e1b7d04f6a8c5e2b9d1f7a3c6e0b4d8f2a';
+  const stripeBody = `51HxQ2mKz9vP8rT4wL0bN6yH3cJ7fA1${'Qw3Er5Ty7Ui9Op1As3Df5Gh7Jk9Lz2Xc4Vb6Nm8'.repeat(2)}`;
+  const title = (key: string) => run(paymentKeyRule, 'src/pay.ts', `const k = '${key}';`)[0]?.title;
+  it('tells Paystack and Stripe secret keys apart, and says so when it cannot', () => {
+    expect(title(['sk', 'live', hex].join('_'))).toBe('Live Paystack secret key in code');
+    expect(title(['sk', 'test', hex].join('_'))).toBe('Paystack test secret key in code');
+    expect(title(['sk', 'live', stripeBody].join('_'))).toBe('Live Stripe secret key in code');
+    expect(title(['sk', 'live', 'a1B2c3D4e5F6g7H8i9J0k1L2m3N4'].join('_'))).toBe('Live Stripe or Paystack secret key in code');
+  });
+  it('reports Stripe restricted keys and webhook secrets, and masks them', () => {
+    expect(title(['rk', 'live', stripeBody].join('_'))).toBe('Live Stripe restricted key in code');
+    const wh = `whsec_${'Zx9Qm2Lp7Vt4Rk8Wn3Yb6Hc1Df5Gj0Ks'}`;
+    expect(title(wh)).toBe('Stripe webhook signing secret in code');
+    expect(maskSnippet(`const s = '${wh}';`)).not.toContain(wh);
+    expect(maskSnippet(`k = '${['rk', 'live', stripeBody].join('_')}'`)).toContain('rk_live_••••••••');
+  });
+});

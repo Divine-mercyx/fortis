@@ -3,15 +3,32 @@ import { isIgnored } from './types';
 
 const ANY_TEXT = /\.(c|m)?(j|t)sx?$|\.(json|ya?ml|env|toml|ini|properties|py|rb|php|go|java|kt|kts|groovy|scala|swift|dart|rs|vue|svelte|jsp|cshtml|cs|sh|sql|tf|tfvars|txt|md|xml|gradle|cfg|conf|pem|key|plist)$|(^|\/)id_(rsa|ecdsa|ed25519)$|(^|\/)\.env(\.|$)|(^|\/)Dockerfile$/i;
 
-type Pattern = { re: RegExp; ruleId: string; severity: Detection['severity']; title: string };
+/** `name` turns the matched key into a more specific title (e.g. which provider it belongs to). */
+type Pattern = { re: RegExp; ruleId: string; severity: Detection['severity']; title: string; name?: (key: string) => string };
 
 const PAYMENT_KEYS: Pattern[] = [
-  { re: /\bsk_live_[A-Za-z0-9]{20,}\b/g, ruleId: 'FX-SEC-001', severity: 'critical', title: 'Live Paystack secret key in code' },
-  { re: /\bsk_test_[A-Za-z0-9]{20,}\b/g, ruleId: 'FX-SEC-001', severity: 'high', title: 'Paystack test secret key in code' },
+  // Paystack and Stripe share the sk_live_ / sk_test_ prefix; skProvider tells them apart by shape.
+  { re: /\bsk_live_[A-Za-z0-9]{20,}\b/g, ruleId: 'FX-SEC-001', severity: 'critical', title: 'Live payment secret key in code', name: (k) => `Live ${skProvider(k)} secret key in code` },
+  { re: /\bsk_test_[A-Za-z0-9]{20,}\b/g, ruleId: 'FX-SEC-001', severity: 'high', title: 'Test payment secret key in code', name: (k) => `${skProvider(k)} test secret key in code` },
+  { re: /\brk_live_[A-Za-z0-9]{20,}\b/g, ruleId: 'FX-SEC-001', severity: 'critical', title: 'Live Stripe restricted key in code' },
+  { re: /\brk_test_[A-Za-z0-9]{20,}\b/g, ruleId: 'FX-SEC-001', severity: 'high', title: 'Stripe test restricted key in code' },
+  { re: /\bwhsec_[A-Za-z0-9]{24,}\b/g, ruleId: 'FX-SEC-001', severity: 'high', title: 'Stripe webhook signing secret in code' },
   { re: /\bFLWSECK-[A-Za-z0-9]{20,}-X\b/g, ruleId: 'FX-SEC-001', severity: 'critical', title: 'Live Flutterwave secret key in code' },
   { re: /\bFLWSECK_TEST-[A-Za-z0-9]{20,}-X\b/g, ruleId: 'FX-SEC-001', severity: 'high', title: 'Flutterwave test secret key in code' },
   { re: /\bMK_PROD_[A-Z0-9]{8,}\b/g, ruleId: 'FX-SEC-001', severity: 'critical', title: 'Live Monnify API key in code' },
 ];
+
+/**
+ * Paystack secret keys are sk_live_/sk_test_ + 40 lowercase hex characters. Stripe's mix upper and
+ * lower case and are usually far longer (current keys ~99 characters, starting 51 or 4e). Anything
+ * else is reported without guessing the provider.
+ */
+export function skProvider(key: string): 'Paystack' | 'Stripe' | 'Stripe or Paystack' {
+  const body = key.replace(/^sk_(?:live|test)_/, '');
+  if (/^[0-9a-f]{40}$/.test(body)) return 'Paystack';
+  if (/[A-Z]/.test(body) && (body.length >= 90 || /^(?:51|4e)/i.test(body))) return 'Stripe';
+  return 'Stripe or Paystack';
+}
 
 const GENERIC: Pattern[] = [
   { re: /-----BEGIN (?:RSA |EC |DSA |OPENSSH |PGP )?PRIVATE KEY-----/g, ruleId: 'SEC-GEN-001', severity: 'critical', title: 'Private key in code' },
@@ -90,7 +107,9 @@ function scan(file: SourceFile, patterns: Pattern[]): Detection[] {
           out.push({ ruleId: p.ruleId, severity: 'low', title: 'Firebase client key (public by design: restrict it to your app in Google Cloud)', file: file.path, line: i + 1, snippet: text.trim() });
           continue;
         }
-        out.push({ ruleId: p.ruleId, severity: p.severity, title: p.title, file: file.path, line: i + 1, snippet: text.trim() });
+        p.re.lastIndex = 0;
+        const key = p.name ? p.re.exec(text)?.[0] : undefined;
+        out.push({ ruleId: p.ruleId, severity: p.severity, title: key ? p.name!(key) : p.title, file: file.path, line: i + 1, snippet: text.trim() });
       }
     }
   });

@@ -31,8 +31,8 @@ export const RULE_CATALOG: readonly RuleMeta[] = [
     pack: 'secrets',
     title: 'Payment-provider secret key in code',
     severity: 'critical',
-    summary: 'A Paystack, Flutterwave or Monnify secret key is committed to the repository or config.',
-    fix: 'Move the key to an environment variable or secret manager, then rotate it with the provider.',
+    summary: 'A Paystack, Stripe, Flutterwave or Monnify secret key (or a Stripe restricted key or webhook secret) is committed to the repository or config.',
+    fix: 'Move the key to an environment variable or secret manager, then rotate it with the provider: Paystack (Settings → API Keys & Webhooks → generate a new secret key), Stripe (Developers → API keys → roll the key), Flutterwave (Settings → API Keys → generate new keys), Monnify (Developers → API Keys → regenerate).',
   },
   {
     id: 'FX-OWN-001',

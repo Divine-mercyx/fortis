@@ -22,8 +22,11 @@ const thresholdsFile = join(here, 'thresholds.json');
 const rand = (n: number, abc = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789') =>
   Array.from({ length: n }, (_, i) => abc[(i * 7 + 3) % abc.length]).join('');
 const FAKES: Record<string, string> = {
-  PAYSTACK_LIVE: ['sk', 'live', rand(40)].join('_'),
-  PAYSTACK_TEST: ['sk', 'test', rand(40)].join('_'),
+  PAYSTACK_LIVE: ['sk', 'live', rand(40, '0123456789abcdef')].join('_'),
+  PAYSTACK_TEST: ['sk', 'test', rand(40, '0123456789abcdef')].join('_'),
+  STRIPE_LIVE: ['sk', 'live', `51${rand(97)}`].join('_'),
+  STRIPE_RESTRICTED: ['rk', 'live', `51${rand(97)}`].join('_'),
+  STRIPE_WEBHOOK: `whsec_${rand(32)}`,
   FLW_LIVE: `FLWSECK-${rand(32)}-X`,
   MONNIFY_PROD: ['MK', 'PROD', rand(10, 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789')].join('_'),
   AWS_KEY: `AKIA${rand(16, 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567')}`,

@@ -27,8 +27,10 @@ function looksRandom(m: string): boolean {
 }
 
 const PATTERNS: { re: RegExp; keepPrefix: (m: string) => number; when?: (m: string) => boolean }[] = [
-  // Paystack sk_live_/sk_test_ (and pk_ for completeness)
-  { re: /\b[sp]k_(?:live|test)_[A-Za-z0-9]{16,}\b/g, keepPrefix: (m) => m.indexOf('_', 3) + 1 },
+  // Paystack/Stripe sk_live_/sk_test_, Stripe restricted rk_ (and pk_ for completeness)
+  { re: /\b[spr]k_(?:live|test)_[A-Za-z0-9]{16,}\b/g, keepPrefix: (m) => m.indexOf('_', 3) + 1 },
+  // Stripe webhook signing secrets
+  { re: /\bwhsec_[A-Za-z0-9]{16,}\b/g, keepPrefix: () => 6 },
   // Flutterwave secret keys
   { re: /\bFLWSECK(?:_TEST)?-[A-Za-z0-9]{16,}(?:-X)?\b/g, keepPrefix: (m) => m.indexOf('-') + 1 },
   // Monnify secret/API keys
