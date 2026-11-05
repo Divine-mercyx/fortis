@@ -263,7 +263,8 @@ Then on npmjs.com: package → Settings → Trusted publishing → GitHub Action
 - runs the install-and-push check (`scripts/e2e.sh`) for npm, pnpm, Yarn 1, Yarn 4 Plug'n'Play, Bun, a global install, the binary, the install script and the Docker image, on Linux, macOS (arm64 and x64) and Windows. Nothing is published unless all of them pass. Run one locally with `bash scripts/e2e.sh npm fortis-watchdog-<version>.tgz`;
 - publishes a GitHub Release with the binaries, install scripts, checksums and build attestations;
 - pushes the Docker image to `ghcr.io`;
-- publishes to npm with provenance. Versions with a pre-release suffix go to the `beta` tag;
+- publishes to npm with provenance. Versions with a pre-release suffix go to the `beta` tag. A version that's already on npm (published by hand) is skipped, not treated as a failure;
+- uses this version's changelog section below as the release notes. Before tagging, change its heading from "(unreleased)" to the release date;
 - builds, tests and publishes the wheels to PyPI (TestPyPI on a fork). `packages/python/build_wheel.py` makes one by hand.
 
 To build a binary for your own machine, run `pnpm --filter fortis-watchdog build:binary`. The result goes in `dist-sea/`. A tag on a fork runs everything except npm, which makes a safe dry run; set `FORTIS_REPO` to install from it.
