@@ -131,7 +131,7 @@ for old in 'npx --no-install fortis scan --pre-push' 'npx --no-install fortis sc
   grep -q 'my own check' .git/hooks/pre-push || fail "upgrading lost the user's line before ($old)"
   grep -q 'after fortis' .git/hooks/pre-push || fail "upgrading lost the user's line after ($old)"
   grep -q -- '--stdin' .git/hooks/pre-push || fail "the hook was not upgraded ($old)"
-  [ "$(grep -c 'fortis scan --pre-push' .git/hooks/pre-push)" -le 4 ] || fail "the Fortis lines were duplicated ($old)"
+  [ "$(grep -c 'npx --no-install fortis scan --pre-push' .git/hooks/pre-push)" -eq 1 ] || fail "the Fortis lines were duplicated ($old)"
 done
 echo "export const again = '$KEY';" > again.js
 git add -A && git commit -qm 'new key under an upgraded hook'
