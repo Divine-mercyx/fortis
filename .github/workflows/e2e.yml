@@ -205,6 +205,24 @@ jobs:
           done
           echo "identical: $(wc -l < fingerprints-ubuntu-24.04.txt) fingerprints"
 
+  # The documented pre-commit, lefthook and Husky setups, each with a real push.
+  hook-managers:
+    runs-on: ubuntu-24.04
+    name: pre-commit, lefthook and Husky
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: pnpm
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter fortis-watchdog build
+      - run: bash packages/cli/scripts/hook-managers.sh
+
   large-repo:
     runs-on: ubuntu-24.04
     name: 100,000-file scan under 30 s

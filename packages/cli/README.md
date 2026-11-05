@@ -90,6 +90,8 @@ fortis scan --sbom target/bom.json
 | `fortis scan --fail-on high` | Block at high or above (default: critical) |
 | `fortis scan --json` / `--no-upload` / `--offline` | Machine output (secrets masked, like every other output), keep results local, or skip the network |
 | `fortis scan --sbom bom.json` | Also check a CycloneDX JSON SBOM |
+| `fortis scan --junit report.xml` | Also write JUnit XML for CI test reports |
+| `fortis scan --ci --pr-comment` | Comment on the pull request with what it adds (GitHub and GitLab) |
 | `fortis login <key>` / `fortis logout` | Save or remove the key for this machine |
 | `fortis whoami` | Project, workspace and plan for the key |
 
@@ -128,7 +130,7 @@ Needs Docker (image `zaproxy/zap-stable`, override with `FORTIS_ZAP_IMAGE`). For
 ## CI in one command
 
 ```bash
-fortis ci init                    # GitHub Actions (or --provider gitlab)
+fortis ci init                    # GitHub Actions, or choose with --provider
 ```
 
 This writes `.github/workflows/fortis.yml`, which needs no Node in your project:
@@ -140,6 +142,71 @@ This writes `.github/workflows/fortis.yml`, which needs no Node in your project:
 - **Maven projects, and Python projects with a hand-written `requirements.txt`,** also get a step that lists every dependency as an SBOM.
 
 Set the `FORTIS_KEY` secret and the `FORTIS_STAGING_URL` variable in the repository settings. Add `--sarif fortis.sarif` to any scan to write SARIF yourself.
+
+### Other CI systems
+
+Each uses the standalone binary or the Docker image, so your project doesn't need Node.
+
+| `--provider` | Writes | Code scan runs on | ZAP on staging |
+|---|---|---|---|
+| `gitlab` | `fortis.gitlab-ci.yml` | Docker image | Yes |
+| `bitbucket` | `bitbucket-pipelines.yml` | Docker image | No: Bitbucket restricts the Docker mounts ZAP needs |
+| `azure` | `azure-pipelines-fortis.yml` | Binary | Yes |
+| `jenkins` | `Jenkinsfile` | Binary | Yes, if the agent has Docker |
+| `circleci` | `.circleci/config.yml` | Binary | Yes |
+| `buildkite` | `.buildkite/pipeline.yml` | Binary | Yes, if the agent has Docker |
+
+Bitbucket, Jenkins, CircleCI and Buildkite read one fixed pipeline file. If you already have one, Fortis never overwrites it, even with `--force`. It writes `fortis.bitbucket-pipelines.yml`, `Jenkinsfile.fortis`, `.circleci/fortis.yml` or `.buildkite/pipeline.fortis.yml` for you to copy from. Run `fortis ci init` to see which variables each one needs.
+
+### Test reports
+
+`fortis scan --junit fortis-junit.xml` writes JUnit XML, and the templates above publish it. A finding that blocks the build is a failed test, and one below `--fail-on` is skipped. Findings in the baseline aren't included.
+
+### Pull-request comments
+
+`fortis scan --ci --pr-comment` posts one summary comment on the pull request and updates it in place. It lists only what the pull request adds: findings on the lines it adds, or in the files it changes for findings with no line. Nothing is posted if there's nothing to report, and a comment that can't be posted never fails the build.
+
+- **GitHub Actions:** set `GITHUB_TOKEN`, which needs `pull-requests: write`. The `fortis ci init` workflow does this. A pull request from a fork gets a read-only token, so it gets no comment.
+- **GitLab:** set `FORTIS_GITLAB_TOKEN` to a project or personal access token with the `api` scope, because `CI_JOB_TOKEN` can't post comments. It only runs in merge request pipelines.
+
+Other CI systems don't get comments yet. The comment shows the rule, severity, file, line and title. It doesn't show the code.
+
+## Other git hook managers
+
+`fortis init` installs its own pre-push hook, and works with Husky's folder. To run Fortis through your existing hook manager instead, install the CLI so `fortis` is on your `PATH`, and use one of these.
+
+**[pre-commit](https://pre-commit.com):** in `.pre-commit-config.yaml`:
+
+```yaml
+repos:
+  - repo: https://github.com/Divine-mercyx/fortis
+    rev: cli-v0.1.0-beta.12 # the first release with this hook, or any newer cli-v* tag
+    hooks:
+      - id: fortis
+```
+
+```bash
+pip install fortis-watchdog pre-commit
+pre-commit install --hook-type pre-push
+```
+
+**[lefthook](https://lefthook.dev):** in `lefthook.yml`:
+
+```yaml
+pre-push:
+  commands:
+    fortis:
+      run: fortis scan --pre-push --stdin
+      use_stdin: true
+```
+
+**[Husky](https://typicode.github.io/husky/):** in `.husky/pre-push`:
+
+```sh
+npx --no-install fortis scan --pre-push --stdin
+```
+
+`--stdin` reads the refs git is pushing, so a first push covers every new commit. pre-commit doesn't pass those on, so a first push of a new branch compares against the remote's main branch instead.
 
 ## Adopting Fortis in an existing codebase
 
@@ -285,6 +352,10 @@ Keys are read from `FORTIS_KEY`, then from `~/.config/fortis/credentials.json` (
 ## Changelog
 
 **0.1.0-beta.12** (unreleased)
+- `fortis ci init --provider` also writes pipelines for Bitbucket, Azure DevOps, Jenkins, CircleCI and Buildkite, using the binary or Docker image, so Node isn't needed.
+- `fortis scan --pr-comment` posts one comment per pull request on GitHub and GitLab, listing only what it adds, and updates it in place.
+- `fortis scan --junit` writes JUnit XML for CI test reports.
+- Setups for pre-commit, lefthook and Husky are documented under "Other git hook managers".
 - Python is fully supported: `pip install fortis-watchdog`, the fintech rules for Django, Django REST, Flask and FastAPI, and dev packages told apart in uv and Poetry lockfiles.
 - `pip install` needs no Node, and the git hook finds the CLI in `.venv` or `venv` even when it isn't active, and through `uv run` and `poetry run`.
 - More secrets are caught in Python: real-looking defaults such as `os.getenv("KEY", "…")`, SQLAlchemy connection URLs, tokens in URLs, PyPI tokens and notebooks.

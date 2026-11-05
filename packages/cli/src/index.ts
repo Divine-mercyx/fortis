@@ -7,8 +7,10 @@ import { MAX_FINDINGS_PER_SCAN, RULE_CATALOG, maskSnippet, SEVERITIES, type Rule
 import { ApiError, client, toUpload, type CliTarget, type WhoAmI } from './api';
 import { ACCESS_CONFIG, checksFromOpenApi, readAccessConfig, runAccessChecks, writeAccessTemplate } from './access';
 import { BASELINE_FILE, readBaseline, splitByBaseline, writeBaseline } from './baseline';
-import { detectProvider, writeCi, type CiProvider } from './ci';
+import { CI_PROVIDERS, detectProvider, NEXT_STEPS, writeCi, type CiProvider } from './ci';
 import { scanHistory } from './history';
+import { toJunit } from './junit';
+import { postPrComment, prContext } from './pr-comment';
 import { githubAnnotations, toSarif } from './sarif';
 import { dockerAvailable, isLocalHost, parseZapReport, reportOrigins, runZap, waitForTarget, ZAP_IMAGE, type DastFinding, type ZapAuth, type ZapReport } from './dast';
 import { PROJECT_CONFIG, readProjectConfig, removeKey, resolveKey, saveKey, writeProjectConfig } from './config';
@@ -36,7 +38,7 @@ ${c.bold('Usage')}
   fortis access --target <url>                       can test user B read test user A's records? (BOLA)
   fortis access init [--openapi URL]                 write ${ACCESS_CONFIG} (from your OpenAPI spec if given)
   fortis baseline                                    accept today's findings so only new ones block
-  fortis ci init [--provider github|gitlab] [--history]  write a CI workflow (scan on PRs, test staging)
+  fortis ci init [--provider <name>] [--history]     write a CI pipeline: ${CI_PROVIDERS.join(', ')}
   fortis explain <RULE-ID>                           why a rule matters and how to fix it
   fortis rules                                       list every rule
 
@@ -49,6 +51,8 @@ ${c.bold('Scan options')}
   --offline        skip the network (no dependency check, no upload)
   --history        also search all git history for secrets (deleted keys still need rotating)
   --sarif <file>   write SARIF for GitHub code scanning, GitLab and IDEs
+  --junit <file>   write JUnit XML for CI systems that show test reports
+  --pr-comment     in CI, post one comment on the pull request listing what it adds, updated in place
   --sbom <file>    also check a CycloneDX JSON SBOM (full Maven coverage, including transitive)
   --no-baseline    block on every finding, ignoring ${BASELINE_FILE}
   --submodules     also scan git submodules (skipped by default: they are separate repositories)
@@ -90,7 +94,7 @@ function parseArgs(argv: string[]): { cmd: string; args: string[]; flags: Flags 
     if (a.startsWith('--')) {
       const [k, v] = a.slice(2).split('=', 2) as [string, string | undefined];
       if (v !== undefined) flags[k] = v;
-      else if (['key', 'api', 'fail-on', 'target', 'mode', 'openapi', 'minutes', 'zap-report', 'sarif', 'since', 'provider', 'staging-branch', 'wait', 'config', 'sbom', 'ca', 'osv-db'].includes(k) && rest[i + 1] && !rest[i + 1]!.startsWith('--')) flags[k] = rest[++i]!;
+      else if (['key', 'api', 'fail-on', 'target', 'mode', 'openapi', 'minutes', 'zap-report', 'sarif', 'since', 'provider', 'staging-branch', 'wait', 'config', 'sbom', 'ca', 'osv-db', 'junit'].includes(k) && rest[i + 1] && !rest[i + 1]!.startsWith('--')) flags[k] = rest[++i]!;
       else flags[k] = true;
     } else args.push(a);
   }
@@ -176,6 +180,8 @@ async function cmdScan(flags: Flags): Promise<number> {
 
   const sarifPath = str(flags.sarif);
   if (sarifPath) writeFileSync(sarifPath, `${JSON.stringify(toSarif(result.detections), null, 2)}\n`);
+  const junitPath = str(flags.junit);
+  if (junitPath) writeFileSync(junitPath, toJunit(fresh, { failOn, durationMs: result.durationMs }));
   if (process.env.GITHUB_ACTIONS === 'true' && !json) {
     for (const line of githubAnnotations(fresh)) log(line);
   }
@@ -217,11 +223,25 @@ async function cmdScan(flags: Flags): Promise<number> {
     result.notes.push(`${who.plan.name} keeps results on this machine. Upgrade to sync findings to the dashboard.`);
   }
 
+  let prComment: Awaited<ReturnType<typeof postPrComment>> | null = null;
+  if (flags['pr-comment']) {
+    const pr = prContext();
+    if (pr.reason) result.notes.push(pr.reason);
+    if (pr.context) {
+      // A comment that can't be posted never fails the build.
+      try {
+        prComment = await postPrComment(pr.context, fresh);
+      } catch (e) {
+        result.notes.push(`Pull-request comment failed: ${(e as Error).message.split(pr.context.token).join('••••')}`);
+      }
+    }
+  }
+
   const blocking = fresh.filter((d) => meetsThreshold(d.severity, failOn));
   if (json) {
     // Masked like every other output: --json usually lands in CI logs.
     const detections = result.detections.map((d) => ({ ...d, snippet: maskSnippet(d.snippet).slice(0, 300) }));
-    log(JSON.stringify({ ...result, detections, packs, failOn, blocking: blocking.length, baselined: known.length, upload: uploaded }, null, 2));
+    log(JSON.stringify({ ...result, detections, packs, failOn, blocking: blocking.length, baselined: known.length, upload: uploaded, prComment }, null, 2));
   } else {
     printReport({ ...result, detections: fresh }, { failOn, prePush, packs });
     if (uploaded) {
@@ -574,7 +594,7 @@ async function cmdBaseline(flags: Flags): Promise<number> {
 
 async function cmdCi(args: string[], flags: Flags): Promise<number> {
   if (args[0] !== 'init') {
-    err('Usage: fortis ci init [--provider github|gitlab] [--staging-branch staging] [--target URL] [--history] [--force]');
+    err(`Usage: fortis ci init [--provider ${CI_PROVIDERS.join('|')}] [--staging-branch staging] [--target URL] [--history] [--force]`);
     return 2;
   }
   const root = repoRoot(process.cwd());
@@ -583,8 +603,8 @@ async function cmdCi(args: string[], flags: Flags): Promise<number> {
     return 2;
   }
   const provider = (str(flags.provider) ?? detectProvider(root)) as CiProvider;
-  if (!['github', 'gitlab'].includes(provider)) {
-    err(c.red('--provider must be github or gitlab'));
+  if (!CI_PROVIDERS.includes(provider)) {
+    err(c.red(`--provider must be one of: ${CI_PROVIDERS.join(', ')}`));
     return 2;
   }
   const stagingBranch = str(flags['staging-branch']) ?? 'staging';
@@ -594,7 +614,13 @@ async function cmdCi(args: string[], flags: Flags): Promise<number> {
     return 2;
   }
   log(c.green('✓'), `Wrote ${res.path}`);
+  if (res.mergeInto) log(c.yellow('!'), `${res.mergeInto} is your own pipeline, so it wasn't changed. Copy what you need from ${res.path} into it.`);
   log('');
+  if (provider !== 'github' && provider !== 'gitlab') {
+    log(c.bold('Next:'));
+    for (const line of NEXT_STEPS[provider]) log(`  ${line}`);
+    return 0;
+  }
   if (provider === 'github') {
     log(c.bold('Next, in GitHub → Settings → Secrets and variables → Actions:'));
     log(`  secret   ${c.cyan('FORTIS_KEY')}           a CLI key from the Fortis dashboard`);
@@ -602,7 +628,8 @@ async function cmdCi(args: string[], flags: Flags): Promise<number> {
     log(`  secret   ${c.cyan('FORTIS_TEST_TOKEN')}    optional: a staging test user's token, to test behind login`);
   } else {
     log(c.bold('Next:'), `add ${c.cyan('include: [{ local: fortis.gitlab-ci.yml }]')} to .gitlab-ci.yml and set the CI/CD variables`);
-    log('  FORTIS_KEY (masked), FORTIS_STAGING_URL, FORTIS_TEST_TOKEN (optional, masked)');
+    log('  FORTIS_KEY (masked), FORTIS_STAGING_URL, FORTIS_TEST_TOKEN (optional, masked),');
+    log('  FORTIS_GITLAB_TOKEN (optional, masked: a token with the api scope, for merge-request comments)');
   }
   log(c.grey(`Pull requests get a code scan; pushes to "${stagingBranch}" also get a ZAP test once the deploy is up.`));
   return 0;
