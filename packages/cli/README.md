@@ -33,13 +33,33 @@ irm https://github.com/Divine-mercyx/fortis/releases/latest/download/install.ps1
 
 Then run `fortis init --key fts_…` in your repository.
 
-The scripts check the download against the release's `SHA256SUMS`. `FORTIS_VERSION` pins a version, and `FORTIS_INSTALL_DIR` changes the folder (default `~/.fortis/bin`). Builds exist for Linux (x64, arm64, glibc only), macOS (arm64, x64) and Windows (x64). On Alpine, use npm or the Docker image:
+Or with a package manager:
+
+```bash
+brew install divine-mercyx/tap/fortis
+```
+
+```powershell
+scoop bucket add fortis https://github.com/Divine-mercyx/scoop-bucket
+scoop install fortis
+winget install DivineMercyx.Fortis
+```
+
+The scripts check the download against the release's `SHA256SUMS`. `FORTIS_VERSION` pins a version, and `FORTIS_INSTALL_DIR` changes the folder (default `~/.fortis/bin`). Builds exist for Linux (x64, arm64), macOS (arm64, x64) and Windows (x64).
+
+On Alpine, the install script uses a musl build, which needs one package first: `apk add libstdc++`. The Docker image also works:
 
 ```bash
 docker run --rm -v "$PWD:/src" -w /src -e FORTIS_KEY ghcr.io/divine-mercyx/fortis fortis scan --ci
 ```
 
 To verify where a binary came from, run `gh attestation verify fortis-linux-x64.tar.gz --repo Divine-mercyx/fortis`.
+
+### Updating
+
+`fortis update` updates a binary from the install scripts, after checking it against the release's `SHA256SUMS`. If you installed another way, it tells you the command to use.
+
+Once a day, Fortis checks GitHub for a newer release and prints a notice if there is one. It sends nothing about your project, waits at most 1.5 seconds, and is off in CI. Turn it off with `FORTIS_NO_UPDATE_CHECK=1`.
 
 ## What it checks
 
@@ -92,6 +112,7 @@ fortis scan --sbom target/bom.json
 | `fortis scan --sbom bom.json` | Also check a CycloneDX JSON SBOM |
 | `fortis login <key>` / `fortis logout` | Save or remove the key for this machine |
 | `fortis whoami` | Project, workspace and plan for the key |
+| `fortis update` | Update a binary install to the latest version |
 
 Exit codes: `0` passed, `1` findings at or above the threshold, `2` usage or configuration error, including a full scan that found no files.
 
@@ -267,6 +288,15 @@ Then on npmjs.com: package → Settings → Trusted publishing → GitHub Action
 - uses this version's changelog section below as the release notes. Before tagging, change its heading from "(unreleased)" to the release date;
 - builds, tests and publishes the wheels to PyPI (TestPyPI on a fork). `packages/python/build_wheel.py` makes one by hand.
 
+A tag also signs the macOS and Windows binaries, builds the Alpine ones, and updates the package managers. Each store or signing step without its secret is skipped. These are set up once, in a GitHub environment called `release` limited to `cli-v*` tags:
+
+| Secrets | What they need |
+|---|---|
+| `APPLE_CERT_P12_BASE64`, `APPLE_CERT_PASSWORD`, `APPLE_API_KEY_P8_BASE64`, `APPLE_API_KEY_ID`, `APPLE_API_ISSUER_ID` | An Apple Developer ID Application certificate, and an App Store Connect API key |
+| `WINDOWS_CERT_PFX_BASE64`, `WINDOWS_CERT_PASSWORD` | A code-signing certificate you can export as a PFX |
+| `PACKAGE_REPOS_TOKEN` | A token that can push to `Divine-mercyx/homebrew-tap` and `Divine-mercyx/scoop-bucket` |
+| `WINGET_TOKEN` | A classic token with the `public_repo` scope, for pull requests to `microsoft/winget-pkgs` |
+
 To build a binary for your own machine, run `pnpm --filter fortis-watchdog build:binary`. The result goes in `dist-sea/`. A tag on a fork runs everything except npm, which makes a safe dry run; set `FORTIS_REPO` to install from it.
 
 Publishing a tarball by hand: `npm pack` rebuilds `dist/` first, so the packed CLI always reports
@@ -285,6 +315,9 @@ Keys are read from `FORTIS_KEY`, then from `~/.config/fortis/credentials.json` (
 ## Changelog
 
 **0.1.0-beta.12** (unreleased)
+- `fortis update` updates a binary install, and a notice once a day says when a newer version exists. It's off in CI and with `FORTIS_NO_UPDATE_CHECK=1`.
+- The install script works on Alpine and other musl systems, with new `linux-x64-musl` and `linux-arm64-musl` builds. They need `apk add libstdc++`.
+- Install with Homebrew, Scoop or winget, and macOS and Windows binaries are signed, once the release setup is finished.
 - Python is fully supported: `pip install fortis-watchdog`, the fintech rules for Django, Django REST, Flask and FastAPI, and dev packages told apart in uv and Poetry lockfiles.
 - `pip install` needs no Node, and the git hook finds the CLI in `.venv` or `venv` even when it isn't active, and through `uv run` and `poetry run`.
 - More secrets are caught in Python: real-looking defaults such as `os.getenv("KEY", "…")`, SQLAlchemy connection URLs, tokens in URLs, PyPI tokens and notebooks.

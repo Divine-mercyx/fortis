@@ -608,6 +608,7 @@ export default function DocsPage() {
                   ['FORTIS_RULES_PUBLIC_KEY', 'scan', 'Pin the rule-pack signing key (PEM) instead of trusting it on first use.'],
                   ['FORTIS_ZAP_AUTH', 'test', 'A test user’s token for logged-in testing. “Bearer ” is added for the Authorization header.'],
                   ['FORTIS_ZAP_AUTH_HEADER', 'test', 'Header for FORTIS_ZAP_AUTH (default Authorization; e.g. Cookie).'],
+                  ['FORTIS_NO_UPDATE_CHECK', 'all', 'Set to 1 to turn off the once-a-day notice about a newer version. Always off in CI.'],
                   ['FORTIS_ZAP_IMAGE', 'test', 'ZAP Docker image (default zaproxy/zap-stable).'],
                   ['FORTIS_ZAP_DOCKER_ARGS', 'test', 'Extra docker run flags, e.g. --add-host or --network.'],
                   ['FORTIS_USER_A_TOKEN / FORTIS_USER_B_TOKEN', 'access', 'The two test customers’ tokens (names can be changed in the config).'],
