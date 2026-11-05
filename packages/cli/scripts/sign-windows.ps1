@@ -24,9 +24,7 @@ try {
     $password = $env:WINDOWS_CERT_PASSWORD
     [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($env:WINDOWS_CERT_PFX_BASE64))
   }
-  # The copy of Node the binary starts from is signed, and adding the CLI invalidated that signature.
-  & $signtool.FullName remove /s $Binary 2>$null
-  $global:LASTEXITCODE = 0
+  # build-binary.mjs already removed the signature of the Node it started from.
   & $signtool.FullName sign /fd SHA256 /f $pfx /p $password /tr http://timestamp.digicert.com /td SHA256 $Binary
   if ($LASTEXITCODE -ne 0) { throw 'FAILED: signtool sign' }
 
