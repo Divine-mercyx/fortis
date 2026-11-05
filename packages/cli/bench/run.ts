@@ -63,28 +63,36 @@ const FAKES: Record<string, string> = {
     Buffer.from(JSON.stringify({ iss: 'supabase', role: 'anon' })).toString('base64url'),
     rand(43),
   ].join('.'),
+  LIVE_PLACEHOLDER: ['sk', 'live', 'X'.repeat(25)].join('_'),
+  TEST_PLACEHOLDER: ['sk', 'test', `${'X'.repeat(20)}5678`].join('_'),
+  WEBHOOK_SECRET: ['whsec', rand(32)].join('_'),
 };
 
 type Score = { tp: number; fp: number; fn: number; misses: string[]; falsePositives: string[] };
 
+/** Scored per language, so a strong JavaScript score can't hide a weak Python one. */
+const scoreKey = (ruleId: string, path: string) => (/\.py$/.test(path) ? `${ruleId}:py` : ruleId);
+
 export function runBench(): Record<string, Score> {
   const scores: Record<string, Score> = {};
   for (const ruleId of readdirSync(casesDir)) {
-    const rule = FILE_RULES.find((r) => r.id === ruleId);
-    if (!rule) throw new Error(`bench/cases/${ruleId}: no rule with that ID`);
+    const rules = FILE_RULES.filter((r) => r.id === ruleId);
+    if (!rules.length) throw new Error(`bench/cases/${ruleId}: no rule with that ID`);
     const files: SourceFile[] = readdirSync(join(casesDir, ruleId)).map((name) => {
       const text = readFileSync(join(casesDir, ruleId, name), 'utf8').replace(/\{\{(\w+)\}\}/g, (_, k: string) => FAKES[k] ?? k);
       // A realistic app path, so path-based rules (money words, test folders) behave as in a repo.
-      return { path: `src/${name.replace(/\.(txt)$/, '')}`, text, lines: text.split('\n') };
+      return { path: `src/${name.replace(/\.(txt)$/, '')}`, text, lines: text.split(/\r?\n/) };
     });
     const ctx = files.length ? buildContext(files) : emptyContext();
-    const s: Score = { tp: 0, fp: 0, fn: 0, misses: [], falsePositives: [] };
     for (const f of files) {
+      const s = (scores[scoreKey(ruleId, f.path)] ??= { tp: 0, fp: 0, fn: 0, misses: [], falsePositives: [] });
       const expected = new Set(f.lines.flatMap((l, i) => (l.includes('@hit') ? [i + 1] : [])));
       const flagged = new Set(
-        rule.appliesTo.test(f.path) && !(rule.skipTests && TEST_PATH.test(f.path))
-          ? rule.run(f, ctx).filter((d) => d.ruleId === ruleId).map((d) => d.line)
-          : [],
+        rules.flatMap((rule) =>
+          rule.appliesTo.test(f.path) && !(rule.skipTests && TEST_PATH.test(f.path))
+            ? rule.run(f, ctx).filter((d) => d.ruleId === ruleId).map((d) => d.line)
+            : [],
+        ),
       );
       for (const line of flagged) {
         if (expected.has(line)) s.tp++;
@@ -92,7 +100,6 @@ export function runBench(): Record<string, Score> {
       }
       for (const line of expected) if (!flagged.has(line)) { s.fn++; s.misses.push(`${f.path}:${line}`); }
     }
-    scores[ruleId] = s;
   }
   return scores;
 }
@@ -106,7 +113,7 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
   const update = process.argv.includes('--update');
   const floors: Record<string, { precision: number; recall: number }> = update ? {} : JSON.parse(readFileSync(thresholdsFile, 'utf8'));
   let failed = false;
-  console.log(`${'rule'.padEnd(12)} ${'cases'.padStart(5)} ${'prec'.padStart(5)} ${'recall'.padStart(6)}  notes`);
+  console.log(`${'rule'.padEnd(15)} ${'cases'.padStart(5)} ${'prec'.padStart(5)} ${'recall'.padStart(6)}  notes`);
   for (const [id, s] of Object.entries(scores)) {
     const p = precision(s);
     const r = recall(s);
@@ -115,7 +122,7 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
     if (bad) failed = true;
     if (update) floors[id] = { precision: Math.round(p * 1000) / 1000, recall: Math.round(r * 1000) / 1000 };
     const notes = [...s.falsePositives.map((x) => `FP ${x}`), ...s.misses.map((x) => `missed ${x}`)].join(', ');
-    console.log(`${id.padEnd(12)} ${String(s.tp + s.fn).padStart(5)} ${pct(p)} ${pct(r).padStart(6)}  ${bad ? 'BELOW FLOOR ' : ''}${notes}`);
+    console.log(`${id.padEnd(15)} ${String(s.tp + s.fn).padStart(5)} ${pct(p)} ${pct(r).padStart(6)}  ${bad ? 'BELOW FLOOR ' : ''}${notes}`);
   }
   if (update) {
     writeFileSync(thresholdsFile, `${JSON.stringify(floors, null, 2)}\n`);

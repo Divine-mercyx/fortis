@@ -3,7 +3,7 @@ import { dirname, join, relative, resolve } from 'node:path';
 
 import type { Severity } from '@fortis/shared';
 
-import { cycloneDx, ecosystemOf, findLockfiles, isPomXml, missingLockfiles, parseLockfile, type Ecosystem, type Locked } from './lockfiles';
+import { cycloneDx, ecosystemOf, findLockfiles, isPomXml, isRequirements, manifestFor, missingLockfiles, parseLockfile, type Ecosystem, type Locked } from './lockfiles';
 import { fixedVersion, fixMessage, type OsvAffected } from './fix-version';
 import { OsvCache } from './osv-cache';
 import { lookupLocal } from './osv-db';
@@ -24,7 +24,47 @@ const SEVERITY: Record<string, Severity> = { CRITICAL: 'critical', HIGH: 'high',
 const MAX_ADVISORIES = 500;
 const ADVISORY_CONCURRENCY = 8;
 
-type OsvVuln = { id: string; summary?: string; aliases?: string[]; database_specific?: { severity?: string }; affected?: OsvAffected[] };
+type OsvVuln = { id: string; summary?: string; aliases?: string[]; database_specific?: { severity?: string }; severity?: { type: string; score: string }[]; affected?: OsvAffected[] };
+
+/** The base score of a CVSS 3 vector, as a severity. Many PyPI and Go advisories carry only this. */
+export function cvssSeverity(vector: string): Severity | null {
+  const m = Object.fromEntries(vector.split('/').map((part) => part.split(':') as [string, string]));
+  if (!/^CVSS:3/.test(vector) || !m.AV || !m.AC || !m.PR || !m.UI || !m.S || !m.C || !m.I || !m.A) return null;
+  const impactOf = (x: string) => ({ H: 0.56, L: 0.22, N: 0 })[x] ?? 0;
+  const changed = m.S === 'C';
+  const iss = 1 - (1 - impactOf(m.C)) * (1 - impactOf(m.I)) * (1 - impactOf(m.A));
+  const impact = changed ? 7.52 * (iss - 0.029) - 3.25 * (iss - 0.02) ** 15 : 6.42 * iss;
+  if (impact <= 0) return 'info';
+  const av = ({ N: 0.85, A: 0.62, L: 0.55, P: 0.2 })[m.AV] ?? 0;
+  const ac = ({ L: 0.77, H: 0.44 })[m.AC] ?? 0;
+  const pr = (changed ? { N: 0.85, L: 0.68, H: 0.5 } : { N: 0.85, L: 0.62, H: 0.27 })[m.PR] ?? 0;
+  const ui = ({ N: 0.85, R: 0.62 })[m.UI] ?? 0;
+  const raw = Math.min((changed ? 1.08 : 1) * (impact + 8.22 * av * ac * pr * ui), 10);
+  const score = Math.ceil(raw * 10) / 10;
+  return score >= 9 ? 'critical' : score >= 7 ? 'high' : score >= 4 ? 'medium' : 'low';
+}
+
+/** Severity from the advisory, then its GitHub alias, then its CVSS vector. */
+function severityOf(v: OsvVuln, details: Map<string, OsvVuln>): Severity {
+  const own = SEVERITY[(v.database_specific?.severity ?? '').toUpperCase()];
+  if (own) return own;
+  for (const alias of v.aliases ?? []) {
+    const known = SEVERITY[(details.get(alias)?.database_specific?.severity ?? '').toUpperCase()];
+    if (known) return known;
+  }
+  const vector = v.severity?.find((x) => x.type === 'CVSS_V3')?.score;
+  return (vector && cvssSeverity(vector)) || 'medium';
+}
+
+/**
+ * A text file, however Windows wrote it. `pip freeze > requirements.txt` in Windows PowerShell gives
+ * UTF-16, and read as UTF-8 that looks like a file with no packages at all.
+ */
+function readText(path: string): string {
+  const bytes = readFileSync(path);
+  const text = bytes[0] === 0xff && bytes[1] === 0xfe ? bytes.toString('utf16le') : bytes.toString('utf8');
+  return text.replace(/^﻿/, '');
+}
 
 export function readPackages(root: string, files: string[], opts: { sbom?: string; allPaths?: string[]; ignore?: string[] } = {}): LockRead {
   const notes: string[] = [];
@@ -37,7 +77,7 @@ export function readPackages(root: string, files: string[], opts: { sbom?: strin
     const abs = resolve(root, opts.sbom);
     const file = relative(root, abs).replace(/\\/g, '/');
     try {
-      const sbom = cycloneDx(readFileSync(abs, 'utf8'));
+      const sbom = cycloneDx(readText(abs));
       packages.push(...sbom.packages.map((p) => ({ ...p, file })));
       for (const p of sbom.packages) seen.add(p.ecosystem);
       sbomRead = true;
@@ -51,16 +91,19 @@ export function readPackages(root: string, files: string[], opts: { sbom?: strin
   let pomChecked = 0;
   let pomSkipped = 0;
   let skippedElsewhere = 0;
+  let directOnlyFiles = 0;
   for (const file of findLockfiles(files, opts.ignore)) {
-    if (sbomRead && isPomXml(file)) continue; // the SBOM already has this, and more
+    if (sbomRead && (isPomXml(file) || isRequirements(file))) continue; // the SBOM already has this, and more
     const abs = join(root, file);
     if (!existsSync(abs)) continue;
     try {
-      const manifestPath = join(root, dirname(file), 'package.json');
-      const manifest = /(^|\/)yarn\.lock$/.test(file) && existsSync(manifestPath) ? readFileSync(manifestPath, 'utf8').replace(/^\uFEFF/, '') : undefined;
-      const parsed = parseLockfile(file, readFileSync(abs, 'utf8'), manifest);
+      const manifestName = manifestFor(file);
+      const manifestPath = manifestName ? join(root, dirname(file), manifestName) : null;
+      const manifest = manifestPath && existsSync(manifestPath) ? readText(manifestPath) : undefined;
+      const parsed = parseLockfile(file, readText(abs), manifest);
       packages.push(...parsed.packages.map((p) => ({ ...p, file })));
       seen.add(ecosystemOf(file));
+      if (parsed.directOnly) directOnlyFiles++;
       if (isPomXml(file)) {
         pomFiles++;
         pomChecked += parsed.packages.length;
@@ -79,6 +122,7 @@ export function readPackages(root: string, files: string[], opts: { sbom?: strin
     const versions = pomSkipped ? `; the other ${pomSkipped} get their version from a parent POM or BOM` : '';
     notes.push(`pom.xml: checked ${pomChecked} of ${declared} declared dependencies${versions}. Transitive dependencies aren't covered: generate a CycloneDX SBOM and pass --sbom for those.`);
   }
+  if (directOnlyFiles) notes.push(`requirements files: only the packages they list were checked. Unless they're a full pip freeze, transitive dependencies aren't covered: use uv, Poetry or pip-compile, or pass --sbom for those.`);
   if (skippedElsewhere) notes.push(`${skippedElsewhere === 1 ? '1 dependency has' : `${skippedElsewhere} dependencies have`} no exact version (unpinned or installed from a branch), so ${skippedElsewhere === 1 ? "it wasn't" : "they weren't"} checked.`);
 
   if (opts.allPaths) {
@@ -170,19 +214,29 @@ export async function scanDependencies(
         if (v) details.set(id, v);
         else missing.push(id);
       }
-      await inPool(missing.slice(0, MAX_ADVISORIES), ADVISORY_CONCURRENCY, async (id) => {
+      const lookUp = async (id: string) => {
         try {
           const r = await fetchImpl(`${base}/v1/vulns/${encodeURIComponent(id)}`, { signal: AbortSignal.timeout(10_000) });
           if (!r.ok) return;
           const v = (await r.json()) as OsvVuln;
           // Keep only what the CLI reads, so the cache stays small.
-          const slim: OsvVuln = { id: v.id, summary: v.summary, aliases: v.aliases, database_specific: { severity: v.database_specific?.severity }, affected: v.affected?.map((a) => ({ package: a.package, ranges: a.ranges })) };
+          const slim: OsvVuln = { id: v.id, summary: v.summary, aliases: v.aliases, database_specific: { severity: v.database_specific?.severity }, severity: v.severity, affected: v.affected?.map((a) => ({ package: a.package, ranges: a.ranges })) };
           details.set(id, slim);
           cache?.setVuln(id, slim);
         } catch {
           /* keep going without severity */
         }
-      });
+      };
+      await inPool(missing.slice(0, MAX_ADVISORIES), ADVISORY_CONCURRENCY, lookUp);
+      // Some advisories carry no severity of their own, but their GitHub alias does.
+      const aliases = [...new Set([...details.values()].filter((v) => !v.database_specific?.severity).flatMap((v) => (v.aliases ?? []).filter((a) => a.startsWith('GHSA-') && !details.has(a))))];
+      const aliasesToFetch: string[] = [];
+      for (const id of aliases) {
+        const v = cache?.vuln<OsvVuln>(id);
+        if (v) details.set(id, v);
+        else aliasesToFetch.push(id);
+      }
+      await inPool(aliasesToFetch.slice(0, Math.max(0, MAX_ADVISORIES - details.size)), ADVISORY_CONCURRENCY, lookUp);
       if (missing.length > MAX_ADVISORIES) notes.push(`Severity was looked up for the first ${MAX_ADVISORIES} of ${missing.length} advisories; the rest show as medium.`);
       cache?.save();
     }
@@ -195,7 +249,7 @@ export async function scanDependencies(
       const { pkg, ids: vulnIds } = hit;
       const vulns = vulnIds.map((id) => details.get(id)).filter(Boolean) as OsvVuln[];
       const ranked = vulns
-        .map((v) => SEVERITY[(v.database_specific?.severity ?? '').toUpperCase()] ?? 'medium')
+        .map((v) => severityOf(v, details))
         .sort((a, b) => ['critical', 'high', 'medium', 'low', 'info'].indexOf(a) - ['critical', 'high', 'medium', 'low', 'info'].indexOf(b));
       const severity = ranked[0] ?? 'medium';
       const top = vulns[0];

@@ -1,0 +1,9 @@
+# For teams that run their hooks through pre-commit. Fortis must be installed: pip install fortis-watchdog
+- id: fortis
+  name: Fortis security scan
+  description: Fintech security checks on the files being pushed.
+  entry: fortis scan --pre-push
+  language: system
+  pass_filenames: false
+  always_run: true
+  stages: [pre-push]

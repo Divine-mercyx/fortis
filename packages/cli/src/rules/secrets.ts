@@ -1,7 +1,7 @@
 import type { Detection, FileRule, SourceFile } from './types';
 import { isIgnored } from './types';
 
-const ANY_TEXT = /\.(c|m)?(j|t)sx?$|\.(json|ya?ml|env|toml|ini|properties|py|rb|php|go|java|kt|kts|groovy|scala|swift|dart|rs|vue|svelte|jsp|cshtml|cs|sh|sql|tf|tfvars|txt|md|xml|gradle|cfg|conf|pem|key|plist)$|(^|\/)id_(rsa|ecdsa|ed25519)$|(^|\/)\.env(\.|$)|(^|\/)\.(npmrc|yarnrc|pypirc|netrc)$|(^|\/)Dockerfile$/i;
+const ANY_TEXT = /\.(c|m)?(j|t)sx?$|\.(json|ya?ml|env|toml|ini|properties|py|pyi|ipynb|rb|php|go|java|kt|kts|groovy|scala|swift|dart|rs|vue|svelte|jsp|cshtml|cs|sh|sql|tf|tfvars|txt|md|xml|gradle|cfg|conf|pem|key|plist)$|(^|\/)id_(rsa|ecdsa|ed25519)$|(^|\/)\.env(\.|$)|(^|\/)\.(npmrc|yarnrc|pypirc|netrc)$|(^|\/)Dockerfile$/i;
 
 /** `name` turns the matched key into a more specific title (e.g. which provider it belongs to). */
 type Pattern = { re: RegExp; ruleId: string; severity: Detection['severity']; title: string; name?: (key: string) => string };
@@ -74,7 +74,7 @@ const GENERIC: Pattern[] = [
 const ASSIGNMENT = /\b([A-Za-z0-9_]*(?:secret|token|api[_-]?key|private[_-]?key|password|passwd|client[_-]?secret)[A-Za-z0-9_]*)["']?\s*(?:=>|:=|[:=])\s*["'`]([^"'`\s]{16,})["'`]/gi;
 
 /** Config files where values go unquoted: `spring.datasource.password=…`, `API_TOKEN: …`. */
-const CONFIG_FILE = /\.(env|properties|ya?ml|ini|toml|conf|cfg)$|(^|\/)\.env(\.|$)/i;
+const CONFIG_FILE = /\.(env|properties|ya?ml|ini|toml|conf|cfg)$|(^|\/)\.env(\.|$)|(^|\/)\.pypirc$/i;
 const EXAMPLE_FILE = /\.(example|sample|template|dist|tmpl)$|\.(example|sample)\./i;
 const UNQUOTED = /^\s*(?:export\s+|-\s+)?([A-Za-z0-9_.-]*(?:secret|token|api[_-]?key|private[_-]?key|password|passwd)[A-Za-z0-9_.-]*)\s*[:=]\s*([^\s"'`#]{16,})\s*(?:#.*)?$/i;
 /** Key files, keystores and dotted class names are settings that point at a secret, not the secret. */
@@ -90,12 +90,12 @@ const READS_ENV = /process\.env|import\.meta\.env|os\.environ|getenv\(|\benv\(|\
  *   Server=host;User Id=u;Password=PASSWORD;   (.NET / ADO connection strings)
  * Local development databases and placeholders are not reported.
  */
-const CONN_URL = /\b((?:postgres(?:ql)?|mysql|mariadb|mongodb(?:\+srv)?|rediss?|amqps?|mssql|sqlserver|cockroachdb|clickhouse)):\/\/([^:/\s@'"`]+):([^@\s'"`]+)@([^/\s:'"`?;,)]+)/gi;
+const CONN_URL = /\b((?:postgres(?:ql)?|mysql|mariadb|mongodb(?:\+srv)?|rediss?|amqps?|mssql|sqlserver|oracle|cockroachdb|clickhouse)(?:\+\w+)?):\/\/([^:/\s@'"`]+):([^@\s'"`]+)@([^/\s:'"`?;,)]+)/gi;
 const JDBC = /\bjdbc:[a-z0-9]+(?::[a-z0-9]+)?:\/\/([^/\s;:?'"`]+)[^\s'"`]*?[?&;]password=([^&;\s'"`]+)/gi;
 const ADO = /(?:^|[;"'\s])(?:server|data source|host|address)\s*=\s*([^;'"`]+);[^'"`]*?\b(?:password|pwd)\s*=\s*([^;'"`]+)/gi;
 /** Hosts that only exist on a developer's machine or inside docker-compose. */
 const LOCAL_HOST = /^(?:localhost|127\.\d+\.\d+\.\d+|0\.0\.0\.0|\[?::1\]?|host\.docker\.internal|db|database|postgres(?:ql)?|mysql|mariadb|mongo(?:db)?|redis|rabbitmq|mssql|sqlserver)$/i;
-const PASSWORD_PLACEHOLDER = /^(?:\$\{.*\}|\$\(.*\)|\$[A-Za-z_]\w*|%\w+%?|<[^>]*>|\{\{.*\}\}|\*+|x+|\.\.\.|password|pass|pwd|secret|changeme|your[_-]?password)$/i;
+const PASSWORD_PLACEHOLDER = /^(?:\$\{.*\}|\{.*\}|\$\(.*\)|\$[A-Za-z_]\w*|%\w+%?|<[^>]*>|\{\{.*\}\}|\*+|x+|\.\.\.|password|pass|pwd|secret|changeme|your[_-]?password)$/i;
 
 /** A JWT whose payload grants a privileged role (Supabase's service_role key bypasses row-level security). */
 const JWT = /\beyJ[A-Za-z0-9_-]{10,}\.(eyJ[A-Za-z0-9_-]{10,})\.[A-Za-z0-9_-]{20,}/g;
@@ -127,6 +127,12 @@ function connectionSecret(text: string): string | null {
   return null;
 }
 
+/** `os.getenv("API_KEY", "real-secret")`: read from the environment, but with a real secret to fall back on. */
+const ENV_DEFAULT = /\b(?:getenv|environ\.get|config|env(?:\.str)?)\s*\(\s*["']([A-Za-z0-9_.-]*(?:secret|token|api[_-]?key|private[_-]?key|password|passwd)[A-Za-z0-9_.-]*)["']\s*,\s*(?:default\s*=\s*)?["']([^"'\s]{16,})["']/i;
+/** `git+https://ghp_abc@github.com/...`: a token used as the URL's username or password. */
+const URL_TOKEN = /\bhttps?:\/\/(?:[\w.-]+:)?([A-Za-z0-9_-]{20,})@[\w.-]+/;
+
+
 function entropy(s: string): number {
   const freq = new Map<string, number>();
   for (const ch of s) freq.set(ch, (freq.get(ch) ?? 0) + 1);
@@ -139,8 +145,8 @@ function entropy(s: string): number {
 }
 
 const PLACEHOLDER = /^(x+|\*+|<.*>|\$\{.*\}|\$[A-Za-z_]|%[\w(]|\{\{|\{cipher\}|ENC\(|your[_-]|changeme|example|placeholder|dummy|test|sample|redacted)/i;
-/** Routes, URLs without credentials (any scheme; URLs with one are connectionSecret's job), dashed-word labels and variable names (`:login-token="loginToken"`) are not secrets. */
-const NOT_SECRET = /^\/|^[a-z][a-z0-9+.-]*:\/\/(?:[^:@/\s]+@)?[^@\s]+$|^[a-z]+(?:[-_./][a-z]+)+$|^[A-Za-z][a-z]*(?:[A-Z][a-z]+)+$/;
+/** Routes, URLs without credentials (any scheme; URLs with one are connectionSecret's job), dashed-word labels, variable and setting names (`:login-token="loginToken"`, `"WEBHOOK_SECRET"`) and email addresses are not secrets. */
+const NOT_SECRET = /^\/|^[a-z][a-z0-9+.-]*:\/\/(?:[^:@/\s]+@)?[^@\s]+$|^[a-z]+(?:[-_./][a-z]+)+$|^[A-Za-z][a-z]*(?:[A-Z][a-z]+)+$|^[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+$|^[^@\s]+@[^@\s]+\.[A-Za-z]+$/;
 
 /** Firebase config files hold client keys that ship inside every app build; they are public by design. */
 const FIREBASE_CONFIG = /(^|\/)(google-services\.json|GoogleService-Info\.plist)$/i;
@@ -150,7 +156,9 @@ function scan(file: SourceFile, patterns: Pattern[]): Detection[] {
   file.lines.forEach((text, i) => {
     for (const p of patterns) {
       p.re.lastIndex = 0;
-      if (p.re.test(text) && !isIgnored(file, i + 1)) {
+      const match = p.re.exec(text);
+      // A key prefix followed only by X is a placeholder in docs and fixtures, not a key.
+      if (match && !/X{8}/.test(match[0]) && !isIgnored(file, i + 1)) {
         if (p.title === 'Private key in code' && /"type"\s*:\s*"service_account"/.test(file.text)) {
           out.push({ ruleId: p.ruleId, severity: 'critical', title: 'Google Cloud service account key in code', file: file.path, line: i + 1, snippet: text.trim() });
           continue;
@@ -192,16 +200,20 @@ export const genericSecretRule: FileRule = {
     const looksRandom = (value: string) => !PLACEHOLDER.test(value) && !NOT_SECRET.test(value) && entropy(value) >= 3.5
       && !(inTests && FAKE_VALUE.test(value))
       && !PAYMENT_KEYS.some((p) => { p.re.lastIndex = 0; return p.re.test(value); });
-    const report = (name: string, text: string, line: number) => {
+    const reportAs = (title: string, text: string, line: number) => {
       if (isIgnored(file, line) || out.some((d) => d.line === line)) return;
-      out.push({ ruleId: 'SEC-GEN-001', severity: 'high', title: `Hard-coded ${name}`, file: file.path, line, snippet: text.trim() });
+      out.push({ ruleId: 'SEC-GEN-001', severity: 'high', title, file: file.path, line, snippet: text.trim() });
     };
+    const report = (name: string, text: string, line: number) => reportAs(`Hard-coded ${name}`, text, line);
     const unquotedAllowed = CONFIG_FILE.test(file.path) && !EXAMPLE_FILE.test(file.path);
-    file.lines.forEach((text, i) => {
+    const isNotebook = /\.ipynb$/i.test(file.path);
+    file.lines.forEach((raw, i) => {
+      // A notebook is JSON, so the quotes in its code cells are escaped.
+      const text = isNotebook ? raw.replace(/\\"/g, '"') : raw;
       // Checked before READS_ENV: `process.env.DATABASE_URL || 'postgres://app:pw@db.prod…'` still leaks the fallback.
       const conn = connectionSecret(text);
       if (conn && !isIgnored(file, i + 1) && !out.some((d) => d.line === i + 1)) {
-        out.push({ ruleId: 'SEC-GEN-001', severity: 'critical', title: conn, file: file.path, line: i + 1, snippet: text.trim() });
+        out.push({ ruleId: 'SEC-GEN-001', severity: 'critical', title: conn, file: file.path, line: i + 1, snippet: raw.trim() });
       }
       const jwt = privilegedJwt(text);
       if (jwt && !isIgnored(file, i + 1) && !out.some((d) => d.line === i + 1)) {
@@ -210,6 +222,10 @@ export const genericSecretRule: FileRule = {
       if (TWILIO_TOKEN.test(text) && !READS_ENV.test(text) && !isIgnored(file, i + 1) && !out.some((d) => d.line === i + 1)) {
         out.push({ ruleId: 'SEC-GEN-001', severity: 'high', title: 'Twilio auth token in code', file: file.path, line: i + 1, snippet: text.trim() });
       }
+      const fallback = ENV_DEFAULT.exec(text);
+      if (fallback && looksRandom(fallback[2]!)) report(`default for ${fallback[1]}`, raw, i + 1);
+      const token = URL_TOKEN.exec(text);
+      if (token && /\d/.test(token[1]!) && looksRandom(token[1]!)) reportAs('Credential in a URL', raw, i + 1);
       if (READS_ENV.test(text)) return;
       ASSIGNMENT.lastIndex = 0;
       for (const m of text.matchAll(ASSIGNMENT)) {
