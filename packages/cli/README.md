@@ -180,7 +180,7 @@ Other CI systems don't get comments yet. The comment shows the rule, severity, f
 ```yaml
 repos:
   - repo: https://github.com/Divine-mercyx/fortis
-    rev: cli-v0.1.0-beta.10 # or the latest cli-v* tag
+    rev: cli-v0.1.0-beta.12 # the first release with this hook, or any newer cli-v* tag
     hooks:
       - id: fortis
 ```
