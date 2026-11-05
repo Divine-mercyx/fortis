@@ -230,3 +230,29 @@ describe('SEC-GEN-001 SaaS, cloud and registry tokens', () => {
     expect(maskSnippet(`const k = '${jwt('service_role')}';`)).not.toContain(b64({ iss: 'supabase', role: 'service_role' }));
   });
 });
+
+describe('FX-SEC-001 African payment providers', () => {
+  const SEERBIT = ['SBSECK', 'aB3dE6gH9jK2mN5pQ8sT1vW4yZ7bC0eF'].join('_');
+  const SEERBIT_PUB = ['SBPUBK', 'aB3dE6gH9jK2mN5pQ8sT1vW4yZ7bC0eF'].join('_');
+  const OPAY = ['OPAY', 'PRV', '1612345678901234567890'].join('');
+  const OPAY_PUB = ['OPAY', 'PUB', '1612345678901234567890'].join('');
+  const SQUAD = ['sandbox', 'sk', '94f2b798466408ef4d19e848ee1a4d1a3e93f1'].join('_');
+
+  it('names live and sandbox secret keys and masks them', () => {
+    const src = [`const a = '${SEERBIT}';`, `const b = '${OPAY}';`, `const c = '${SQUAD}';`].join('\n');
+    const d = run(paymentKeyRule, 'src/pay.ts', src);
+    expect(d.map((x) => [x.severity, x.title])).toEqual([
+      ['critical', 'Live SeerBit secret key in code'],
+      ['critical', 'OPay private key in code'],
+      ['high', 'Squad sandbox secret key in code'],
+    ]);
+    for (const [line, key] of [[0, SEERBIT], [1, OPAY], [2, SQUAD]] as const) {
+      expect(maskSnippet(src.split('\n')[line]!)).not.toContain(key.slice(-16));
+    }
+  });
+
+  it('leaves public keys alone under every rule', () => {
+    const src = `export const SEERBIT_PUBLIC_KEY = '${SEERBIT_PUB}';\nexport const OPAY_PUBLIC_KEY = '${OPAY_PUB}';`;
+    expect([...run(paymentKeyRule, 'src/pay.ts', src), ...run(genericSecretRule, 'src/pay.ts', src)]).toEqual([]);
+  });
+});

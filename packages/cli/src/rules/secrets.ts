@@ -16,6 +16,16 @@ const PAYMENT_KEYS: Pattern[] = [
   { re: /\bFLWSECK-[A-Za-z0-9]{20,}-X\b/g, ruleId: 'FX-SEC-001', severity: 'critical', title: 'Live Flutterwave secret key in code' },
   { re: /\bFLWSECK_TEST-[A-Za-z0-9]{20,}-X\b/g, ruleId: 'FX-SEC-001', severity: 'high', title: 'Flutterwave test secret key in code' },
   { re: /\bMK_PROD_[A-Z0-9]{8,}\b/g, ruleId: 'FX-SEC-001', severity: 'critical', title: 'Live Monnify API key in code' },
+  // SeerBit: SBSECK_ (live) / SBTESTSECK_ (test) secret keys; SBPUBK_ public keys are meant for the browser.
+  // Source: FCMB's SeerBit integration guide, paydocs.fcmb.com/accept-payment/sub-account-integration
+  { re: /\bSBSECK_[A-Za-z0-9_]{16,}/g, ruleId: 'FX-SEC-001', severity: 'critical', title: 'Live SeerBit secret key in code' },
+  { re: /\bSBTESTSECK_[A-Za-z0-9_]{16,}/g, ruleId: 'FX-SEC-001', severity: 'high', title: 'SeerBit test secret key in code' },
+  // OPay: OPAYPRV private key signs requests (HMAC-SHA512); OPAYPUB is the public key.
+  // Source: OPay's merchant-cashier-php library (packagist opay/merchant-cashier-php) and documentation.opaycheckout.com/api-signature
+  { re: /\bOPAYPRV[A-Za-z0-9]{16,}\b/g, ruleId: 'FX-SEC-001', severity: 'critical', title: 'OPay private key in code' },
+  // Squad (GTCO): sandbox secret keys start sandbox_sk_; live keys are a bare sk_ with no documented shape, so only sandbox is named.
+  // Source: Squad API docs (squadinc.gitbook.io) and the go-squad SDK, which detects sandbox mode from this prefix
+  { re: /\bsandbox_sk_[A-Za-z0-9]{20,}\b/g, ruleId: 'FX-SEC-001', severity: 'high', title: 'Squad sandbox secret key in code' },
 ];
 
 /**
