@@ -145,7 +145,7 @@ jobs:
     name: Code scan
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Install Fortis
         uses: Divine-mercyx/fortis@cli-v${CLI_VERSION}
         with:
@@ -157,7 +157,7 @@ jobs:
       - name: Upload to GitHub code scanning
         if: always() && hashFiles('fortis.sarif') != ''
         continue-on-error: true   # free on public repos; needs Advanced Security on private ones
-        uses: github/codeql-action/upload-sarif@v3
+        uses: github/codeql-action/upload-sarif@v4
         with:
           sarif_file: fortis.sarif
           category: fortis
@@ -168,7 +168,7 @@ jobs:
     if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/staging')
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Install Fortis
         uses: Divine-mercyx/fortis@cli-v${CLI_VERSION}
         with:
