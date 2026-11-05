@@ -117,3 +117,19 @@ describe('false positives seen on a real fintech backend', () => {
     expect(run(rule('FX-IDEM-001'), 'src/modules/wallet/wallet.routes.ts', "router.post('/transfer', async (req, res) => {});", ctx)).toHaveLength(1);
   });
 });
+
+describe('SEC-GEN-001 in tests', () => {
+  it('skips values that spell themselves out as fake, in test files only', () => {
+    const fake = 'out = ApiKeyCreated(**record, api_key="nova_abc12345_secret")';
+    expect(run(genericSecretRule, 'backend/tests/test_integration_api.py', fake)).toEqual([]);
+    expect(run(genericSecretRule, 'backend/test_api.py', fake)).toEqual([]);
+    expect(run(genericSecretRule, 'pkg/client_test.go', 'token := "fake-token-9fK2mQ8vX1pL"')).toEqual([]);
+    // The same value in application code is still reported.
+    expect(run(genericSecretRule, 'backend/app/config.py', fake)).toHaveLength(1);
+  });
+
+  it('still catches a real-looking secret in a test file', () => {
+    expect(run(genericSecretRule, 'backend/tests/test_payments.py', 'api_key = "Zx9Qm2Lp7Vt4Rk8Wn3Yb6Hc1"')).toHaveLength(1);
+  });
+});
+

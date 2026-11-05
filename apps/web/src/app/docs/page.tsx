@@ -221,7 +221,7 @@ const ACCESS_JSON = `{
 
 const PACK_LABEL: Record<RulePack, string> = { fintech: 'Fintech', secrets: 'Secrets', dependencies: 'Dependencies' };
 const RULE_LANG: Record<string, string> = {
-  'FX-SEC-001': 'Any file', 'SEC-GEN-001': 'Any file', 'DEP-OSV': 'Lockfiles for JavaScript, PHP, Python, Java, Go, .NET and Ruby',
+  'FX-SEC-001': 'Any file', 'SEC-GEN-001': 'Any file', 'DEP-OSV': 'Lockfiles for JavaScript, PHP, Python, Java, Go, .NET, Ruby, Rust and Dart/Flutter',
   'FX-BOLA-001': 'Any language (running app)', 'FX-AUTH-001': 'Any language (running app)',
 };
 
@@ -739,6 +739,8 @@ export default function DocsPage() {
 
         <Section id="changelog" title="Changelog">
           <dl className="doc-faq">
+            <dt>0.1.0-beta.11</dt>
+            <dd>The dependency check reads Rust (<C>Cargo.lock</C>) and Dart/Flutter (<C>pubspec.lock</C>). Projects whose dependencies can&apos;t be checked (no lockfile, or Swift, CocoaPods and Elixir, not read yet) are reported instead of passing as clean. Obviously fake values in tests are no longer flagged.</dd>
             <dt>0.1.0-beta.10</dt>
             <dd>The one-line installer shows download progress, retries dropped connections and stops clearly if a download stalls. On Apple-silicon Macs running Terminal under Rosetta it installs the native build.</dd>
             <dt>0.1.0-beta.9</dt>

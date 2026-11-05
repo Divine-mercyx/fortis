@@ -228,3 +228,40 @@ describe('line numbers', () => {
     expect(parseLockfile(file, text).packages[0]!.line).toBe(line);
   });
 });
+
+describe('Rust and Dart', () => {
+  it('Cargo.lock: crates.io packages only, with lines; the project\'s own and git crates are not looked up', () => {
+    const text = [
+      'version = 4', '',
+      '[[package]]', 'name = "demo"', 'version = "0.1.0"', 'dependencies = [', ' "regex",', ']', '',
+      '[[package]]', 'name = "regex"', 'version = "1.5.4"', 'source = "registry+https://github.com/rust-lang/crates.io-index"', 'checksum = "x"', '',
+      '[[package]]', 'name = "forked"', 'version = "0.2.0"', 'source = "git+https://github.com/me/forked?rev=abc#abc"', '',
+    ].join('\n');
+    const r = parseLockfile('contracts/Cargo.lock', text);
+    expect(r.packages).toEqual([{ name: 'regex', version: '1.5.4', ecosystem: 'crates.io', dev: false, line: 10 }]);
+    expect(r.skipped).toBe(1);
+  });
+
+  it('pubspec.lock: hosted packages, dev dependencies marked, SDK and git packages not looked up', () => {
+    const text = [
+      'packages:',
+      '  http:', '    dependency: "direct main"', '    description:', '      name: http', '      url: "https://pub.dev"', '    source: hosted', '    version: "0.13.3"',
+      '  mockito:', '    dependency: "direct dev"', '    source: hosted', '    version: "5.4.0"',
+      '  flutter:', '    dependency: "direct main"', '    source: sdk', '    version: "0.0.0"',
+      '  my_fork:', '    dependency: "direct main"', '    source: git', '    version: "1.0.0"',
+      'sdks:', '  dart: ">=3.0.0 <4.0.0"', '',
+    ].join('\n');
+    const r = parseLockfile('app/pubspec.lock', text);
+    expect(r.packages.map((p) => `${p.ecosystem}:${p.name}@${p.version}${p.dev ? ' dev' : ''} L${p.line}`)).toEqual(['Pub:http@0.13.3 L2', 'Pub:mockito@5.4.0 dev L9']);
+    expect(r.skipped).toBe(1);
+  });
+
+  it('says when a Rust or Flutter project has no lockfile, and which ecosystems are not checked yet', () => {
+    const notes = missingLockfiles(['contracts/Cargo.toml', 'app/pubspec.yaml', 'ios/Podfile', 'Package.swift'], [], new Set());
+    expect(notes.join('\n')).toMatch(/Cargo\.toml found but no lockfile.*commit Cargo\.lock/);
+    expect(notes.join('\n')).toMatch(/pubspec\.yaml found but no lockfile.*commit pubspec\.lock/);
+    expect(notes.join('\n')).toMatch(/CocoaPods aren't checked/);
+    expect(notes.join('\n')).toMatch(/Swift packages aren't checked/);
+    expect(missingLockfiles(['Cargo.toml', 'Cargo.lock'], [], new Set(['crates.io']))).toEqual([]);
+  });
+});

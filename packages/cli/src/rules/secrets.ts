@@ -79,13 +79,20 @@ export const paymentKeyRule: FileRule = {
   run: (file) => scan(file, PAYMENT_KEYS),
 };
 
+/** Test code, including Python's test_*.py and Go's *_test.go. */
+const TEST_FILE = /(^|\/)(__tests__|__mocks__|tests?|spec|e2e|fixtures?|mocks?)\/|\.(test|spec|mock|mocks|fixture|stories)\.[cm]?[jt]sx?$|(^|\/)test_[^/]+\.py$|_test\.(py|go)$/i;
+/** In tests, a value that spells itself out as fake (`nova_abc12345_secret`, `fake-token-1`) is test data. */
+const FAKE_VALUE = /secret|example|dummy|fake|sample|placeholder|changeme|test|mock|abc123|123456|xxxx/i;
+
 export const genericSecretRule: FileRule = {
   id: 'SEC-GEN-001',
   pack: 'secrets',
   appliesTo: ANY_TEXT,
   run: (file) => {
     const out = scan(file, GENERIC);
+    const inTests = TEST_FILE.test(file.path);
     const looksRandom = (value: string) => !PLACEHOLDER.test(value) && !NOT_SECRET.test(value) && entropy(value) >= 3.5
+      && !(inTests && FAKE_VALUE.test(value))
       && !PAYMENT_KEYS.some((p) => { p.re.lastIndex = 0; return p.re.test(value); });
     const report = (name: string, text: string, line: number) => {
       if (isIgnored(file, line) || out.some((d) => d.line === line)) return;

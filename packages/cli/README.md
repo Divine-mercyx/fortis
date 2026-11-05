@@ -55,6 +55,8 @@ Run `fortis rules` for the list and `fortis explain FX-OWN-001` for why a rule m
 | Go | `go.mod` |
 | .NET | `packages.lock.json` |
 | Ruby | `Gemfile.lock` |
+| Rust | `Cargo.lock` |
+| Dart / Flutter | `pubspec.lock` |
 
 Files are found in any folder of the repository. Dev and test dependencies are left out wherever they can be told apart (`uv.lock` and yarn workspaces can't, so those are all checked). Findings point at the package's line in the file. If a project has no lockfile, the scan says so.
 
@@ -87,9 +89,9 @@ If the dependency check can't finish (OSV is down, or a lockfile can't be read),
 ## In CI
 
 ```yaml
-- uses: Divine-mercyx/fortis@cli-v0.1.0-beta.10
+- uses: Divine-mercyx/fortis@cli-v0.1.0-beta.11
   with:
-    version: 0.1.0-beta.10
+    version: 0.1.0-beta.11
 - run: fortis scan --ci
   env:
     FORTIS_KEY: ${{ secrets.FORTIS_KEY }}
@@ -227,6 +229,10 @@ the version in `package.json`. Publish it with `npm publish fortis-watchdog-<ver
 Keys are read from `FORTIS_KEY`, then from `~/.config/fortis/credentials.json` (written by `fortis login`, mode 0600).
 
 ## Changelog
+
+**0.1.0-beta.11**
+- The dependency check reads Rust (`Cargo.lock`) and Dart/Flutter (`pubspec.lock`). A Rust or Flutter project without its lockfile, and Swift, CocoaPods or Elixir projects (not read yet), are now reported instead of passing as clean.
+- Hard-coded values in tests that spell themselves out as fake (`nova_abc12345_secret`, `fake-token-1`) are no longer reported. Real-looking secrets in tests still are. Python's `test_*.py` and Go's `*_test.go` count as tests.
 
 **0.1.0-beta.10**
 - The installer shows a progress bar while it downloads (about 40 MB), retries dropped connections, and stops with a clear message if the download stalls, instead of looking stuck.

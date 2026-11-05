@@ -7,7 +7,7 @@ import { lineOf, TEST_PATH } from './types';
  * hand-written reader, so the CLI stays one dependency-free file. Ecosystem names are OSV's.
  */
 
-export type Ecosystem = 'npm' | 'Packagist' | 'PyPI' | 'Maven' | 'Go' | 'NuGet' | 'RubyGems' | 'crates.io';
+export type Ecosystem = 'npm' | 'Packagist' | 'PyPI' | 'Maven' | 'Go' | 'NuGet' | 'RubyGems' | 'crates.io' | 'Pub';
 /** `line`: where the package is in its lockfile (npm-family lockfiles), so findings point at it. */
 export type Locked = { name: string; version: string; ecosystem: Ecosystem; dev: boolean; line?: number };
 /** `skipped` counts declared packages with no exact version to check. */
@@ -181,8 +181,52 @@ function gemfileLock(text: string): Parsed {
   return { packages, skipped: 0 };
 }
 
+/** Cargo.lock: `[[package]]` tables. Workspace crates have no `source`; git and path crates aren't on crates.io. */
+function cargoLock(text: string): Parsed {
+  const packages: Locked[] = [];
+  let skipped = 0;
+  const heads = [...text.matchAll(/^\[\[package\]\]\s*$/gm)];
+  heads.forEach((head, i) => {
+    const table = text.slice(head.index + head[0].length, heads[i + 1]?.index ?? text.length).split(/^\[/m)[0]!;
+    const name = /^name\s*=\s*"([^"]+)"/m.exec(table)?.[1];
+    const version = /^version\s*=\s*"([^"]+)"/m.exec(table)?.[1];
+    const source = /^source\s*=\s*"([^"]+)"/m.exec(table)?.[1];
+    if (!name || !version || !source) return; // the project's own crates
+    if (!source.startsWith('registry+')) { skipped++; return; }
+    packages.push(pkg('crates.io', name, version, false, lineOf(text, head.index)));
+  });
+  return { packages, skipped };
+}
+
+/** pubspec.lock (Dart and Flutter): one block per package under `packages:`, with its source and version. */
+function pubspecLock(text: string): Parsed {
+  const packages: Locked[] = [];
+  let skipped = 0;
+  let inPackages = false;
+  let current: { name: string; line: number; dev: boolean; source?: string; version?: string } | null = null;
+  const flush = () => {
+    if (!current) return;
+    if (current.source === 'hosted' && current.version) packages.push(pkg('Pub', current.name, current.version, current.dev, current.line));
+    else if (current.source && current.source !== 'sdk') skipped++; // git and path packages
+    current = null;
+  };
+  for (const [i, line] of text.split(/\r?\n/).entries()) {
+    if (/^\S/.test(line)) { flush(); inPackages = line.startsWith('packages:'); continue; }
+    if (!inPackages) continue;
+    const name = /^ {2}("?)([\w.-]+)\1:\s*$/.exec(line);
+    if (name) { flush(); current = { name: name[2]!, line: i + 1, dev: false }; continue; }
+    if (!current) continue;
+    const field = /^ {4}(dependency|source|version):\s*"?([^"]*)"?\s*$/.exec(line);
+    if (field?.[1] === 'dependency') current.dev = /dev/.test(field[2]!);
+    else if (field?.[1] === 'source') current.source = field[2]!;
+    else if (field?.[1] === 'version') current.version = field[2]!;
+  }
+  flush();
+  return { packages, skipped };
+}
+
 const PURL_TYPES: Record<string, Ecosystem> = {
-  npm: 'npm', composer: 'Packagist', pypi: 'PyPI', maven: 'Maven', golang: 'Go', nuget: 'NuGet', gem: 'RubyGems', cargo: 'crates.io',
+  npm: 'npm', composer: 'Packagist', pypi: 'PyPI', maven: 'Maven', golang: 'Go', nuget: 'NuGet', gem: 'RubyGems', cargo: 'crates.io', pub: 'Pub',
 };
 
 /** A package URL such as pkg:maven/org.apache.logging.log4j/log4j-core@2.14.1?type=jar. */
@@ -236,6 +280,8 @@ const FORMATS: Format[] = [
   { match: /(^|\/)go\.mod$/, ecosystem: 'Go', parse: goMod },
   { match: /(^|\/)packages\.lock\.json$/, ecosystem: 'NuGet', parse: nugetLock },
   { match: /(^|\/)Gemfile\.lock$/, ecosystem: 'RubyGems', parse: gemfileLock },
+  { match: /(^|\/)Cargo\.lock$/, ecosystem: 'crates.io', parse: cargoLock },
+  { match: /(^|\/)pubspec\.lock$/, ecosystem: 'Pub', parse: pubspecLock },
 ];
 
 export const isPomXml = (path: string) => /(^|\/)pom\.xml$/.test(path);
@@ -248,6 +294,8 @@ const MANIFESTS: { match: RegExp; ecosystem: Ecosystem; label: string; hint: str
   { match: /(^|\/)build\.gradle(\.kts)?$/, ecosystem: 'Maven', label: 'build.gradle', hint: 'turn on Gradle dependency locking, or pass --sbom' },
   { match: /\.csproj$/, ecosystem: 'NuGet', label: '.csproj files', hint: 'set RestorePackagesWithLockFile, or pass --sbom' },
   { match: /(^|\/)Gemfile$/, ecosystem: 'RubyGems', label: 'Gemfile', hint: 'commit Gemfile.lock' },
+  { match: /(^|\/)Cargo\.toml$/, ecosystem: 'crates.io', label: 'Cargo.toml', hint: 'commit Cargo.lock' },
+  { match: /(^|\/)pubspec\.yaml$/, ecosystem: 'Pub', label: 'pubspec.yaml', hint: 'commit pubspec.lock' },
 ];
 
 /** Vendored and generated folders hold other people's manifests, not this project's. */
@@ -276,7 +324,16 @@ export const parseLockfile = (file: string, text: string, manifest?: string): Pa
 export const ecosystemOf = (file: string): Ecosystem => formatOf(file).ecosystem;
 
 /** Ecosystems the project plainly uses but gave no versions for, so nothing was checked. */
+/** Ecosystems we can't read yet: say so, so a scan of such a project doesn't look like a clean pass. */
+const UNSUPPORTED: { match: RegExp; label: string }[] = [
+  { match: /(^|\/)(Package\.swift|Package\.resolved)$/, label: 'Swift packages' },
+  { match: /(^|\/)Podfile(\.lock)?$/, label: 'CocoaPods' },
+  { match: /(^|\/)mix\.(exs|lock)$/, label: 'Elixir (mix)' },
+];
+
 export function missingLockfiles(paths: string[], ignore: string[], found: ReadonlySet<Ecosystem>): string[] {
   const files = relevant(paths, ignore);
-  return MANIFESTS.filter((m) => !found.has(m.ecosystem) && files.some((p) => m.match.test(p))).map((m) => `${m.label} found but no lockfile, so those dependencies weren't checked: ${m.hint}.`);
+  const missing = MANIFESTS.filter((m) => !found.has(m.ecosystem) && files.some((p) => m.match.test(p))).map((m) => `${m.label} found but no lockfile, so those dependencies weren't checked: ${m.hint}.`);
+  const unsupported = UNSUPPORTED.filter((u) => files.some((p) => u.match.test(p))).map((u) => `${u.label} aren't checked for vulnerabilities yet.`);
+  return [...missing, ...unsupported];
 }
