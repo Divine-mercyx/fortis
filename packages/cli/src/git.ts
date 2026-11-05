@@ -9,14 +9,47 @@ function git(cwd: string, args: string[]): string | null {
 }
 
 export const repoRoot = (cwd: string) => git(cwd, ['rev-parse', '--show-toplevel']);
-export const currentBranch = (cwd: string) => git(cwd, ['rev-parse', '--abbrev-ref', 'HEAD']) ?? undefined;
+/** The branch name, or undefined on a detached HEAD (CI checkouts of a tag or a pull-request merge commit). */
+export const currentBranch = (cwd: string) => {
+  const b = git(cwd, ['rev-parse', '--abbrev-ref', 'HEAD']);
+  return b && b !== 'HEAD' ? b : undefined;
+};
 export const currentCommit = (cwd: string) => git(cwd, ['rev-parse', 'HEAD']) ?? undefined;
 
 const lines = (out: string | null) => (out ? out.split('\n').map((l) => l.trim()).filter(Boolean) : []);
 
-/** Every tracked and untracked-but-not-ignored file. */
-export function allFiles(root: string): string[] {
-  return lines(git(root, ['ls-files', '--cached', '--others', '--exclude-standard']));
+/** How the checkout is laid out: what a scan can't see, and why. */
+export type Checkout = {
+  /** A shallow clone (CI's default fetch-depth: 1): history and branch comparisons see only part of it. */
+  shallow: boolean;
+  /** Paths of submodules (separate repositories inside this one). */
+  submodules: string[];
+  /** Tracked files a sparse checkout left off disk. */
+  notCheckedOut: number;
+};
+
+export function checkoutInfo(root: string): Checkout {
+  const staged = lines(git(root, ['ls-files', '--stage']));
+  return {
+    shallow: git(root, ['rev-parse', '--is-shallow-repository']) === 'true',
+    // Mode 160000 is a gitlink: the folder belongs to another repository.
+    submodules: staged.filter((l) => l.startsWith('160000 ')).map((l) => l.slice(l.indexOf('\t') + 1)),
+    // `ls-files -t` marks skip-worktree entries (sparse checkout) with S.
+    notCheckedOut: lines(git(root, ['ls-files', '-t'])).filter((l) => l.startsWith('S ')).length,
+  };
+}
+
+/**
+ * Every tracked and untracked-but-not-ignored file that is on disk. Submodules are left out unless
+ * asked for (they are other repositories, usually scanned on their own); sparse-checkout entries
+ * that aren't on disk are left out.
+ */
+export function allFiles(root: string, opts: { submodules?: boolean } = {}): string[] {
+  const skipped = new Set(lines(git(root, ['ls-files', '-t'])).filter((l) => l.startsWith('S ')).map((l) => l.slice(2)));
+  const tracked = lines(git(root, ['ls-files', '--cached', ...(opts.submodules ? ['--recurse-submodules'] : [])]));
+  const untracked = lines(git(root, ['ls-files', '--others', '--exclude-standard']));
+  const gitlinks = opts.submodules ? new Set<string>() : new Set(checkoutInfo(root).submodules);
+  return [...new Set([...tracked, ...untracked])].filter((p) => !skipped.has(p) && !gitlinks.has(p));
 }
 
 /** One line of what git gives a pre-push hook on stdin: `<local ref> <local sha> <remote ref> <remote sha>`. */

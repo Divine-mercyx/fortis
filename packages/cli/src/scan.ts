@@ -4,8 +4,8 @@ import { scanDependencies } from './rules/dependencies';
 import { rulesFor } from './rules/index';
 import { findLockfiles } from './rules/lockfiles';
 import { JS_TS, TEST_PATH, type Detection, type ProjectContext, type SourceFile } from './rules/types';
-import { loadFiles } from './files';
-import { allFiles, changedFiles, type PushedRef } from './git';
+import { makeFilter, readSource } from './files';
+import { allFiles, changedFiles, checkoutInfo, type PushedRef } from './git';
 
 export type ScanOptions = {
   root: string;
@@ -22,6 +22,10 @@ export type ScanOptions = {
   /** A CycloneDX JSON SBOM to check as well as the lockfiles. */
   sbom?: string;
   fetchImpl?: typeof fetch;
+  /** Also scan submodules (other repositories inside this one). */
+  submodules?: boolean;
+  /** Stop reading files after this long; the result says so. Default 10 minutes, or FORTIS_SCAN_BUDGET_SECONDS. */
+  budgetMs?: number;
 };
 
 export type ScanResult = {
@@ -32,6 +36,11 @@ export type ScanResult = {
   notes: string[];
   /** Checks that couldn't see everything, so a full scan must not close their findings. */
   incompleteChecks: 'dependencies'[];
+  /**
+   * Why the file checks didn't see the whole repository (sparse checkout, time budget). A full scan
+   * with a reason is uploaded as a partial one, so it can't close findings in files it never read.
+   */
+  partial: string[];
 };
 
 /** Source files the fintech code rules can't read yet. */
@@ -46,25 +55,59 @@ const UNCOVERED_LANGUAGES: [RegExp, string][] = [
   [/\.(swift|dart)$/i, 'mobile'],
 ];
 
-function uncoveredLanguagesNote(files: SourceFile[]): string | null {
-  const counts = UNCOVERED_LANGUAGES.map(([re, label]) => ({ label, n: files.filter((f) => re.test(f.path) && !TEST_PATH.test(f.path)).length })).filter((c) => c.n);
+function uncoveredLanguagesNote(paths: string[]): string | null {
+  const counts = UNCOVERED_LANGUAGES.map(([re, label]) => ({ label, n: paths.filter((p) => re.test(p) && !TEST_PATH.test(p)).length })).filter((c) => c.n);
   if (!counts.length) return null;
   const list = counts.sort((a, b) => b.n - a.n).map((c) => `${c.n} ${c.label}`).join(', ');
   return `Fintech code rules cover JavaScript and TypeScript only so far: ${list} files had secrets and dependency checks only.`;
 }
 
+const DEFAULT_BUDGET_MS = (Number(process.env.FORTIS_SCAN_BUDGET_SECONDS) || 600) * 1000;
+
 export async function runScan(opts: ScanOptions): Promise<ScanResult> {
   const started = Date.now();
   const notes: string[] = [];
-  const paths = opts.scope === 'changed' ? changedFiles(opts.root, opts.pushed) : allFiles(opts.root);
-  const files = loadFiles(opts.root, paths, opts.ignore);
+  const partial: string[] = [];
+  const checkout = checkoutInfo(opts.root);
+  const everything = () => allFiles(opts.root, { submodules: opts.submodules });
+  const paths = opts.scope === 'changed' ? changedFiles(opts.root, opts.pushed) : everything();
+  const keep = makeFilter(opts.ignore);
+  const candidates = paths.filter(keep);
   const rules = rulesFor(opts.packs);
-  // Repository-wide facts (e.g. idempotency middleware defined elsewhere), even for pre-push scans.
-  const ctx = buildContext(opts.scope === 'full' ? files : loadFiles(opts.root, allFiles(opts.root), opts.ignore));
 
+  if (checkout.submodules.length && !opts.submodules) {
+    const list = checkout.submodules.slice(0, 3).join(', ') + (checkout.submodules.length > 3 ? ` and ${checkout.submodules.length - 3} more` : '');
+    notes.push(`Skipped ${checkout.submodules.length === 1 ? 'a submodule' : `${checkout.submodules.length} submodules`} (${list}): they are separate repositories. Scan them on their own, or pass --submodules.`);
+  }
+  if (checkout.notCheckedOut && opts.scope === 'full') {
+    notes.push(`Sparse checkout: ${checkout.notCheckedOut} tracked files aren't on disk and weren't scanned. Findings in them stay open.`);
+    partial.push('sparse checkout');
+  }
+  if (checkout.shallow && opts.scope === 'changed' && !opts.pushed?.length) {
+    notes.push('This is a shallow clone, so the comparison with the main branch may cover too little. In CI, fetch more history (actions/checkout: fetch-depth: 0) or run a full scan with --ci.');
+  }
+
+  // Repository-wide facts (e.g. idempotency middleware defined elsewhere), even for pre-push
+  // scans. Read first, one file at a time, from JavaScript and TypeScript only.
+  const ctxPaths = (opts.scope === 'full' ? candidates : everything().filter(keep)).filter((p) => JS_TS.test(p) && !TEST_PATH.test(p));
+  const ctx = buildContextFrom(opts.root, ctxPaths);
+
+  // Files are read and checked one at a time, so memory stays flat however big the repository is.
+  const budget = opts.budgetMs ?? DEFAULT_BUDGET_MS;
   const seen = new Set<string>();
   const detections: Detection[] = [];
-  for (const file of files) {
+  let filesScanned = 0;
+  let read = 0;
+  for (const path of candidates) {
+    if (Date.now() - started > budget) {
+      notes.push(`Stopped after ${Math.round(budget / 1000)} seconds: checked ${read} of ${candidates.length} files. Raise the limit with FORTIS_SCAN_BUDGET_SECONDS, or ignore generated folders in .fortis.json.`);
+      partial.push('time budget');
+      break;
+    }
+    read++;
+    const file = readSource(opts.root, path);
+    if (!file) continue;
+    filesScanned++;
     for (const rule of rules) {
       if (!rule.appliesTo.test(file.path)) continue;
       if (rule.skipTests && TEST_PATH.test(file.path)) continue;
@@ -103,12 +146,22 @@ export async function runScan(opts: ScanOptions): Promise<ScanResult> {
   }
 
   if (opts.scope === 'full') {
-    const uncovered = uncoveredLanguagesNote(files);
+    const uncovered = uncoveredLanguagesNote(candidates);
     if (uncovered) notes.push(uncovered);
   }
 
   detections.sort((a, b) => SEVERITY_RANK[b.severity] - SEVERITY_RANK[a.severity] || a.file.localeCompare(b.file) || a.line - b.line);
-  return { detections, filesScanned: files.length, packagesChecked, durationMs: Date.now() - started, notes, incompleteChecks };
+  return { detections, filesScanned, packagesChecked, durationMs: Date.now() - started, notes, incompleteChecks, partial };
+}
+
+/** buildContext over files read one at a time. */
+function buildContextFrom(root: string, paths: string[]): ProjectContext {
+  const idempotencyHelpers = new Set<string>();
+  for (const p of paths) {
+    const f = readSource(root, p);
+    if (f) for (const name of buildContext([f]).idempotencyHelpers) idempotencyHelpers.add(name);
+  }
+  return { idempotencyHelpers };
 }
 
 /** Names exported from modules that implement idempotency keys, e.g. withPaymentGuard. */

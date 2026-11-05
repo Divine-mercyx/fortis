@@ -4,7 +4,8 @@ import { dirname, join } from 'node:path';
 import { DOCKER_IMAGE, RELEASE_REPO, VERSION } from './env';
 
 export type CiProvider = 'github' | 'gitlab';
-type CiOptions = { stagingBranch: string; target?: string; maven?: boolean };
+/** history: also search git history for secrets, which needs the full history (fetch-depth: 0). */
+type CiOptions = { stagingBranch: string; target?: string; maven?: boolean; history?: boolean };
 
 const pkg = `fortis-watchdog@${VERSION}`;
 const SBOM_PATH = 'target/bom.json';
@@ -56,10 +57,12 @@ jobs:
     name: Code scan
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4${opts.history ? `
+        with:
+          fetch-depth: 0 # --history reads every commit; a scan without it needs only the latest` : ''}
 ${opts.maven ? sbomSteps : ''}${installStep}
       - name: Fortis scan
-        run: fortis scan --ci --sarif fortis.sarif${opts.maven ? ` --sbom ${SBOM_PATH}` : ''}
+        run: fortis scan --ci --sarif fortis.sarif${opts.maven ? ` --sbom ${SBOM_PATH}` : ''}${opts.history ? ' --history' : ''}
         env:
           FORTIS_KEY: \${{ secrets.FORTIS_KEY }}
       - name: Upload to GitHub code scanning
@@ -103,9 +106,11 @@ export function gitlabJobs(opts: CiOptions) {
 ${mavenNote}
 fortis-scan:
   stage: test
-  image: ${DOCKER_IMAGE}:${VERSION}
+  image: ${DOCKER_IMAGE}:${VERSION}${opts.history ? `
+  variables:
+    GIT_DEPTH: 0 # --history reads every commit` : ''}
   script:
-    - fortis scan --ci --sarif fortis.sarif
+    - fortis scan --ci --sarif fortis.sarif${opts.history ? ' --history' : ''}
   artifacts:
     when: always
     paths: [fortis.sarif]
@@ -132,7 +137,7 @@ fortis-staging:
 `;
 }
 
-export function writeCi(root: string, provider: CiProvider, opts: { stagingBranch: string; target?: string; force?: boolean }) {
+export function writeCi(root: string, provider: CiProvider, opts: { stagingBranch: string; target?: string; force?: boolean; history?: boolean }) {
   const rel = provider === 'github' ? '.github/workflows/fortis.yml' : 'fortis.gitlab-ci.yml';
   const abs = join(root, rel);
   if (existsSync(abs) && !opts.force) return { path: rel, written: false };
