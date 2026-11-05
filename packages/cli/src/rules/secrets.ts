@@ -1,7 +1,7 @@
 import type { Detection, FileRule, SourceFile } from './types';
 import { isIgnored } from './types';
 
-const ANY_TEXT = /\.(c|m)?(j|t)sx?$|\.(json|ya?ml|env|toml|ini|properties|py|rb|php|go|java|kt|kts|groovy|scala|swift|dart|rs|vue|svelte|jsp|cshtml|cs|sh|sql|tf|tfvars|txt|md|xml|gradle|cfg|conf|pem|key|plist)$|(^|\/)id_(rsa|ecdsa|ed25519)$|(^|\/)\.env(\.|$)|(^|\/)Dockerfile$/i;
+const ANY_TEXT = /\.(c|m)?(j|t)sx?$|\.(json|ya?ml|env|toml|ini|properties|py|rb|php|go|java|kt|kts|groovy|scala|swift|dart|rs|vue|svelte|jsp|cshtml|cs|sh|sql|tf|tfvars|txt|md|xml|gradle|cfg|conf|pem|key|plist)$|(^|\/)id_(rsa|ecdsa|ed25519)$|(^|\/)\.env(\.|$)|(^|\/)\.(npmrc|yarnrc|pypirc|netrc)$|(^|\/)Dockerfile$/i;
 
 /** `name` turns the matched key into a more specific title (e.g. which provider it belongs to). */
 type Pattern = { re: RegExp; ruleId: string; severity: Detection['severity']; title: string; name?: (key: string) => string };
@@ -37,6 +37,27 @@ const GENERIC: Pattern[] = [
   { re: /\bxox[abprs]-[A-Za-z0-9-]{10,}\b/g, ruleId: 'SEC-GEN-001', severity: 'high', title: 'Slack token in code' },
   { re: /\bAIza[0-9A-Za-z_-]{35}\b/g, ruleId: 'SEC-GEN-001', severity: 'high', title: 'Google API key in code' },
   { re: /\bfts_[A-Za-z0-9]{40}\b/g, ruleId: 'SEC-GEN-001', severity: 'high', title: 'Fortis CLI key in code' },
+  // Messaging and email
+  { re: /\bSG\.[A-Za-z0-9_-]{22}\.[A-Za-z0-9_-]{43}\b/g, ruleId: 'SEC-GEN-001', severity: 'high', title: 'SendGrid API key in code' },
+  { re: /\bkey-[0-9a-f]{32}\b/g, ruleId: 'SEC-GEN-001', severity: 'high', title: 'Mailgun API key in code' },
+  { re: /\bre_[A-Za-z0-9]{8}_[A-Za-z0-9]{24,}\b/g, ruleId: 'SEC-GEN-001', severity: 'high', title: 'Resend API key in code' },
+  { re: /https:\/\/hooks\.slack\.com\/(?:services|workflows|triggers)\/T[A-Z0-9]{6,}\/[A-Z0-9]{6,}\/[A-Za-z0-9]{16,}/g, ruleId: 'SEC-GEN-001', severity: 'high', title: 'Slack webhook URL in code' },
+  { re: /https:\/\/(?:canary\.|ptb\.)?discord(?:app)?\.com\/api\/webhooks\/\d{15,}\/[A-Za-z0-9_-]{40,}/g, ruleId: 'SEC-GEN-001', severity: 'high', title: 'Discord webhook URL in code' },
+  { re: /\b\d{8,10}:AA[A-Za-z0-9_-]{33}\b/g, ruleId: 'SEC-GEN-001', severity: 'high', title: 'Telegram bot token in code' },
+  // AI providers
+  { re: /\bsk-ant-(?:api|admin)\d{2}-[A-Za-z0-9_-]{80,}/g, ruleId: 'SEC-GEN-001', severity: 'high', title: 'Anthropic API key in code' },
+  { re: /\bsk-(?:proj|svcacct|admin)-[A-Za-z0-9_-]{40,}|\bsk-[A-Za-z0-9]{20}T3BlbkFJ[A-Za-z0-9]{20}\b/g, ruleId: 'SEC-GEN-001', severity: 'high', title: 'OpenAI API key in code' },
+  // Cloud and hosting
+  { re: /DefaultEndpointsProtocol=https?;AccountName=[^;\s]+;AccountKey=[A-Za-z0-9+/]{40,}={0,2}/g, ruleId: 'SEC-GEN-001', severity: 'critical', title: 'Azure Storage account key in code' },
+  { re: /\bdo[opr]_v1_[a-f0-9]{64}\b/g, ruleId: 'SEC-GEN-001', severity: 'high', title: 'DigitalOcean token in code' },
+  { re: /\brnd_[A-Za-z0-9]{24,}\b/g, ruleId: 'SEC-GEN-001', severity: 'high', title: 'Render API key in code' },
+  // Package registries: a leaked publish token lets anyone release a malicious version of your package
+  { re: /\bnpm_[A-Za-z0-9]{36}\b/g, ruleId: 'SEC-GEN-001', severity: 'high', title: 'npm access token in code' },
+  { re: /\bpypi-AgEIcHlwaS5vcmc[A-Za-z0-9_-]{50,}/g, ruleId: 'SEC-GEN-001', severity: 'high', title: 'PyPI API token in code' },
+  { re: /\brubygems_[a-f0-9]{48}\b/g, ruleId: 'SEC-GEN-001', severity: 'high', title: 'RubyGems API key in code' },
+  { re: /\boy2[a-z0-9]{43}\b/g, ruleId: 'SEC-GEN-001', severity: 'high', title: 'NuGet API key in code' },
+  { re: /\bdckr_pat_[A-Za-z0-9_-]{27,}/g, ruleId: 'SEC-GEN-001', severity: 'high', title: 'Docker Hub access token in code' },
+  { re: /\/\/[^\s:]+\/:_authToken=(?!\$\{)[A-Za-z0-9_.-]{20,}/g, ruleId: 'SEC-GEN-001', severity: 'high', title: 'Registry auth token in .npmrc' },
 ];
 
 /** `password = "…"`, `apiKey: '…'`, PHP's `'api_key' => '…'`, Go's `token := "…"` and similar, when the value looks random. */
@@ -65,6 +86,23 @@ const ADO = /(?:^|[;"'\s])(?:server|data source|host|address)\s*=\s*([^;'"`]+);[
 /** Hosts that only exist on a developer's machine or inside docker-compose. */
 const LOCAL_HOST = /^(?:localhost|127\.\d+\.\d+\.\d+|0\.0\.0\.0|\[?::1\]?|host\.docker\.internal|db|database|postgres(?:ql)?|mysql|mariadb|mongo(?:db)?|redis|rabbitmq|mssql|sqlserver)$/i;
 const PASSWORD_PLACEHOLDER = /^(?:\$\{.*\}|\$\(.*\)|\$[A-Za-z_]\w*|%\w+%?|<[^>]*>|\{\{.*\}\}|\*+|x+|\.\.\.|password|pass|pwd|secret|changeme|your[_-]?password)$/i;
+
+/** A JWT whose payload grants a privileged role (Supabase's service_role key bypasses row-level security). */
+const JWT = /\beyJ[A-Za-z0-9_-]{10,}\.(eyJ[A-Za-z0-9_-]{10,})\.[A-Za-z0-9_-]{20,}/g;
+function privilegedJwt(text: string): string | null {
+  for (const m of text.matchAll(JWT)) {
+    try {
+      const payload = JSON.parse(Buffer.from(m[1]!.replace(/-/g, '+').replace(/_/g, '/'), 'base64').toString('utf8')) as { role?: string; iss?: string };
+      if (payload.role === 'service_role') return 'Supabase service_role key in code';
+    } catch {
+      /* not a JWT we can read */
+    }
+  }
+  return null;
+}
+
+/** A Twilio auth token: 32 hex characters assigned to a Twilio setting. (The AC… account SID is an identifier, not a secret.) */
+const TWILIO_TOKEN = /\b[\w.-]*twilio[\w.-]*["']?\s*(?:=>|:=|[:=])\s*["'`]?([0-9a-f]{32})\b/i;
 
 function connectionSecret(text: string): string | null {
   const real = (host: string, pass: string) => {
@@ -103,6 +141,10 @@ function scan(file: SourceFile, patterns: Pattern[]): Detection[] {
     for (const p of patterns) {
       p.re.lastIndex = 0;
       if (p.re.test(text) && !isIgnored(file, i + 1)) {
+        if (p.title === 'Private key in code' && /"type"\s*:\s*"service_account"/.test(file.text)) {
+          out.push({ ruleId: p.ruleId, severity: 'critical', title: 'Google Cloud service account key in code', file: file.path, line: i + 1, snippet: text.trim() });
+          continue;
+        }
         if (p.title === 'Google API key in code' && FIREBASE_CONFIG.test(file.path)) {
           out.push({ ruleId: p.ruleId, severity: 'low', title: 'Firebase client key (public by design: restrict it to your app in Google Cloud)', file: file.path, line: i + 1, snippet: text.trim() });
           continue;
@@ -150,6 +192,13 @@ export const genericSecretRule: FileRule = {
       const conn = connectionSecret(text);
       if (conn && !isIgnored(file, i + 1) && !out.some((d) => d.line === i + 1)) {
         out.push({ ruleId: 'SEC-GEN-001', severity: 'critical', title: conn, file: file.path, line: i + 1, snippet: text.trim() });
+      }
+      const jwt = privilegedJwt(text);
+      if (jwt && !isIgnored(file, i + 1) && !out.some((d) => d.line === i + 1)) {
+        out.push({ ruleId: 'SEC-GEN-001', severity: 'critical', title: jwt, file: file.path, line: i + 1, snippet: text.trim() });
+      }
+      if (TWILIO_TOKEN.test(text) && !READS_ENV.test(text) && !isIgnored(file, i + 1) && !out.some((d) => d.line === i + 1)) {
+        out.push({ ruleId: 'SEC-GEN-001', severity: 'high', title: 'Twilio auth token in code', file: file.path, line: i + 1, snippet: text.trim() });
       }
       if (READS_ENV.test(text)) return;
       ASSIGNMENT.lastIndex = 0;

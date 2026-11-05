@@ -32,6 +32,31 @@ const FAKES: Record<string, string> = {
   AWS_KEY: `AKIA${rand(16, 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567')}`,
   GH_TOKEN: `ghp_${rand(36)}`,
   GENERIC: rand(28),
+  SENDGRID: ['SG', rand(22), rand(43)].join('.'),
+  MAILGUN: `key-${rand(32, '0123456789abcdef')}`,
+  RESEND: ['re', rand(8), rand(24)].join('_'),
+  SLACK_HOOK: ['https://hooks.slack.com/services', `T${rand(9, 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789')}`, `B${rand(9, 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789')}`, rand(24)].join('/'),
+  DISCORD_HOOK: ['https://discord.com/api/webhooks', rand(18, '0123456789'), rand(68)].join('/'),
+  TELEGRAM: `${rand(10, '0123456789')}:AA${rand(33)}`,
+  OPENAI: ['sk', 'proj', rand(48)].join('-'),
+  ANTHROPIC: ['sk', 'ant', 'api03', rand(93)].join('-'),
+  AZURE_STORAGE: `DefaultEndpointsProtocol=https;AccountName=acme;AccountKey=${rand(86)}==`,
+  DIGITALOCEAN: ['dop', 'v1', rand(64, '0123456789abcdef')].join('_'),
+  NPM: ['npm', rand(36)].join('_'),
+  PYPI: `pypi-${['AgEI', 'cHlwaS5vcmc'].join('')}${rand(60)}`,
+  RUBYGEMS: ['rubygems', rand(48, '0123456789abcdef')].join('_'),
+  DOCKER: ['dckr', 'pat', rand(27)].join('_'),
+  TWILIO_TOKEN: rand(32, '0123456789abcdef'),
+  SUPABASE_SERVICE: [
+    Buffer.from('{"alg":"HS256","typ":"JWT"}').toString('base64url'),
+    Buffer.from(JSON.stringify({ iss: 'supabase', role: 'service_role' })).toString('base64url'),
+    rand(43),
+  ].join('.'),
+  SUPABASE_ANON: [
+    Buffer.from('{"alg":"HS256","typ":"JWT"}').toString('base64url'),
+    Buffer.from(JSON.stringify({ iss: 'supabase', role: 'anon' })).toString('base64url'),
+    rand(43),
+  ].join('.'),
 };
 
 type Score = { tp: number; fp: number; fn: number; misses: string[]; falsePositives: string[] };

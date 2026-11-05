@@ -39,6 +39,16 @@ const PATTERNS: { re: RegExp; keepPrefix: (m: string) => number; when?: (m: stri
   { re: /\bAKIA[0-9A-Z]{16}\b/g, keepPrefix: () => 4 },
   { re: /\bgh[pousr]_[A-Za-z0-9]{30,}\b/g, keepPrefix: () => 4 },
   { re: /\bxox[abprs]-[A-Za-z0-9-]{10,}\b/g, keepPrefix: () => 5 },
+  // SaaS and registry tokens with fixed prefixes (the long-random rule below misses short or dotted ones)
+  { re: /\bSG\.[A-Za-z0-9_-]{16,}\.[A-Za-z0-9_-]{16,}/g, keepPrefix: () => 3 },
+  { re: /(?<=hooks\.slack\.com\/(?:services|workflows|triggers)\/T[A-Z0-9]+\/[A-Z0-9]+\/)[A-Za-z0-9]{8,}/g, keepPrefix: () => 0 },
+  { re: /(?<=discord(?:app)?\.com\/api\/webhooks\/\d+\/)[A-Za-z0-9_-]{16,}/g, keepPrefix: () => 0 },
+  { re: /\b\d{8,10}:AA[A-Za-z0-9_-]{20,}/g, keepPrefix: () => 0 },
+  { re: /\bsk-(?:ant-[a-z]+\d{2}|proj|svcacct|admin)-[A-Za-z0-9_-]{16,}/g, keepPrefix: (m) => m.lastIndexOf('-') + 1 },
+  { re: /(?<=AccountKey=)[A-Za-z0-9+/]{16,}={0,2}/g, keepPrefix: () => 0 },
+  { re: /\b(?:key-[0-9a-f]{16,}|re_[A-Za-z0-9]{6,}_[A-Za-z0-9]{8,}|do[opr]_v1_[a-f0-9]{16,}|rnd_[A-Za-z0-9]{16,}|npm_[A-Za-z0-9]{16,}|pypi-[A-Za-z0-9_-]{16,}|rubygems_[a-f0-9]{16,}|dckr_pat_[A-Za-z0-9_-]{16,})/g, keepPrefix: (m) => Math.max(m.indexOf('_'), m.indexOf('-')) + 1 },
+  { re: /(?<=:_authToken=)(?!\$\{)[A-Za-z0-9_.-]{12,}/g, keepPrefix: () => 0 },
+  { re: /\beyJ[A-Za-z0-9_-]{10,}\.eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{16,}/g, keepPrefix: () => 3 },
   // Fortis keys themselves
   { re: /\bfts_[A-Za-z0-9]{20,}\b/g, keepPrefix: () => 4 },
   // Long opaque strings (hex/base64-ish) that look like secrets; URL paths and words are left alone

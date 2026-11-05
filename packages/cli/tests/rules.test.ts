@@ -195,3 +195,38 @@ describe('FX-SEC-001 names the right provider', () => {
     expect(maskSnippet(`k = '${['rk', 'live', stripeBody].join('_')}'`)).toContain('rk_live_••••••••');
   });
 });
+
+describe('SEC-GEN-001 SaaS, cloud and registry tokens', () => {
+  const b64 = (o: object) => Buffer.from(JSON.stringify(o)).toString('base64url');
+  const jwt = (role: string) => [b64({ alg: 'HS256', typ: 'JWT' }), b64({ iss: 'supabase', role }), 'Zm9vYmFyYmF6cXV4cXV1eGNvcmdl'].join('.');
+  const SENDGRID = ['SG', 'aB3dE6gH9jK2mN5pQ8sT1v', 'wX4zA7cD0fG3iJ6lM9oP2rS5uV8xY1aB4dE7gH0jK3m'].join('.');
+  const SLACK = ['https://hooks.slack.com/services', 'T01ABCDEF', 'B02GHIJKL', 'aB3dE6gH9jK2mN5pQ8sT1vW4'].join('/');
+  const ANTHROPIC = ['sk', 'ant', 'api03', 'aB3dE6gH9jK2mN5pQ8sT1vW4yZ7bC0eF3hI6kL9nO2qR5tU8wX1zA4cD7fG0iJ3lM6oP9rS2uV5xY8aB1dE4gH7jK0mN3'].join('-');
+
+  it('names the provider of each token', () => {
+    const titles = run(genericSecretRule, 'src/notify.ts', [`const a = '${SENDGRID}';`, `const b = '${SLACK}';`, `const c = '${ANTHROPIC}';`].join('\n')).map((d) => d.title);
+    expect(titles).toEqual(['SendGrid API key in code', 'Slack webhook URL in code', 'Anthropic API key in code']);
+  });
+
+  it('flags a Supabase service_role key as critical but not the public anon key', () => {
+    const d = run(genericSecretRule, 'src/db.ts', `const admin = '${jwt('service_role')}';\nconst anon = '${jwt('anon')}';`);
+    expect(d.map((x) => [x.line, x.severity, x.title])).toEqual([[1, 'critical', 'Supabase service_role key in code']]);
+  });
+
+  it('flags a Twilio auth token but not the account SID or an env read', () => {
+    const src = [`TWILIO_AUTH_TOKEN=${'0a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d'}`, `TWILIO_ACCOUNT_SID=AC${'0'.repeat(32)}`, 'const t = process.env.TWILIO_AUTH_TOKEN;'].join('\n');
+    expect(run(genericSecretRule, '.env', src).map((d) => [d.line, d.title])).toEqual([[1, 'Twilio auth token in code']]);
+  });
+
+  it('calls a PEM inside a service-account JSON a Google Cloud key', () => {
+    const src = `{\n  "type": "service_account",\n  "private_key": "-----BEGIN PRIVATE KEY-----\\nMIIE\\n"\n}`; // fortis-ignore: test input
+    expect(run(genericSecretRule, 'deploy/sa.json', src).map((d) => [d.line, d.severity, d.title])).toEqual([[3, 'critical', 'Google Cloud service account key in code']]);
+  });
+
+  it('masks the secret part of each token', () => {
+    expect(maskSnippet(`const a = '${SENDGRID}';`)).not.toContain(SENDGRID.slice(3, 20));
+    expect(maskSnippet(`const b = '${SLACK}';`)).not.toContain('aB3dE6gH9jK2mN5pQ8sT1vW4');
+    expect(maskSnippet(`const c = '${ANTHROPIC}';`)).not.toContain(ANTHROPIC.slice(20, 40));
+    expect(maskSnippet(`const k = '${jwt('service_role')}';`)).not.toContain(b64({ iss: 'supabase', role: 'service_role' }));
+  });
+});
