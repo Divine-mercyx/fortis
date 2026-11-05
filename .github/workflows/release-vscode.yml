@@ -1,0 +1,70 @@
+name: Release VS Code extension
+
+# Publishes the extension when a tag like vscode-v0.1.0 is pushed. See packages/vscode/PUBLISHING.md.
+# A store without its secret (VSCE_PAT, OVSX_PAT) is skipped, so a fork can dry-run the rest.
+
+on:
+  push:
+    tags: ['vscode-v*']
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    strategy:
+      fail-fast: true
+      matrix:
+        os: [ubuntu-24.04, macos-15, windows-2025]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter fortis-security test
+      - run: pnpm --filter fortis-security package
+      - name: Run the extension in VS Code
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" = Linux ]; then xvfb-run -a pnpm --filter fortis-security test:editor; else pnpm --filter fortis-security test:editor; fi
+
+  publish:
+    needs: test
+    runs-on: ubuntu-24.04
+    env:
+      VSCE_PAT: ${{ secrets.VSCE_PAT }}
+      OVSX_PAT: ${{ secrets.OVSX_PAT }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Check the tag matches the extension version
+        working-directory: packages/vscode
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          if [ "vscode-v$VERSION" != "$GITHUB_REF_NAME" ]; then
+            echo "Tag $GITHUB_REF_NAME does not match extension version $VERSION"; exit 1
+          fi
+      - run: pnpm --filter fortis-security package
+      - uses: actions/upload-artifact@v6
+        with:
+          name: fortis-security-vsix
+          path: packages/vscode/fortis-security.vsix
+          if-no-files-found: error
+      - name: Publish to the VS Code Marketplace
+        if: env.VSCE_PAT != ''
+        working-directory: packages/vscode
+        run: pnpm exec vsce publish --packagePath fortis-security.vsix --no-dependencies
+      - name: Publish to Open VSX
+        if: env.OVSX_PAT != ''
+        working-directory: packages/vscode
+        run: pnpm exec ovsx publish fortis-security.vsix --pat "$OVSX_PAT"

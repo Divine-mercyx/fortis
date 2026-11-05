@@ -205,6 +205,35 @@ jobs:
           done
           echo "identical: $(wc -l < fingerprints-ubuntu-24.04.txt) fingerprints"
 
+  # The extension in a real VS Code, from the same .vsix that would be published.
+  vscode:
+    name: VS Code extension · ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-15, windows-2025]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter fortis-security package
+      - name: Run the extension in VS Code
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" = Linux ]; then xvfb-run -a pnpm --filter fortis-security test:editor; else pnpm --filter fortis-security test:editor; fi
+      - uses: actions/upload-artifact@v6
+        if: matrix.os == 'ubuntu-24.04'
+        with:
+          name: fortis-security-vsix
+          path: packages/vscode/fortis-security.vsix
+          if-no-files-found: error
+
   large-repo:
     runs-on: ubuntu-24.04
     name: 100,000-file scan under 30 s

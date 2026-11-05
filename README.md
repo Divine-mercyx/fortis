@@ -11,6 +11,7 @@ The marketing site lives in a separate repo (`fortis-website`).
 apps/api         Backend API (Fastify, PostgreSQL, Drizzle)
 apps/web         Dashboard (Next.js), styled like fortis.dev
 packages/cli     The CLI (npm: fortis-watchdog, command: fortis)
+packages/vscode  The VS Code extension, also for Cursor and VSCodium
 packages/shared  Plans, rule catalogue, masking and request schemas shared by every app
 ```
 

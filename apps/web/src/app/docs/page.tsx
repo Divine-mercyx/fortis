@@ -582,6 +582,15 @@ export default function DocsPage() {
           </ul>
         </Section>
 
+        <Section id="vscode" title="VS Code, Cursor and VSCodium">
+          <p>The Fortis Security extension scans each file when you save it and shows findings as problems at the right line. Hover for why a finding matters and how to fix it.</p>
+          <ul className="doc-list">
+            <li><b>Quick fixes:</b> ignore a line with a reason, open a dependency&apos;s advisory, or copy its upgrade command.</li>
+            <li><b>The CLI:</b> it uses the version in your project or on your PATH, or else the one it comes with.</li>
+            <li><b>Privacy:</b> the extension never uploads findings, and its results are masked like every other output. To sync, use your git hook or CI as usual.</li>
+          </ul>
+        </Section>
+
         <Section id="ignoring" title="Ignoring a finding">
           <p>When you have reviewed a line and it is safe, add a comment on it or on the line above:</p>
           <Block lang="ts" code={`const key = loadFromVault('paystack'); // fortis-ignore\n\n// fortis-ignore-next-line: staff-only route, checked by requirePermission\nconst loan = await Loan.findById(req.params.id);`} />
