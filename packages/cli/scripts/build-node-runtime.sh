@@ -22,8 +22,25 @@ actual=$(python3 -c "import hashlib,sys;print(hashlib.sha256(open('node.tar.xz',
 tar -xJf node.tar.xz
 cd "node-v$NODE_VERSION"
 
+EXTRA=()
+case "$(uname -s)-$(uname -m)" in
+  Linux-*)
+    # Node exports every symbol for native addons with -rdynamic, which the CLI has no use for. That keeps
+    # all its code alive. macOS's linker already drops unused code, which is why it was 15 MB smaller.
+    export CFLAGS="-ffunction-sections -fdata-sections"
+    export CXXFLAGS="-ffunction-sections -fdata-sections"
+    export LDFLAGS="-Wl,--gc-sections -Wl,--exclude-libs,ALL"
+    EXTRA+=(--without-node-code-cache)
+    ;;
+  Darwin-x86_64)
+    # With chained fixups, adding the CLI to the binary breaks its thread-locals on Intel Macs:
+    # dyld says "unsupported thread-local, larger than 4GB".
+    export LDFLAGS="-Wl,-no_fixup_chains"
+    ;;
+esac
+
 # small-icu: English only, instead of about 30 MB of data for every language.
-./configure \
+./configure "${EXTRA[@]}" \
   --with-intl=small-icu \
   --without-npm \
   --without-corepack \
