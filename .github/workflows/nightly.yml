@@ -1,0 +1,70 @@
+name: Nightly accuracy
+
+# Things that can change without a commit here: OSV's API, and how the rules behave on real code.
+# A scheduled failure opens one issue, and a later pass closes it. See scripts/report-nightly.mjs.
+
+on:
+  schedule:
+    - cron: '30 2 * * *'
+  workflow_dispatch:
+  # Checks changes to the corpus itself. These runs never touch issues.
+  pull_request:
+    paths:
+      - .github/workflows/nightly.yml
+      - packages/cli/bench/corpus.json
+      - packages/cli/bench/corpus.ts
+
+permissions:
+  contents: read
+
+jobs:
+  live-osv:
+    name: Live OSV tests
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter fortis-watchdog exec vitest run tests/osv-live.test.ts
+        env:
+          FORTIS_LIVE_OSV: '1'
+
+  corpus:
+    name: Real-world corpus
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    env:
+      FORTIS_CORPUS_DIR: ${{ github.workspace }}/.corpus
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - uses: actions/cache@v4
+        with:
+          path: .corpus
+          key: corpus-${{ hashFiles('packages/cli/bench/corpus.json') }}
+      - run: pnpm --filter fortis-watchdog corpus
+
+  report:
+    name: Open or close the issue
+    needs: [live-osv, corpus]
+    if: always() && github.event_name != 'pull_request'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@v5
+      - env:
+          GH_TOKEN: ${{ github.token }}
+          RESULT: ${{ (needs.live-osv.result == 'success' && needs.corpus.result == 'success') && 'success' || 'failure' }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: node packages/cli/scripts/report-nightly.mjs "$RESULT" "$RUN_URL"

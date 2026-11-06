@@ -137,7 +137,7 @@ export const otpRule: FileRule = {
     file.lines.forEach((text, i) => {
       const line = i + 1;
       if (isIgnored(file, line)) return;
-      if (/Math\.random\s*\(/.test(text) && /\b(otp|pin|token|code|passcode|verification)\b/i.test(window(file, line, 1, 1))) {
+      if (/Math\.random\s*\(/.test(text) && /\b(otp|pin|token|code|passcode|verification|verificationCode|otpCode|pinCode|smsCode|authCode|resetCode|resetToken)\b/i.test(window(file, line, 1, 1))) {
         out.push(hit(file, line, 'FX-OTP-001', 'high', 'OTP generated with Math.random'));
         return;
       }

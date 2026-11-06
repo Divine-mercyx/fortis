@@ -2,3 +2,4 @@ dist/
 dist-sea/
 out/
 bin/
+bench/candidates/
