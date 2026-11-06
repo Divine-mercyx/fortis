@@ -43,7 +43,7 @@ const STACKS: Record<StackId, { label: string; install: string; run: string; not
     label: 'Other languages (Go, Java, PHP…)',
     install: `curl -fsSL ${CLI_INSTALL_URL}/install.sh | sh`,
     run: CLI_COMMAND,
-    note: `A standalone binary: no Node.js needed. On Windows, in PowerShell: irm ${CLI_INSTALL_URL}/install.ps1 | iex. Secrets, dependencies, staging tests (ZAP) and access checks work for your language. The fintech code rules read JavaScript, TypeScript and Python so far, and the scan tells you which files they skipped.`,
+    note: `A standalone binary: no Node.js needed. On Windows, in PowerShell: irm ${CLI_INSTALL_URL}/install.ps1 | iex. Secrets, dependencies, staging tests (ZAP) and access checks work for your language. The fintech code rules read JavaScript, TypeScript, Python, Java and Kotlin so far, and the scan tells you which files they skipped.`,
   },
 };
 

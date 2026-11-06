@@ -28,7 +28,10 @@ export type ProjectContext = {
 export const emptyContext = (): ProjectContext => ({ idempotencyHelpers: new Set() });
 
 /** Test code, fixtures, mocks and generated migrations: fintech checks skip these (secret checks still run). */
-export const TEST_PATH = /(^|\/)(__tests__|__mocks__|tests?|spec|e2e|fixtures?|mocks?|migrations)\/|\.(test|spec|mock|mocks|fixture|stories)\.[cm]?[jt]sx?$|(^|\/)(test_[^/]*|[^/]*_test|conftest)\.py$/i;
+const TEST_PATTERN = /(^|\/)(__tests__|__mocks__|tests?|spec|e2e|fixtures?|mocks?|migrations)\/|\.(test|spec|mock|mocks|fixture|stories)\.[cm]?[jt]sx?$|(^|\/)(test_[^/]*|[^/]*_test|conftest)\.py$|(^|\/)[\w-]*integration-?tests?\//i;
+/** WalletTest.java is a test and Contest.java isn't, so this part has to match case. */
+const JVM_TEST_FILE = /[a-z0-9](?:Test|Tests|Spec|IT)\.(?:java|kt)$/;
+export const TEST_PATH = { test: (path: string) => TEST_PATTERN.test(path) || JVM_TEST_FILE.test(path) };
 
 export type FileRule = {
   id: string;

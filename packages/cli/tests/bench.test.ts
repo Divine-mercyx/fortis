@@ -16,4 +16,16 @@ describe('accuracy benchmark', () => {
       expect(recall(s)).toBeGreaterThanOrEqual(floors[id]!.recall - 1e-9);
     });
   }
+
+  for (const rule of ['FX-OWN-001', 'FX-HOOK-001', 'FX-TXN-001', 'FX-PII-002', 'FX-OTP-001', 'FX-IDEM-001']) {
+    for (const language of ['java', 'kt']) {
+      it(`${rule} on ${language} has 95% precision and 90% recall`, () => {
+        const s = scores[`${rule}:${language}`];
+        expect(s, `no ${language} cases for ${rule}`).toBeDefined();
+        expect(s!.tp + s!.fn).toBeGreaterThanOrEqual(5);
+        expect(precision(s!)).toBeGreaterThanOrEqual(0.95);
+        expect(recall(s!)).toBeGreaterThanOrEqual(0.9);
+      });
+    }
+  }
 });

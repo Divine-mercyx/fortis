@@ -71,7 +71,7 @@ const FAKES: Record<string, string> = {
 type Score = { tp: number; fp: number; fn: number; misses: string[]; falsePositives: string[] };
 
 /** Scored per language, so a strong JavaScript score can't hide a weak Python one. */
-const scoreKey = (ruleId: string, path: string) => (/\.py$/.test(path) ? `${ruleId}:py` : ruleId);
+const scoreKey = (ruleId: string, path: string) => (/\.py$/.test(path) ? `${ruleId}:py` : /\.java$/.test(path) ? `${ruleId}:java` : /\.kt$/.test(path) ? `${ruleId}:kt` : ruleId);
 
 export function runBench(): Record<string, Score> {
   const scores: Record<string, Score> = {};
