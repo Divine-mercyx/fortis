@@ -1,6 +1,7 @@
 // Builds a standalone `fortis` executable for this machine's OS and architecture: a copy of the
-// running Node with the CLI injected, as a Node single executable application. Users need no Node.
-// Release builds use Node 22 (.nvmrc), the version the tests run on.
+// Node with the CLI injected, as a Node single executable application. Users need no Node.
+// FORTIS_NODE_RUNTIME picks which Node: CI points it at the small build from build-node-runtime.sh.
+// Otherwise it's the running Node, so a local build works, at about twice the size.
 import { execFileSync } from 'node:child_process';
 import { chmodSync, copyFileSync, mkdirSync, statSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
@@ -13,6 +14,7 @@ const isWindows = process.platform === 'win32';
 const isMac = process.platform === 'darwin';
 const binary = join(out, isWindows ? 'fortis.exe' : 'fortis');
 const run = (cmd, args) => execFileSync(cmd, args, { cwd: cli, stdio: 'inherit' });
+const runtime = process.env.FORTIS_NODE_RUNTIME || process.execPath;
 
 mkdirSync(out, { recursive: true });
 run(process.execPath, ['build.mjs', '--sea']);
@@ -20,9 +22,10 @@ run(process.execPath, ['build.mjs', '--sea']);
 const blob = join(out, 'sea.blob');
 const config = join(out, 'sea-config.json');
 writeFileSync(config, JSON.stringify({ main: join(out, 'fortis.cjs'), output: blob, disableExperimentalSEAWarning: true }));
-run(process.execPath, ['--experimental-sea-config', config]);
+// The blob has to come from the same Node it's injected into.
+run(runtime, ['--experimental-sea-config', config]);
 
-copyFileSync(process.execPath, binary);
+copyFileSync(runtime, binary);
 chmodSync(binary, 0o755);
 if (isMac) run('codesign', ['--remove-signature', binary]);
 
