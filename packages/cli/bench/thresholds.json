@@ -1,5 +1,13 @@
 {
+  "FX-HOOK-001:cs": {
+    "precision": 1,
+    "recall": 1
+  },
   "FX-HOOK-001": {
+    "precision": 1,
+    "recall": 1
+  },
+  "FX-HOOK-001:go": {
     "precision": 1,
     "recall": 1
   },
@@ -11,7 +19,23 @@
     "precision": 1,
     "recall": 1
   },
+  "FX-IDEM-001:cs": {
+    "precision": 1,
+    "recall": 1
+  },
+  "FX-IDEM-001:go": {
+    "precision": 1,
+    "recall": 1
+  },
   "FX-IDEM-001:py": {
+    "precision": 1,
+    "recall": 1
+  },
+  "FX-OTP-001:cs": {
+    "precision": 1,
+    "recall": 1
+  },
+  "FX-OTP-001:go": {
     "precision": 1,
     "recall": 1
   },
@@ -27,7 +51,23 @@
     "precision": 1,
     "recall": 0.857
   },
+  "FX-OWN-001:cs": {
+    "precision": 1,
+    "recall": 1
+  },
+  "FX-OWN-001:go": {
+    "precision": 1,
+    "recall": 1
+  },
   "FX-OWN-001:py": {
+    "precision": 1,
+    "recall": 1
+  },
+  "FX-PII-002:cs": {
+    "precision": 1,
+    "recall": 1
+  },
+  "FX-PII-002:go": {
     "precision": 1,
     "recall": 1
   },
@@ -47,6 +87,14 @@
     "precision": 1,
     "recall": 1
   },
+  "FX-TXN-001:cs": {
+    "precision": 1,
+    "recall": 1
+  },
+  "FX-TXN-001:go": {
+    "precision": 1,
+    "recall": 1
+  },
   "FX-TXN-001": {
     "precision": 1,
     "recall": 1
@@ -56,6 +104,10 @@
     "recall": 1
   },
   "SEC-GEN-001": {
+    "precision": 1,
+    "recall": 1
+  },
+  "SEC-GEN-001:go": {
     "precision": 1,
     "recall": 1
   },
