@@ -20,6 +20,8 @@ export type RuleMeta = {
   fix: string;
   /** The fix in Python's terms, where `fix` is written for JavaScript. */
   fixPython?: string;
+  /** The fix in PHP's terms. */
+  fixPhp?: string;
 };
 
 /**
@@ -44,6 +46,7 @@ export const RULE_CATALOG: readonly RuleMeta[] = [
     summary: 'A transfer, wallet or account is loaded by ID without scoping it to the signed-in user.',
     fix: 'Filter the query by the signed-in user, for example { _id: id, ownerId: req.user.id }, and return 404 otherwise.',
     fixPython: 'Filter by the signed-in user, for example get_object_or_404(Wallet, pk=pk, user=request.user), or override get_queryset in Django REST.',
+    fixPhp: "Check a policy with $this->authorize('view', $wallet), or scope the query to the signed-in user: $request->user()->wallets()->findOrFail($id).",
   },
   {
     id: 'FX-HOOK-001',
@@ -53,6 +56,7 @@ export const RULE_CATALOG: readonly RuleMeta[] = [
     summary: 'A webhook credits value without verifying the provider signature header.',
     fix: "Verify the provider's HMAC signature (for example x-paystack-signature) against the raw body before acting.",
     fixPython: "Compute the HMAC of the raw body and compare it to the provider's signature header with hmac.compare_digest before acting.",
+    fixPhp: "Compute hash_hmac('sha512', $request->getContent(), $secret), and compare it to the provider's signature header with hash_equals before acting.",
   },
   {
     id: 'FX-TXN-001',
@@ -62,6 +66,7 @@ export const RULE_CATALOG: readonly RuleMeta[] = [
     summary: 'A debit or credit reads and writes a balance in separate steps, open to race conditions.',
     fix: 'Use a single atomic update or a database transaction with a row lock.',
     fixPython: 'Use update(balance=F("balance") - amount), or lock the row first with select_for_update() (with_for_update() in SQLAlchemy). transaction.atomic alone is not enough.',
+    fixPhp: "Use $wallet->decrement('balance', $amount), or lock the row with lockForUpdate() inside DB::transaction().",
   },
   {
     id: 'FX-PII-002',
@@ -87,6 +92,7 @@ export const RULE_CATALOG: readonly RuleMeta[] = [
     summary: 'An OTP is logged, returned in a response, generated with a predictable random function or has no attempt limit.',
     fix: 'Generate with crypto.randomInt, never log or return it, and limit attempts.',
     fixPython: 'Generate with secrets.randbelow, never log or return it, and limit attempts.',
+    fixPhp: "Generate with random_int(), never rand() or mt_rand(). Never log or return it, and limit attempts.",
   },
   {
     id: 'SEC-GEN-001',
@@ -123,8 +129,10 @@ export const RULE_CATALOG: readonly RuleMeta[] = [
 ];
 
 /** The fix for a finding, in the language of the file it's in. */
-export function fixFor(rule: Pick<RuleMeta, 'fix' | 'fixPython'>, file: string): string {
-  return /\.py$/i.test(file) && rule.fixPython ? rule.fixPython : rule.fix;
+export function fixFor(rule: Pick<RuleMeta, 'fix' | 'fixPython' | 'fixPhp'>, file: string): string {
+  if (/\.py$/i.test(file) && rule.fixPython) return rule.fixPython;
+  if (/\.php$/i.test(file) && rule.fixPhp) return rule.fixPhp;
+  return rule.fix;
 }
 
 export function findRule(id: string): RuleMeta | undefined {
