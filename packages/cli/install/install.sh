@@ -41,7 +41,7 @@ else
 fi
 ASSET="fortis-$OS-$ARCH.tar.gz"
 
-# Small files quietly; the binary with a progress bar (about 40 MB), so a slow line doesn't look
+# Small files quietly; the binary with a progress bar, so a slow line doesn't look
 # like a hang. Retries dropped connections, and gives up if nothing arrives for a minute.
 fetch() {
   if command -v curl >/dev/null 2>&1; then
@@ -60,7 +60,7 @@ fetch() {
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 
-echo "Downloading $ASSET (about 40 MB) ..."
+echo "Downloading $ASSET ..."
 fetch "$BASE/$ASSET" "$TMP/$ASSET" progress || fail "could not download $BASE/$ASSET (check your connection and run this again)"
 fetch "$BASE/SHA256SUMS" "$TMP/SHA256SUMS" || fail "could not download the checksums"
 

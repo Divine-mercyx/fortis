@@ -267,7 +267,9 @@ Then on npmjs.com: package → Settings → Trusted publishing → GitHub Action
 - uses this version's changelog section below as the release notes. Before tagging, change its heading from "(unreleased)" to the release date;
 - builds, tests and publishes the wheels to PyPI (TestPyPI on a fork). `packages/python/build_wheel.py` makes one by hand.
 
-To build a binary for your own machine, run `pnpm --filter fortis-watchdog build:binary`. The result goes in `dist-sea/`. A tag on a fork runs everything except npm, which makes a safe dry run; set `FORTIS_REPO` to install from it.
+Release binaries for macOS and Linux are made from a small Node, built by `scripts/build-node-runtime.sh` without the parts the CLI never uses. CI caches it, and fails if a binary goes over 60 MB or its download over 25 MB.
+
+To build a binary for your own machine, run `pnpm --filter fortis-watchdog build:binary`. It uses the Node you're running, so it's about twice the size of a release. Set `FORTIS_NODE_RUNTIME` to use another. The result goes in `dist-sea/`. A tag on a fork runs everything except npm, which makes a safe dry run; set `FORTIS_REPO` to install from it.
 
 Publishing a tarball by hand: `npm pack` rebuilds `dist/` first, so the packed CLI always reports
 the version in `package.json`. Publish it with `npm publish fortis-watchdog-<version>.tgz --tag beta`.
@@ -285,6 +287,7 @@ Keys are read from `FORTIS_KEY`, then from `~/.config/fortis/credentials.json` (
 ## Changelog
 
 **0.1.0-beta.12** (unreleased)
+- The macOS and Linux binaries are much smaller, because they use a Node without the parts the CLI never uses. Only English locale data is included.
 - Python is fully supported: `pip install fortis-watchdog`, the fintech rules for Django, Django REST, Flask and FastAPI, and dev packages told apart in uv and Poetry lockfiles.
 - `pip install` needs no Node, and the git hook finds the CLI in `.venv` or `venv` even when it isn't active, and through `uv run` and `poetry run`.
 - More secrets are caught in Python: real-looking defaults such as `os.getenv("KEY", "…")`, SQLAlchemy connection URLs, tokens in URLs, PyPI tokens and notebooks.
