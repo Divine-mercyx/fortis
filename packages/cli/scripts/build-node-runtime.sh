@@ -33,9 +33,10 @@ case "$(uname -s)-$(uname -m)" in
     EXTRA+=(--without-node-code-cache)
     ;;
   Darwin-x86_64)
-    # With chained fixups, adding the CLI to the binary breaks its thread-locals on Intel Macs:
-    # dyld says "unsupported thread-local, larger than 4GB".
-    export LDFLAGS="-Wl,-no_fixup_chains"
+    # Adding the CLI needs a new segment in the header, and Intel builds leave only 64 bytes free there.
+    # Without room, postject moves everything along but leaves __thread_bss behind, and the binary dies
+    # with dyld's "unsupported thread-local, larger than 4GB". Arm Macs get room from their larger pages.
+    export LDFLAGS="-Wl,-headerpad,0x1000"
     ;;
 esac
 
