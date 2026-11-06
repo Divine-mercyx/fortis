@@ -1,0 +1,122 @@
+{
+  "repos": [
+    {"repo": "stripe-samples/accept-a-payment", "commit": "1a57c3b2f5aaf4ecd8de59ab0b1c3c5638827625", "languages": ["JavaScript"], "minPackages": 1229, "findings": [
+    ]},
+    {"repo": "PaystackHQ/sample-charge-card-backend", "commit": "885122564655a546d6f2e36621266f90e4228ec4", "languages": ["JavaScript"], "findings": [
+    ]},
+    {"repo": "Flutterwave/Node-v3", "commit": "537f9f4455f922a879e4f088cf0f596621c3517c", "languages": ["JavaScript"], "minPackages": 163, "findings": [
+      {"rule": "SEC-GEN-001", "file": "documentation/payment-plan.md", "line": 118, "verdict": "false", "why": "Sample value in API documentation"},
+      {"rule": "SEC-GEN-001", "file": "documentation/payment-plan.md", "line": 129, "verdict": "false", "why": "Sample value in API documentation"},
+      {"rule": "SEC-GEN-001", "file": "documentation/payment-plan.md", "line": 140, "verdict": "false", "why": "Sample value in API documentation"},
+      {"rule": "SEC-GEN-001", "file": "documentation/payment-plan.md", "line": 151, "verdict": "false", "why": "Sample value in API documentation"},
+      {"rule": "SEC-GEN-001", "file": "documentation/payment-plan.md", "line": 162, "verdict": "false", "why": "Sample value in API documentation"},
+      {"rule": "SEC-GEN-001", "file": "documentation/payment-plan.md", "line": 173, "verdict": "false", "why": "Sample value in API documentation"},
+      {"rule": "SEC-GEN-001", "file": "documentation/payment-plan.md", "line": 184, "verdict": "false", "why": "Sample value in API documentation"},
+      {"rule": "SEC-GEN-001", "file": "documentation/payment-plan.md", "line": 195, "verdict": "false", "why": "Sample value in API documentation"},
+      {"rule": "SEC-GEN-001", "file": "documentation/payment-plan.md", "line": 206, "verdict": "false", "why": "Sample value in API documentation"},
+      {"rule": "SEC-GEN-001", "file": "documentation/payment-plan.md", "line": 253, "verdict": "false", "why": "Sample value in API documentation"},
+      {"rule": "SEC-GEN-001", "file": "documentation/payment-plan.md", "line": 295, "verdict": "false", "why": "Sample value in API documentation"},
+      {"rule": "SEC-GEN-001", "file": "documentation/payment-plan.md", "line": 339, "verdict": "false", "why": "Sample value in API documentation"},
+      {"rule": "SEC-GEN-001", "file": "documentation/payment-plan.md", "line": 58, "verdict": "false", "why": "Sample value in API documentation"},
+      {"rule": "SEC-GEN-001", "file": "documentation/tokenization.md", "line": 112, "verdict": "false", "why": "Sample value in API documentation"},
+      {"rule": "SEC-GEN-001", "file": "documentation/tokenization.md", "line": 164, "verdict": "false", "why": "Sample value in API documentation"},
+      {"rule": "SEC-GEN-001", "file": "documentation/tokenization.md", "line": 175, "verdict": "false", "why": "Sample value in API documentation"},
+      {"rule": "SEC-GEN-001", "file": "documentation/tokenization.md", "line": 30, "verdict": "false", "why": "Sample value in API documentation"},
+      {"rule": "SEC-GEN-001", "file": "documentation/tokenization.md", "line": 91, "verdict": "false", "why": "Sample value in API documentation"},
+      {"rule": "SEC-GEN-001", "file": "documentation/transactions.md", "line": 541, "verdict": "false", "why": "Sample value in API documentation"},
+      {"rule": "SEC-GEN-001", "file": "documentation/transactions.md", "line": 616, "verdict": "false", "why": "Sample value in API documentation"}
+    ]},
+    {"repo": "actualbudget/actual", "commit": "92865f32f307ec04e0556a8c2052819d49e8e204", "languages": ["TypeScript"], "minPackages": 2726, "findings": [
+      {"rule": "SEC-GEN-001", "file": "packages/sync-server/src/app-https-config.test.ts", "line": 10, "verdict": "true", "why": "A private key committed in a test"},
+      {"rule": "SEC-GEN-001", "file": "packages/sync-server/src/app-https-config.test.ts", "line": 15, "verdict": "true", "why": "A private key committed in a test"},
+      {"rule": "SEC-GEN-001", "file": "packages/sync-server/src/services/secrets-service.js", "line": 16, "verdict": "false", "why": "A setting's name, not a secret"},
+      {"rule": "SEC-GEN-001", "file": "packages/sync-server/src/services/secrets-service.js", "line": 21, "verdict": "false", "why": "A setting's name, not a secret"}
+    ]},
+    {"repo": "django-oscar/django-oscar", "commit": "a5ed3c9c17d4cf6ee18aa9795b493172416ab68b", "languages": ["Python"], "findings": [
+      {"rule": "SEC-GEN-001", "file": "sandbox/fixtures/auth.json", "line": 15, "verdict": "false", "why": "Password hash in a sample fixture"},
+      {"rule": "SEC-GEN-001", "file": "sandbox/fixtures/auth.json", "line": 33, "verdict": "false", "why": "Password hash in a sample fixture"},
+      {"rule": "SEC-GEN-001", "file": "sandbox/settings.py", "line": 120, "verdict": "true", "why": "Hard-coded default for Django's SECRET_KEY"},
+      {"rule": "SEC-GEN-001", "file": "src/oscar/test/testcases.py", "line": 35, "verdict": "false", "why": "Made-up password in a test helper"}
+    ]},
+    {"repo": "apache/fineract", "commit": "405c18dcabfc235325e71616e816290234eead87", "languages": ["Java"], "findings": [
+      {"rule": "SEC-GEN-001", "file": "integration-tests/src/test/java/org/apache/fineract/integrationtests/PasswordResetIntegrationTest.java", "line": 84, "verdict": "false", "why": "Made-up password in a test"},
+      {"rule": "SEC-GEN-001", "file": "twofactor-tests/src/test/java/org/apache/fineract/twofactortests/TwoFactorAuthenticationTest.java", "line": 61, "verdict": "false", "why": "An HTTP header's name"}
+    ]},
+    {"repo": "moov-io/ach", "commit": "ff3a0988df1f84421b069bc58ff9c1315ba3b448", "languages": ["Go"], "minPackages": 71, "findings": [
+    ]},
+    {"repo": "bagisto/bagisto", "commit": "678a43c804321a310dd41fd39deda78d316ac6f5", "languages": ["PHP"], "minPackages": 181, "findings": [
+      {"rule": "FX-OTP-001", "file": "public/build/assets/app-CAiCLEjY.js", "line": 1, "verdict": "false", "why": "Math.random in a minified third-party bundle"},
+      {"rule": "FX-OTP-001", "file": "public/themes/admin/default/build/assets/app-CG1OQxbP.js", "line": 41, "verdict": "false", "why": "Math.random in a minified third-party bundle"},
+      {"rule": "FX-OTP-001", "file": "public/themes/admin/default/build/assets/app-CG1OQxbP.js", "line": 75, "verdict": "false", "why": "Math.random in a minified third-party bundle"},
+      {"rule": "FX-OTP-001", "file": "public/themes/admin/default/build/assets/echo-CTK1Dwf6.js", "line": 1, "verdict": "false", "why": "Math.random in a minified third-party bundle"},
+      {"rule": "FX-OTP-001", "file": "public/themes/installer/default/build/assets/app-0V9mieov.js", "line": 53, "verdict": "false", "why": "Math.random in a minified third-party bundle"},
+      {"rule": "SEC-GEN-001", "file": "lang/ja/auth.php", "line": 17, "verdict": "false", "why": "A translated label"},
+      {"rule": "SEC-GEN-001", "file": "lang/ja/passwords.php", "line": 19, "verdict": "false", "why": "A translated label"},
+      {"rule": "SEC-GEN-001", "file": "packages/Webkul/Admin/src/Http/Controllers/User/AccountController.php", "line": 39, "verdict": "false", "why": "A validation rule, not a value"},
+      {"rule": "SEC-GEN-001", "file": "packages/Webkul/Admin/src/Http/Controllers/User/ResetPasswordController.php", "line": 49, "verdict": "false", "why": "A validation rule, not a value"},
+      {"rule": "SEC-GEN-001", "file": "packages/Webkul/Admin/src/Http/Requests/UserForm.php", "line": 31, "verdict": "false", "why": "A validation rule, not a value"},
+      {"rule": "SEC-GEN-001", "file": "packages/Webkul/Admin/src/Http/Requests/UserForm.php", "line": 32, "verdict": "false", "why": "A validation rule, not a value"},
+      {"rule": "SEC-GEN-001", "file": "packages/Webkul/Admin/src/Resources/lang/de/app.php", "line": 4948, "verdict": "false", "why": "A translated label"},
+      {"rule": "SEC-GEN-001", "file": "packages/Webkul/Admin/src/Resources/lang/de/app.php", "line": 4950, "verdict": "false", "why": "A translated label"},
+      {"rule": "SEC-GEN-001", "file": "packages/Webkul/Admin/src/Resources/lang/de/app.php", "line": 5527, "verdict": "false", "why": "A translated label"},
+      {"rule": "SEC-GEN-001", "file": "packages/Webkul/Admin/src/Resources/lang/ja/app.php", "line": 4945, "verdict": "false", "why": "A translated label"},
+      {"rule": "SEC-GEN-001", "file": "packages/Webkul/Admin/src/Resources/lang/ja/app.php", "line": 77, "verdict": "false", "why": "A translated label"},
+      {"rule": "SEC-GEN-001", "file": "packages/Webkul/Admin/src/Resources/lang/nl/app.php", "line": 4948, "verdict": "false", "why": "A translated label"},
+      {"rule": "SEC-GEN-001", "file": "packages/Webkul/Admin/src/Resources/lang/nl/app.php", "line": 4950, "verdict": "false", "why": "A translated label"},
+      {"rule": "SEC-GEN-001", "file": "packages/Webkul/Admin/tests/e2e-pw/pages/admin/configuration/customer/CaptchaConfigurationPage.ts", "line": 15, "verdict": "false", "why": "Made-up value or a form field's name in a test"},
+      {"rule": "SEC-GEN-001", "file": "packages/Webkul/Admin/tests/e2e-pw/pages/admin/configuration/magic-ai/MagicAiProvidersPage.ts", "line": 8, "verdict": "false", "why": "Made-up value or a form field's name in a test"},
+      {"rule": "SEC-GEN-001", "file": "packages/Webkul/Admin/tests/e2e-pw/tests/configuration/magic-ai/magic-ai.spec.ts", "line": 57, "verdict": "false", "why": "Made-up value or a form field's name in a test"},
+      {"rule": "SEC-GEN-001", "file": "packages/Webkul/Admin/tests/Feature/Configuration/Customer/CaptchaConfigurationTest.php", "line": 126, "verdict": "false", "why": "Made-up value or a form field's name in a test"},
+      {"rule": "SEC-GEN-001", "file": "packages/Webkul/Admin/tests/Feature/Configuration/Customer/CaptchaConfigurationTest.php", "line": 242, "verdict": "false", "why": "Made-up value or a form field's name in a test"},
+      {"rule": "SEC-GEN-001", "file": "packages/Webkul/Customer/src/Captcha.php", "line": 212, "verdict": "false", "why": "A validation rule, not a value"},
+      {"rule": "SEC-GEN-001", "file": "packages/Webkul/Installer/src/Http/Controllers/InstallerController.php", "line": 170, "verdict": "false", "why": "A validation rule, not a value"},
+      {"rule": "SEC-GEN-001", "file": "packages/Webkul/Shop/src/Http/Controllers/Customer/ResetPasswordController.php", "line": 58, "verdict": "false", "why": "A validation rule, not a value"},
+      {"rule": "SEC-GEN-001", "file": "packages/Webkul/Shop/src/Http/Requests/Customer/ProfileRequest.php", "line": 37, "verdict": "false", "why": "A validation rule, not a value"},
+      {"rule": "SEC-GEN-001", "file": "packages/Webkul/Shop/src/Http/Requests/Customer/ProfileRequest.php", "line": 38, "verdict": "false", "why": "A validation rule, not a value"},
+      {"rule": "SEC-GEN-001", "file": "packages/Webkul/Shop/src/Http/Requests/Customer/ProfileRequest.php", "line": 39, "verdict": "false", "why": "A validation rule, not a value"},
+      {"rule": "SEC-GEN-001", "file": "packages/Webkul/Shop/src/Http/Requests/Customer/RegistrationRequest.php", "line": 31, "verdict": "false", "why": "A validation rule, not a value"},
+      {"rule": "SEC-GEN-001", "file": "packages/Webkul/Shop/tests/Feature/Customers/LoginThrottleTest.php", "line": 31, "verdict": "false", "why": "Made-up value or a form field's name in a test"},
+      {"rule": "SEC-GEN-001", "file": "packages/Webkul/Shop/tests/Feature/Customers/LoginThrottleTest.php", "line": 68, "verdict": "false", "why": "Made-up value or a form field's name in a test"},
+      {"rule": "SEC-GEN-001", "file": "packages/Webkul/User/src/Database/Factories/AdminFactory.php", "line": 27, "verdict": "false", "why": "Password hash in a test factory"}
+    ]},
+    {"repo": "btcpayserver/btcpayserver", "commit": "c16fc29eb3aa5e9704257f3bb89ad173b95a2db6", "languages": ["C#"], "findings": [
+      {"rule": "SEC-GEN-001", "file": "BTCPayServer.Abstractions/Constants/AuthenticationSchemes.cs", "line": 13, "verdict": "false", "why": "A constant's name, not a secret"},
+      {"rule": "SEC-GEN-001", "file": "BTCPayServer.Tests/DatabaseTests.cs", "line": 310, "verdict": "false", "why": "Made-up value in a test"},
+      {"rule": "SEC-GEN-001", "file": "BTCPayServer.Tests/DatabaseTests.cs", "line": 314, "verdict": "false", "why": "Made-up value in a test"},
+      {"rule": "SEC-GEN-001", "file": "BTCPayServer.Tests/GreenfieldAPITests.cs", "line": 1741, "verdict": "false", "why": "Made-up value in a test"},
+      {"rule": "SEC-GEN-001", "file": "BTCPayServer/Hosting/BTCPayServerServices.cs", "line": 251, "verdict": "false", "why": "Placeholder in a help message"},
+      {"rule": "SEC-GEN-001", "file": "BTCPayServer/Hosting/BTCPayServerServices.cs", "line": 253, "verdict": "false", "why": "Placeholder in a help message"},
+      {"rule": "SEC-GEN-001", "file": "BTCPayServer/Hosting/BTCPayServerServices.cs", "line": 255, "verdict": "false", "why": "Placeholder in a help message"},
+      {"rule": "SEC-GEN-001", "file": "BTCPayServer/Models/InvoiceResponse.cs", "line": 232, "verdict": "false", "why": "Sample value in a comment"},
+      {"rule": "SEC-GEN-001", "file": "BTCPayServer/Plugins/Emails/ServerMailTriggers.cs", "line": 5, "verdict": "false", "why": "A constant's name, not a secret"}
+    ]},
+    {"repo": "maybe-finance/maybe", "commit": "77b5469832758d1cbee1a940f3012a1ae1c74cd3", "languages": ["Ruby"], "minPackages": 215, "findings": [
+      {"rule": "SEC-GEN-001", "file": "docs/hosting/docker.md", "line": 93, "verdict": "false", "why": "Placeholder in the documentation"},
+      {"rule": "SEC-GEN-001", "file": "docs/hosting/docker.md", "line": 94, "verdict": "false", "why": "Placeholder in the documentation"},
+      {"rule": "SEC-GEN-001", "file": "test/controllers/plaid_items_controller_test.rb", "line": 13, "verdict": "false", "why": "Made-up value in a test"},
+      {"rule": "SEC-GEN-001", "file": "test/controllers/plaid_items_controller_test.rb", "line": 16, "verdict": "false", "why": "Made-up value in a test"},
+      {"rule": "SEC-GEN-001", "file": "test/fixtures/users.yml", "line": 16, "verdict": "false", "why": "Password hash in a test fixture"},
+      {"rule": "SEC-GEN-001", "file": "test/fixtures/users.yml", "line": 26, "verdict": "false", "why": "Password hash in a test fixture"},
+      {"rule": "SEC-GEN-001", "file": "test/fixtures/users.yml", "line": 36, "verdict": "false", "why": "Password hash in a test fixture"},
+      {"rule": "SEC-GEN-001", "file": "test/fixtures/users.yml", "line": 46, "verdict": "false", "why": "Password hash in a test fixture"},
+      {"rule": "SEC-GEN-001", "file": "test/fixtures/users.yml", "line": 6, "verdict": "false", "why": "Password hash in a test fixture"},
+      {"rule": "SEC-GEN-001", "file": "test/vcr_cassettes/plaid/access_token.yml", "line": 119, "verdict": "true", "why": "A recorded Plaid sandbox token"},
+      {"rule": "SEC-GEN-001", "file": "test/vcr_cassettes/plaid/access_token.yml", "line": 59, "verdict": "true", "why": "A recorded Plaid sandbox token"},
+      {"rule": "SEC-GEN-001", "file": "test/vcr_cassettes/plaid/access_token.yml", "line": 68, "verdict": "true", "why": "A recorded Plaid sandbox token"},
+      {"rule": "SEC-GEN-001", "file": "test/vcr_cassettes/plaid/exchange_public_token.yml", "line": 119, "verdict": "true", "why": "A recorded Plaid sandbox token"},
+      {"rule": "SEC-GEN-001", "file": "test/vcr_cassettes/plaid/exchange_public_token.yml", "line": 59, "verdict": "true", "why": "A recorded Plaid sandbox token"},
+      {"rule": "SEC-GEN-001", "file": "test/vcr_cassettes/plaid/exchange_public_token.yml", "line": 68, "verdict": "true", "why": "A recorded Plaid sandbox token"},
+      {"rule": "SEC-GEN-001", "file": "test/vcr_cassettes/plaid/get_item_accounts.yml", "line": 8, "verdict": "true", "why": "A recorded Plaid sandbox token"},
+      {"rule": "SEC-GEN-001", "file": "test/vcr_cassettes/plaid/get_item_investments.yml", "line": 280, "verdict": "true", "why": "A recorded Plaid sandbox token"},
+      {"rule": "SEC-GEN-001", "file": "test/vcr_cassettes/plaid/get_item_investments.yml", "line": 8, "verdict": "true", "why": "A recorded Plaid sandbox token"},
+      {"rule": "SEC-GEN-001", "file": "test/vcr_cassettes/plaid/get_item_liabilities.yml", "line": 8, "verdict": "true", "why": "A recorded Plaid sandbox token"},
+      {"rule": "SEC-GEN-001", "file": "test/vcr_cassettes/plaid/get_item.yml", "line": 8, "verdict": "true", "why": "A recorded Plaid sandbox token"},
+      {"rule": "SEC-GEN-001", "file": "test/vcr_cassettes/plaid/link_token.yml", "line": 60, "verdict": "true", "why": "A recorded Plaid sandbox token"}
+    ]},
+    {"repo": "lightningdevkit/ldk-sample", "commit": "89000584f73452ebe0c58b295f8f89917117c8a2", "languages": ["Rust"], "minPackages": 108, "findings": [
+    ]},
+    {"repo": "flutter-stripe/flutter_stripe", "commit": "c3d84c91cf63b553907386f86bbe6e50a1bbe7c1", "languages": ["Dart"], "minPackages": 516, "findings": [
+      {"rule": "FX-OWN-001", "file": "example/server/src/index.ts", "line": 849, "verdict": "true", "why": "Payment options read by a customer ID from the request, with no ownership check"}
+    ]}
+  ]
+}
