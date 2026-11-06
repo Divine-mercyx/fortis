@@ -1,4 +1,12 @@
 {
+  "FX-AMT-001": {
+    "precision": 1,
+    "recall": 1
+  },
+  "FX-AMT-001:py": {
+    "precision": 1,
+    "recall": 1
+  },
   "FX-HOOK-001": {
     "precision": 1,
     "recall": 1
@@ -12,6 +20,14 @@
     "recall": 1
   },
   "FX-IDEM-001:py": {
+    "precision": 1,
+    "recall": 1
+  },
+  "FX-MONEY-001": {
+    "precision": 1,
+    "recall": 1
+  },
+  "FX-MONEY-001:py": {
     "precision": 1,
     "recall": 1
   },
@@ -31,11 +47,27 @@
     "precision": 1,
     "recall": 1
   },
+  "FX-PCI-001": {
+    "precision": 1,
+    "recall": 1
+  },
+  "FX-PCI-001:py": {
+    "precision": 1,
+    "recall": 1
+  },
   "FX-PII-002": {
     "precision": 1,
     "recall": 1
   },
   "FX-PII-002:py": {
+    "precision": 1,
+    "recall": 1
+  },
+  "FX-REF-001": {
+    "precision": 1,
+    "recall": 1
+  },
+  "FX-REF-001:py": {
     "precision": 1,
     "recall": 1
   },

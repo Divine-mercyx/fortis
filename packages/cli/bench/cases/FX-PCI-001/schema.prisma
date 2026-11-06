@@ -1,0 +1,8 @@
+model Card {
+  id          String @id
+  cardNumber  String // @hit
+  cvv         String // @hit
+  cardToken   String
+  last4       String
+  brand       String
+}
