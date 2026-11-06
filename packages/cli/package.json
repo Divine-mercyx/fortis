@@ -18,6 +18,7 @@
   },
   "files": [
     "dist",
+    "fortis.schema.json",
     "README.md",
     "LICENSE"
   ],
