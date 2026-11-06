@@ -40,7 +40,8 @@ case "$(uname -s)-$(uname -m)" in
 esac
 
 # small-icu: English only, instead of about 30 MB of data for every language.
-./configure "${EXTRA[@]}" \
+# The odd expansion is for macOS's bash 3.2, where an empty array counts as unset under set -u.
+./configure ${EXTRA[@]+"${EXTRA[@]}"} \
   --with-intl=small-icu \
   --without-npm \
   --without-corepack \
