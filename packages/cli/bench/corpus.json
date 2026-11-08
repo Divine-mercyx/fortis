@@ -45,11 +45,6 @@
     {"repo": "moov-io/ach", "commit": "ff3a0988df1f84421b069bc58ff9c1315ba3b448", "languages": ["Go"], "minPackages": 71, "findings": [
     ]},
     {"repo": "bagisto/bagisto", "commit": "678a43c804321a310dd41fd39deda78d316ac6f5", "languages": ["PHP"], "minPackages": 181, "findings": [
-      {"rule": "FX-OTP-001", "file": "public/build/assets/app-CAiCLEjY.js", "line": 1, "verdict": "false", "why": "Math.random in a minified third-party bundle"},
-      {"rule": "FX-OTP-001", "file": "public/themes/admin/default/build/assets/app-CG1OQxbP.js", "line": 41, "verdict": "false", "why": "Math.random in a minified third-party bundle"},
-      {"rule": "FX-OTP-001", "file": "public/themes/admin/default/build/assets/app-CG1OQxbP.js", "line": 75, "verdict": "false", "why": "Math.random in a minified third-party bundle"},
-      {"rule": "FX-OTP-001", "file": "public/themes/admin/default/build/assets/echo-CTK1Dwf6.js", "line": 1, "verdict": "false", "why": "Math.random in a minified third-party bundle"},
-      {"rule": "FX-OTP-001", "file": "public/themes/installer/default/build/assets/app-0V9mieov.js", "line": 53, "verdict": "false", "why": "Math.random in a minified third-party bundle"},
       {"rule": "SEC-GEN-001", "file": "lang/ja/auth.php", "line": 17, "verdict": "false", "why": "A translated label"},
       {"rule": "SEC-GEN-001", "file": "lang/ja/passwords.php", "line": 19, "verdict": "false", "why": "A translated label"},
       {"rule": "SEC-GEN-001", "file": "packages/Webkul/Admin/src/Http/Controllers/User/AccountController.php", "line": 39, "verdict": "false", "why": "A validation rule, not a value"},
