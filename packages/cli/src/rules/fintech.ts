@@ -34,7 +34,8 @@ const isStaffRoute = (route: RouteFact | undefined) =>
 
 /* ---------- FX-OWN-001: a money record loaded by an ID from the request, for anyone who asks ---------- */
 
-const REQUEST_INPUT = /\b(?:req|request|ctx|context|params)\b|@(?:Param|Query|Body)\b|\bdef\s+\w+\s*\(\s*(?:self\s*,\s*)?request\b|@\w+\.(?:route|get|post|put|patch|delete)\b|Depends\s*\(/;
+/** Code that takes something from a request: only files with this are worth parsing for the rule. */
+const REQUEST_INPUT = /\b(?:req|request|ctx|context)\s*\.\s*(?:params|query|body|param|req|request|GET|POST|data|kwargs)\b|@(?:Param|Query|Body)\s*\(|\{\s*params\s*\}|\bdef\s+\w+\s*\(\s*(?:self\s*,\s*)?request\b|@\w+\.(?:route|get|post|put|patch|delete|api_route)\s*\(|\bkwargs\b|\bqueryset\s*=/;
 
 export const ownershipRule: FileRule = {
   id: 'FX-OWN-001',
@@ -43,7 +44,7 @@ export const ownershipRule: FileRule = {
   skipTests: true,
   run(file, ctx) {
     if (!MONEY.test(file.text) && !MONEY.test(file.path)) return [];
-    if (!REQUEST_INPUT.test(file.text) && !/queryset/.test(file.text)) return [];
+    if (!REQUEST_INPUT.test(file.text)) return [];
     const facts = factsFor(file);
     const out: Detection[] = [];
     const flag = (line: number) => {
@@ -143,13 +144,17 @@ function anyCaller(facts: FileFacts, fn: FnFact, test: (caller: FnFact) => boole
   });
 }
 
+/** A balance assigned to, and a word for storage: without both, nothing here can race. */
+const BALANCE_WRITE = /balance\w*\s*(?:[-+]=|=(?!=))|balance\w*['"]?\s*:\s*[\w.]+balance\w*\s*[-+]/i;
+const STORAGE_WORD = /save|update|insert|query|execute|commit|flush|prisma|knex|repository|upsert/i;
+
 export const balanceRaceRule: FileRule = {
   id: 'FX-TXN-001',
   pack: 'fintech',
   appliesTo: SOURCE,
   skipTests: true,
   run(file) {
-    if (!/balance/i.test(file.text)) return [];
+    if (!BALANCE_WRITE.test(file.text) || !STORAGE_WORD.test(file.text)) return [];
     const facts = factsFor(file);
     const out: Detection[] = [];
     for (const update of facts.balances) {
@@ -215,13 +220,16 @@ export const otpRule: FileRule = {
 const READ_ONLY = new Set(['quote', 'quotes', 'fee', 'fees', 'preview', 'estimate', 'validate', 'verify', 'lookup', 'enquiry', 'resolve']);
 const IDEMPOTENT = /idempot|dedup|replay|paymentguard|withguard|payment_guard|with_guard/i;
 
+/** Something that defines a route that takes writes, in any of the frameworks the extractors know. */
+const WRITE_ROUTE = /\.(?:post|put|patch|all|use|route)\s*\(|@(?:Post|Put|Patch|All)\s*\(|@\w+\.(?:post|put|patch|route|api_route)\s*\(|def\s+(?:post|put|patch|create|update|partial_update)|@api_view|@action|request\.method|function\s+(?:POST|PUT|PATCH)|methods\s*=/;
+
 export const idempotencyRule: FileRule = {
   id: 'FX-IDEM-001',
   pack: 'fintech',
   appliesTo: SOURCE,
   skipTests: true,
   run(file, ctx) {
-    if (!MONEY_OUT.test(file.text) || /idempoten/i.test(file.text)) return [];
+    if (!MONEY_OUT.test(file.text) || !WRITE_ROUTE.test(file.text) || /idempoten/i.test(file.text)) return [];
     const facts = factsFor(file);
     const out: Detection[] = [];
     for (const route of facts.routes) {
