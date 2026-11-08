@@ -1,5 +1,7 @@
 import type { RulePack, Severity } from '@fortis/shared';
 
+import type { Project } from '../analysis/project';
+
 export type SourceFile = { path: string; text: string; lines: string[] };
 
 export type Detection = {
@@ -23,6 +25,8 @@ export type Detection = {
 export type ProjectContext = {
   /** Names of functions/middleware defined in files that implement idempotency keys. */
   idempotencyHelpers: Set<string>;
+  /** The repository's other files, for following calls into them. Without it, calls stop at the file. */
+  project?: Project;
 };
 
 export const emptyContext = (): ProjectContext => ({ idempotencyHelpers: new Set() });
@@ -44,6 +48,7 @@ export type FileRule = {
 };
 
 export const JS_TS = /\.(c|m)?(j|t)sx?$/i;
+export const PYTHON = /\.py$/i;
 const IGNORE_LINE = /fortis-ignore(?!-next-line)/;
 const IGNORE_NEXT = /fortis-ignore-next-line/;
 
