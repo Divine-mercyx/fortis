@@ -436,3 +436,23 @@ describe('first push of a new repository or branch', () => {
     expect(parsePushRefs(`(delete) ${'0'.repeat(40)} refs/heads/old ${'a'.repeat(40)}\n`)).toEqual([]);
   });
 });
+
+describe('following calls between files', () => {
+  const route = "import { getLoan } from '../services/loans';\nrouter.get('/loans/:id', async (req, res) => {\n  res.json(await getLoan(req.params.id));\n});\n";
+
+  it('reports a route whose service loads the record with no owner check', async () => {
+    const { dir } = repo({ 'src/routes/loans.ts': route, 'src/services/loans.ts': 'export const getLoan = (id: string) => Loan.findById(id);\n' });
+    const r = await runScan({ root: dir, scope: 'full', packs: ['fintech'], offline: true });
+    expect(r.detections.map((d) => `${d.ruleId}@${d.file}:${d.line}`)).toEqual(['FX-OWN-001@src/routes/loans.ts:3']);
+  });
+
+  it('trusts the service when it checks the owner', async () => {
+    const service = 'export const getLoan = (id: string) => Loan.findOne({ _id: id, userId: currentUser().id });\n';
+    const { dir, g } = repo({ 'src/routes/loans.ts': 'export {};\n', 'src/services/loans.ts': service });
+    expect((await runScan({ root: dir, scope: 'full', packs: ['fintech'], offline: true })).detections).toEqual([]);
+    writeFileSync(join(dir, 'src/routes/loans.ts'), route);
+    g('add', '-A');
+    g('commit', '-q', '-m', 'route');
+    expect((await runScan({ root: dir, scope: 'full', packs: ['fintech'], offline: true })).detections).toEqual([]);
+  });
+});

@@ -1,10 +1,12 @@
 import { SEVERITY_RANK, type RulePack, type Severity } from '@fortis/shared';
 
+import { takeAnalysisFailures } from './analysis/facts';
+import { languageOf, loadGrammars, type Language } from './analysis/parser';
+import { createProject } from './analysis/project';
 import { scanDependencies } from './rules/dependencies';
 import { rulesFor } from './rules/index';
 import { findLockfiles } from './rules/lockfiles';
-import { PYTHON } from './rules/python';
-import { JS_TS, TEST_PATH, type Detection, type ProjectContext, type SourceFile } from './rules/types';
+import { JS_TS, PYTHON, TEST_PATH, type Detection, type ProjectContext, type SourceFile } from './rules/types';
 import { makeFilter, readSource } from './files';
 import { allFiles, changedFiles, checkoutInfo, type PushedRef } from './git';
 
@@ -72,7 +74,7 @@ export async function runScan(opts: ScanOptions): Promise<ScanResult> {
   const paths = opts.scope === 'changed' ? changedFiles(opts.root, opts.pushed) : everything();
   const keep = makeFilter(opts.ignore);
   const candidates = paths.filter(keep);
-  const rules = rulesFor(opts.packs);
+  let rules = rulesFor(opts.packs);
 
   if (checkout.submodules.length && !opts.submodules) {
     const list = checkout.submodules.slice(0, 3).join(', ') + (checkout.submodules.length > 3 ? ` and ${checkout.submodules.length - 3} more` : '');
@@ -86,10 +88,22 @@ export async function runScan(opts: ScanOptions): Promise<ScanResult> {
     notes.push('This is a shallow clone, so the comparison with the main branch may cover too little. In CI, fetch more history (actions/checkout: fetch-depth: 0) or run a full scan with --ci.');
   }
 
-  // Repository-wide facts (e.g. idempotency middleware defined elsewhere), even for pre-push
-  // scans. Read first, one file at a time, from JavaScript and TypeScript only.
-  const ctxPaths = (opts.scope === 'full' ? candidates : everything().filter(keep)).filter((p) => JS_TS.test(p) && !TEST_PATH.test(p));
+  // Repository-wide facts (e.g. idempotency middleware defined elsewhere), even for pre-push scans.
+  const ctxPaths = (opts.scope === 'full' ? candidates : everything().filter(keep)).filter((p) => (JS_TS.test(p) || PYTHON.test(p)) && !TEST_PATH.test(p));
   const ctx = buildContextFrom(opts.root, ctxPaths);
+  ctx.project = createProject(ctxPaths, (p) => readSource(opts.root, p));
+
+  // Only the grammars this repository needs, and only if the rules that use them are running.
+  if (rules.some((r) => r.pack === 'fintech')) {
+    const languages = new Set(candidates.map(languageOf).filter((l): l is Language => l !== null));
+    try {
+      await loadGrammars(languages);
+    } catch (err) {
+      notes.push(`Fintech code rules couldn't start: ${(err as Error).message}`);
+      partial.push('code analysis unavailable');
+      rules = rules.filter((r) => r.pack !== 'fintech');
+    }
+  }
 
   // Files are read and checked one at a time, so memory stays flat however big the repository is.
   const budget = opts.budgetMs ?? DEFAULT_BUDGET_MS;
@@ -117,6 +131,12 @@ export async function runScan(opts: ScanOptions): Promise<ScanResult> {
         detections.push(d);
       }
     }
+  }
+
+  const unreadable = takeAnalysisFailures();
+  if (unreadable) {
+    notes.push(`Fintech code rules couldn't read ${unreadable} file${unreadable === 1 ? '' : 's'}, so findings in them stay open.`);
+    partial.push('code analysis incomplete');
   }
 
   let packagesChecked = 0;
