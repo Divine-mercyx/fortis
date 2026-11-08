@@ -2,9 +2,14 @@
 // With --sea it writes the CommonJS bundle that scripts/build-binary.mjs turns into an executable.
 import { build } from 'esbuild';
 import { readFileSync, chmodSync } from 'node:fs';
+import { createRequire } from 'node:module';
+import { brotliCompressSync } from 'node:zlib';
 
 const pkg = JSON.parse(readFileSync(new URL('./package.json', import.meta.url), 'utf8'));
 const sea = process.argv.includes('--sea');
+// Parser grammars travel inside the bundle, compressed, and each is only unpacked if a repository needs it.
+const wasm = (name) => brotliCompressSync(readFileSync(createRequire(import.meta.url).resolve(`@vscode/tree-sitter-wasm/wasm/${name}.wasm`))).toString('base64');
+const grammars = Object.fromEntries(['tree-sitter', 'tree-sitter-javascript', 'tree-sitter-typescript', 'tree-sitter-tsx', 'tree-sitter-python'].map((n) => [n, wasm(n)]));
 const outfile = sea ? 'dist-sea/fortis.cjs' : 'dist/fortis.js';
 await build({
   entryPoints: ['src/index.ts'],
@@ -13,10 +18,13 @@ await build({
   platform: 'node',
   target: sea ? 'node22' : 'node18',
   format: sea ? 'cjs' : 'esm',
-  // Bundled CommonJS packages (undici) require() Node built-ins; ESM output needs a require for that.
-  banner: sea ? {} : { js: "#!/usr/bin/env node\nimport { createRequire as __fortisRequire } from 'node:module';\nconst require = __fortisRequire(import.meta.url);" },
+  // Bundled CommonJS packages (undici, the parser) use require() and __filename, which ESM output has to provide.
+  banner: sea ? {} : { js: "#!/usr/bin/env node\nimport { createRequire as __fortisRequire } from 'node:module';\nconst require = __fortisRequire(import.meta.url);\nimport { fileURLToPath as __fortisPath } from 'node:url';\nconst __filename = __fortisPath(import.meta.url);" },
   define: {
     __FORTIS_VERSION__: JSON.stringify(pkg.version),
+    __FORTIS_GRAMMARS__: JSON.stringify(grammars),
+    // Only the run-from-source path uses import.meta, and the bundles never take it; CommonJS has none.
+    ...(sea ? { 'import.meta.url': '"file:///"' } : {}),
     __FORTIS_API_URL__: JSON.stringify(process.env.FORTIS_DEFAULT_API_URL ?? 'https://fortis-api-prqr.onrender.com'),
   },
   legalComments: 'none',
