@@ -1,187 +1,239 @@
-import type { Detection, FileRule, SourceFile } from './types';
-import { codeOnly, isIgnored, JS_TS, statementAt } from './types';
+import { callsIn, resolveCall, summarize, type Located } from '../analysis/project';
+import { factsFor, type CallFact, type FileFacts, type FnFact, type RouteFact } from '../analysis/facts';
+import { isKycName, isOtpName, MONEY, MONEY_OUT, namesSecretCode, wordsOf } from '../analysis/words';
+import type { Detection, FileRule, ProjectContext, SourceFile } from './types';
+import { isIgnored } from './types';
 
 /*
- * Fintech rules for JavaScript and TypeScript. They are deliberately conservative pattern
- * checks: each looks for a specific risky shape and the absence of the usual safeguard nearby.
- * Silence a reviewed line with `// fortis-ignore`.
+ * The fintech rules. Each is a check over the facts of a file (see analysis/facts.ts), so they work
+ * the same in every language that has an extractor, and they can follow simple calls across functions
+ * and files. Each rule first looks for its words in the text, because most files have nothing for
+ * it and parsing is the slow part. Silence a reviewed line with `// fortis-ignore` or `# fortis-ignore`.
  */
 
-const MONEY = /transfer|wallet|account|payout|withdraw|transaction|payment|balance|loan|disburse|beneficiar|card|invoice/i;
-const OWNER_SCOPE = /\b(user|owner|customer|account|wallet|merchant|tenant|org)_?id\b|req\.user|ctx\.state\.user|request\.user|session\.user|currentUser|res\.locals\.user/i;
+const SOURCE = /\.(?:[cm]?[jt]sx?|py)$/i;
 
-function window(file: SourceFile, line: number, before: number, after: number): string {
-  return file.lines.slice(Math.max(0, line - 1 - before), line + after).join('\n');
-}
+const hit = (file: SourceFile, line: number, ruleId: string, severity: Detection['severity'], title: string): Detection => ({
+  ruleId,
+  severity,
+  title,
+  file: file.path,
+  line,
+  snippet: (file.lines[line - 1] ?? '').trim(),
+});
 
-function hit(file: SourceFile, line: number, ruleId: string, severity: Detection['severity'], title: string): Detection {
-  return { ruleId, severity, title, file: file.path, line, snippet: (file.lines[line - 1] ?? '').trim() };
-}
+const here = (file: SourceFile, facts: FileFacts, fn: FnFact): Located => ({ file, facts, fn });
 
-/** FX-OWN-001: loading a money record by an ID from the request without scoping it to the signed-in user. */
+/** Names that say a function is a service that loads records: `loanService.get(id)`, `get_loan(id)`. */
+const SERVICE_NAME = /(?:service|svc|repo|repository|dao|store|manager|gateway|model)s?$/i;
+const LOADER_METHOD = /^(?:get|find|fetch|load|read|retrieve|show|delete|remove|update|cancel|approve)/i;
+
+/** Staff can see every customer's records. */
+const isStaffRoute = (route: RouteFact | undefined) =>
+  Boolean(route) && (/(?:^|\/)admin(?:\/|$)/i.test(route!.path) || route!.refs.some((r) => /admin|staff|superuser|back-?office/i.test(r)));
+
+/* ---------- FX-OWN-001: a money record loaded by an ID from the request, for anyone who asks ---------- */
+
+const REQUEST_INPUT = /\b(?:req|request|ctx|context|params)\b|@(?:Param|Query|Body)\b|\bdef\s+\w+\s*\(\s*(?:self\s*,\s*)?request\b|@\w+\.(?:route|get|post|put|patch|delete)\b|Depends\s*\(/;
+
 export const ownershipRule: FileRule = {
   id: 'FX-OWN-001',
   pack: 'fintech',
-  appliesTo: JS_TS,
+  appliesTo: SOURCE,
   skipTests: true,
-  run(file) {
+  run(file, ctx) {
+    if (!MONEY.test(file.text) && !MONEY.test(file.path)) return [];
+    if (!REQUEST_INPUT.test(file.text) && !/queryset/.test(file.text)) return [];
+    const facts = factsFor(file);
     const out: Detection[] = [];
-    const byId =
-      /\.(findById|findByPk|findUnique|findOne|findFirst|get|getById|load)\s*\(\s*(\{\s*(where\s*:\s*\{\s*)?(_?id|uuid)\s*:\s*)?(Number\(|parseInt\()?\s*(req|request|ctx\.request|ctx)\.(params|query|body)\b/;
-    const sqlById = /(select|update|delete)\b[^;]*\bwhere\b[^;]*\bid\s*=\s*(\$\d|\?|:id)/i;
-    // NestJS: `@Param('id') id` in the handler signature, then a lookup by that bare id.
-    const nestById = /\.(findUnique|findFirst|findOne|findById|findByPk|findOneBy)\s*\(\s*(\{\s*(where\s*:\s*)?\{\s*id\s*\}|\{\s*id\s*\}|id\s*[,)])/;
-    file.lines.forEach((text, i) => {
-      const line = i + 1;
-      const nest = nestById.test(text) && /@Param\(\s*["'`]id["'`]\s*\)\s*id\b/.test(window(file, line, 8, 0));
-      const looksById = nest || byId.test(text) || (sqlById.test(text) && /req\.(params|query|body)/.test(window(file, line, 2, 3)));
-      if (!looksById) return;
-      const context = window(file, line, 3, 6);
-      if (!MONEY.test(`${file.path}\n${context}`)) return;
-      if (OWNER_SCOPE.test(context.replace(text, '')) || OWNER_SCOPE.test(text.replace(/(req|request|ctx)\.(params|query|body)\.\w+/g, ''))) return;
-      if (isIgnored(file, line)) return;
-      out.push(hit(file, line, 'FX-OWN-001', 'critical', 'Money record read without an ownership check'));
-    });
+    const flag = (line: number) => {
+      if (!isIgnored(file, line) && !out.some((d) => d.line === line)) out.push(hit(file, line, 'FX-OWN-001', 'critical', 'Money record read without an ownership check'));
+    };
+    for (const e of facts.exposures) if (MONEY.test(`${file.path}\n${e.text}`)) flag(e.line);
+
+    for (const fn of facts.fns) {
+      const route = facts.routes.find((r) => r.fn === fn.id);
+      if (fn.staffOnly || isStaffRoute(route)) continue;
+      const reads = facts.reads.filter((r) => r.fn === fn.id && r.origins.includes('request'));
+      const calls = callsIn(facts, fn).filter((c) => c.args.some((a) => a.includes('request')));
+      if (!reads.length && !calls.length) continue;
+      const whole = summarize(ctx.project, here(file, facts, fn));
+      if (whole.ownerCheck) continue;
+      const about = `${file.path}\n${fn.name}\n${fn.owner ?? ''}\n${route?.path ?? ''}`;
+      for (const read of reads) {
+        if (!read.scoped && MONEY.test(`${about}\n${read.text}\n${file.lines[read.line - 1] ?? ''}`)) flag(read.line);
+      }
+      for (const call of calls) {
+        if (loadsRecordFor(ctx, file, facts, fn, call) && MONEY.test(`${about}\n${call.text}\n${file.lines[call.line - 1] ?? ''}`)) flag(call.line);
+      }
+    }
     return out;
   },
 };
 
-/** FX-HOOK-001: a payment-provider webhook handler that never verifies the signature. */
+/** Whether a call hands the request's ID to something that loads a record with it. */
+function loadsRecordFor(ctx: ProjectContext, file: SourceFile, facts: FileFacts, fn: FnFact, call: CallFact): boolean {
+  const target = resolveCall(ctx.project, file, facts, fn, call.chain);
+  if (target) {
+    const theirs = summarize(ctx.project, target);
+    return !theirs.ownerCheck && call.args.some((origins, i) => origins.includes('request') && theirs.readsById.has(i));
+  }
+  // Nothing to read, such as a service from a package or one injected by name: go by what it's called.
+  const method = call.chain[call.chain.length - 1]!;
+  const object = (call.chain[call.chain.length - 2] ?? '').replace(/\(\)$/, '');
+  if (object) return SERVICE_NAME.test(object) && LOADER_METHOD.test(method);
+  return LOADER_METHOD.test(method) && MONEY.test(method);
+}
+
+/* ---------- FX-HOOK-001: a payment webhook that never verifies the provider's signature ---------- */
+
+const PROVIDER = /paystack|flutterwave|monnify|interswitch|remita|opay|kora/i;
+const SIGNATURE_CHECKED =
+  /x-paystack-signature|HTTP_X_PAYSTACK_SIGNATURE|verif-hash|HTTP_VERIF_HASH|monnify-signature|HTTP_MONNIFY_SIGNATURE|createHmac|timingSafeEqual|compare_digest|hmac\.|verify_?\w*signature|validate_?\w*signature|is_valid_\w*signature|verify_webhook|verifyWebhook|webhook.*secret/i;
+
+/** Follows a route's handler and middleware, for a check that's in another file. */
+function reachable(ctx: ProjectContext, file: SourceFile, facts: FileFacts, route: RouteFact): { sources: string[]; names: Set<string> } {
+  const sources: string[] = [];
+  const names = new Set<string>(route.refs);
+  const follow = (located: Located | null) => {
+    if (!located) return;
+    const s = summarize(ctx.project, located);
+    sources.push(...s.sources);
+    for (const n of s.names) names.add(n);
+  };
+  if (route.fn !== null) follow(here(file, facts, facts.fns[route.fn]!));
+  for (const ref of route.refs) follow(resolveCall(ctx.project, file, facts, facts.fns[0]!, [ref]));
+  return { sources, names };
+}
+
 export const webhookSignatureRule: FileRule = {
   id: 'FX-HOOK-001',
   pack: 'fintech',
-  appliesTo: JS_TS,
+  appliesTo: SOURCE,
   skipTests: true,
-  run(file) {
-    const route = /\.(post|all|use)\s*\(\s*["'`][^"'`]*webhook[^"'`]*["'`]/i;
-    const provider = /paystack|flutterwave|monnify|interswitch|remita|opay|kora/i;
-    const verified = /x-paystack-signature|verif-hash|monnify-signature|createHmac|verifySignature|validateSignature|timingSafeEqual|webhook.*secret/i;
-    if (!provider.test(file.text) || verified.test(file.text)) return [];
+  run(file, ctx) {
+    if (!/webhook/i.test(file.text) || !PROVIDER.test(file.text) || SIGNATURE_CHECKED.test(file.text)) return [];
+    const facts = factsFor(file);
     const out: Detection[] = [];
-    file.lines.forEach((text, i) => {
-      if (route.test(text) && !isIgnored(file, i + 1)) {
-        out.push(hit(file, i + 1, 'FX-HOOK-001', 'critical', 'Payment webhook without a signature check'));
-      }
-    });
+    for (const route of facts.routes) {
+      const fn = route.fn === null ? undefined : facts.fns[route.fn];
+      if (!/webhook/i.test(`${route.path} ${fn?.name ?? ''} ${fn?.owner ?? ''}`)) continue;
+      // A method on a class view has to accept writes; a function view can take anything.
+      if (fn?.owner && !route.writes) continue;
+      if (!fn?.owner && route.fn === null && !route.writes) continue;
+      if (!route.writes && route.path) continue;
+      if (reachable(ctx, file, facts, route).sources.some((s) => SIGNATURE_CHECKED.test(s)) || isIgnored(file, route.line)) continue;
+      out.push(hit(file, route.line, 'FX-HOOK-001', 'critical', 'Payment webhook without a signature check'));
+    }
     return out;
   },
 };
 
-/** FX-TXN-001: a read-modify-write of a balance outside a transaction or atomic update. */
+/* ---------- FX-TXN-001: read a balance, change it, write it back, with no transaction or lock ---------- */
+
+/** What called this function, in this file. A helper's safety can come from its caller. */
+const callersOf = (facts: FileFacts, fn: FnFact) => (fn.name ? facts.calls.filter((c) => c.chain[c.chain.length - 1] === fn.name && c.fn !== fn.id && (c.chain.length === 1 || /^(?:this|self)$/.test(c.chain[c.chain.length - 2]!))) : []);
+
+function anyCaller(facts: FileFacts, fn: FnFact, test: (caller: FnFact) => boolean, depth = 3, seen = new Set<number>()): boolean {
+  if (depth === 0 || seen.has(fn.id)) return false;
+  seen.add(fn.id);
+  return callersOf(facts, fn).some((c) => {
+    const caller = facts.fns[c.fn]!;
+    return test(caller) || anyCaller(facts, caller, test, depth - 1, seen);
+  });
+}
+
 export const balanceRaceRule: FileRule = {
   id: 'FX-TXN-001',
   pack: 'fintech',
-  appliesTo: JS_TS,
+  appliesTo: SOURCE,
   skipTests: true,
   run(file) {
-    const rmw = /\b([\w.]*balance)\s*=\s*\(?\s*(Number\()?\s*[\w.]*balance\)?\s*[-+]|\b[\w.]*balance\s*[-+]=/i;
-    const safe = /\$transaction|\.transaction\s*\(|startTransaction|BEGIN\b|FOR UPDATE|\$inc\b|increment\s*\(|decrement\s*\(|sequelize\.transaction|knex\.transaction|withTransaction/i;
-    // Only a balance that is written back to storage can race.
-    const persists = /\.save\s*\(|\.(updateOne|updateMany|findOneAndUpdate|findByIdAndUpdate|upsert)\s*\(|\.update\s*\(\s*\{|\.query\s*\(|\.execute\s*\(|\binsert\s+into\b|\bupdate\s+\w+\s+set\b|\bprisma\.|\bknex\b|getRepository|\.repository\b/i;
-    // UI components compute running balances for display; they cannot race on stored money.
-    if (/\.[jt]sx$/i.test(file.path) || safe.test(file.text) || !persists.test(file.text)) return [];
+    if (!/balance/i.test(file.text)) return [];
+    const facts = factsFor(file);
     const out: Detection[] = [];
-    file.lines.forEach((text, i) => {
-      if (rmw.test(text) && !isIgnored(file, i + 1)) {
-        out.push(hit(file, i + 1, 'FX-TXN-001', 'high', 'Balance update outside a transaction'));
-      }
-    });
+    for (const update of facts.balances) {
+      const fn = facts.fns[update.fn]!;
+      if (fn.atomic || anyCaller(facts, fn, (c) => c.atomic)) continue;
+      // Only a balance that's written back to storage can race. A local has to be what's written.
+      if (update.local) {
+        if (!fn.persists || !new RegExp(`\\.\\w+\\s*\\([^;]*\\b${update.local}\\b`).test(fn.source.split('\n').slice(update.line - fn.line + 1).join('\n'))) continue;
+      } else if (!fn.persists && !anyCaller(facts, fn, (c) => c.persists)) continue;
+      if (!isIgnored(file, update.line)) out.push(hit(file, update.line, 'FX-TXN-001', 'high', 'Balance update outside a transaction'));
+    }
     return out;
   },
 };
 
-/** FX-PII-002: a BVN or NIN *value* written to logs (not just the word "BVN" in a message). */
-const LOG_CALL = /\b(console\.(log|info|warn|error|debug)|logger\.(log|info|warn|error|debug|trace)|log\.(info|warn|error|debug)|winston\.\w+|pino\.\w+)\s*\(/;
-const KYC_VALUE = /\b(bvn|nin|bvnNumber|ninNumber|bankVerificationNumber|nationalIdNumber|nationalId)\b/i;
-const MASKED = /mask|redact|last4|slice\(\s*-4\s*\)|\*\*\*/i;
-
-/** `Boolean(c.bvn)`, `!!c.bvn` and `c.bvn != null` log whether a value exists, not the value. */
-function withoutPresenceChecks(code: string): string {
-  return code
-    .replace(/\bBoolean\s*\([^)]*\)/g, ' ')
-    .replace(/!!\s*[\w.?]+/g, ' ')
-    .replace(/[\w.?]+\s*(?:!==?|===?)\s*(?:null|undefined)\b/g, ' ')
-    .replace(/[\w.?]+\.length\b/g, ' ')
-    // `p.bvn ? 'set' : 'missing'` (string branches are already blanked by codeOnly)
-    .replace(/[\w.?]+\s*\?(?![.?])(?=\s*[ :]*\s*(?:[ :]|$))/g, ' ');
-}
+/* ---------- FX-PII-002: a BVN or NIN value written to logs, not just the word "BVN" ---------- */
 
 export const kycLoggingRule: FileRule = {
   id: 'FX-PII-002',
   pack: 'fintech',
-  appliesTo: JS_TS,
+  appliesTo: SOURCE,
   skipTests: true,
   run(file) {
+    if (!/\b(?:bvn|nin|national|bank_?verification)|bvn|nin_?number/i.test(file.text)) return [];
     const out: Detection[] = [];
-    file.lines.forEach((text, i) => {
-      if (!LOG_CALL.test(text) || isIgnored(file, i + 1)) return;
-      const code = withoutPresenceChecks(codeOnly(statementAt(file, i + 1)));
-      if (KYC_VALUE.test(code) && !MASKED.test(code)) {
-        out.push(hit(file, i + 1, 'FX-PII-002', 'high', 'BVN or NIN written to logs'));
-      }
-    });
+    for (const log of factsFor(file).logs) {
+      if (log.values.some(isKycName) && !isIgnored(file, log.line)) out.push(hit(file, log.line, 'FX-PII-002', 'high', 'BVN or NIN written to logs'));
+    }
     return out;
   },
 };
 
-/** FX-OTP-001: OTPs generated with Math.random, an OTP value logged or returned, or a hard-coded OTP. */
-const OTP_VALUE = /\b(otp|otpCode|oneTimePassword|passcode|verificationCode)\b/i;
+/* ---------- FX-OTP-001: OTPs from a weak generator, written to logs, returned, or hard-coded ---------- */
+
+const OTP_WORDS = /otp|passcode|verification|one_?time|Math\.random|\brandom\./i;
+const OTP_IN_TEXT = /\botp\b[^\n]{0,20}?\b\d{4,8}\b/i;
 
 export const otpRule: FileRule = {
   id: 'FX-OTP-001',
   pack: 'fintech',
-  appliesTo: JS_TS,
+  appliesTo: SOURCE,
   skipTests: true,
   run(file) {
+    if (!OTP_WORDS.test(file.text)) return [];
+    const facts = factsFor(file);
     const out: Detection[] = [];
-    file.lines.forEach((text, i) => {
-      const line = i + 1;
-      if (isIgnored(file, line)) return;
-      if (/Math\.random\s*\(/.test(text) && /\b(otp|pin|token|code|passcode|verification)\b/i.test(window(file, line, 1, 1))) {
-        out.push(hit(file, line, 'FX-OTP-001', 'high', 'OTP generated with Math.random'));
-        return;
-      }
-      if (LOG_CALL.test(text)) {
-        const stmt = statementAt(file, line);
-        const code = codeOnly(stmt);
-        if (OTP_VALUE.test(code) && !MASKED.test(code)) {
-          out.push(hit(file, line, 'FX-OTP-001', 'high', 'OTP written to logs'));
-        } else if (/\botp\b[^\n]{0,20}?\b\d{4,8}\b/i.test(stmt)) {
-          out.push(hit(file, line, 'FX-OTP-001', 'medium', 'Hard-coded OTP in source'));
-        }
-        return;
-      }
-      if (/res\.(json|send)\s*\(/.test(text) && /\botp\s*[:,}]/i.test(codeOnly(statementAt(file, line)))) {
-        out.push(hit(file, line, 'FX-OTP-001', 'high', 'OTP returned in an API response'));
-      }
-    });
+    const add = (line: number, severity: Detection['severity'], title: string) => {
+      if (!isIgnored(file, line) && !out.some((d) => d.line === line)) out.push(hit(file, line, 'FX-OTP-001', severity, title));
+    };
+    for (const r of facts.randoms) if (namesSecretCode(r.context)) add(r.line, 'high', `OTP generated with ${r.api}`);
+    for (const log of facts.logs) {
+      if (log.values.some(isOtpName)) add(log.line, 'high', 'OTP written to logs');
+      else if (log.literals.some((l) => OTP_IN_TEXT.test(l))) add(log.line, 'medium', 'Hard-coded OTP in source');
+    }
+    for (const line of facts.fixedOtps) add(line, 'medium', 'Hard-coded OTP in source');
+    for (const r of facts.responses) if (r.fields.some((f) => /^otp$/i.test(f))) add(r.line, 'high', 'OTP returned in an API response');
     return out;
   },
 };
 
-/**
- * FX-IDEM-001: a money-out route with no idempotency protection: none in the file, no
- * guard-style middleware on the route, and no helper from an idempotency module.
- */
+/* ---------- FX-IDEM-001: a money-out route that a retry can replay ---------- */
+
+const READ_ONLY = new Set(['quote', 'quotes', 'fee', 'fees', 'preview', 'estimate', 'validate', 'verify', 'lookup', 'enquiry', 'resolve']);
+const IDEMPOTENT = /idempot|dedup|replay|paymentguard|withguard|payment_guard|with_guard/i;
+
 export const idempotencyRule: FileRule = {
   id: 'FX-IDEM-001',
   pack: 'fintech',
-  appliesTo: JS_TS,
+  appliesTo: SOURCE,
   skipTests: true,
   run(file, ctx) {
-    if (/idempoten/i.test(file.text)) return [];
-    // A route is registered with a path literal ("/..." or ":id"); outbound calls like axios.post(`${BASE}/...`) are not routes.
-    const route = /\.(post|put)\s*\(\s*["'`][/:][^"'`$]*(transfer|payout|withdraw|disburse|send-money|sendmoney)[^"'`]*["'`]/i;
+    if (!MONEY_OUT.test(file.text) || /idempoten/i.test(file.text)) return [];
+    const facts = factsFor(file);
     const out: Detection[] = [];
-    file.lines.forEach((text, i) => {
-      if (!route.test(text) || isIgnored(file, i + 1)) return;
-      // Read-only helpers next to money routes (fee quotes, name enquiry) move no money.
-      if (/["'`][^"'`]*\/(quote|quotes|fees?|preview|estimate|validate|verify|lookup|name-?enquiry|resolve)["'`/?]/i.test(text)) return;
-      const stmt = statementAt(file, i + 1).slice(0, 600);
-      const names = codeOnly(stmt).match(/[A-Za-z_$][\w$]*/g) ?? [];
-      if (names.some((n) => /idempot|dedup|replay|paymentguard|withguard/i.test(n) || ctx.idempotencyHelpers.has(n))) return;
-      out.push(hit(file, i + 1, 'FX-IDEM-001', 'high', 'Transfer without an idempotency key'));
-    });
+    for (const route of facts.routes) {
+      if (!route.writes) continue;
+      const fn = route.fn === null ? undefined : facts.fns[route.fn];
+      const names = `${route.path} ${fn?.name ?? ''} ${fn?.owner ?? ''} ${route.refs.join(' ')}`;
+      if (!MONEY_OUT.test(names) || wordsOf(names).some((w) => READ_ONLY.has(w))) continue;
+      const reached = reachable(ctx, file, facts, route);
+      const guarded = [...reached.names].some((n) => n !== fn?.name && (IDEMPOTENT.test(n) || ctx.idempotencyHelpers.has(n)));
+      if (guarded || reached.sources.some((s) => /idempoten/i.test(s)) || isIgnored(file, route.line)) continue;
+      out.push(hit(file, route.line, 'FX-IDEM-001', 'high', 'Transfer without an idempotency key'));
+    }
     return out;
   },
 };
