@@ -6,7 +6,7 @@
  *
  * Each shape the rule still flags is written to bench/candidates/<RULE>/. Review one, turn it into
  * realistic code if the shape alone isn't enough, and move it to bench/cases/<RULE>/ with no @hit.
- * The benchmark then fails until the rule stops flagging it.
+ * The benchmark then fails until the rule stops flagging it. Call loadGrammars before stillFlagged.
  */
 import { createHash } from 'node:crypto';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
@@ -15,6 +15,7 @@ import { fileURLToPath } from 'node:url';
 
 import type { FalsePositiveShape } from '@fortis/shared';
 
+import { ALL_LANGUAGES, loadGrammars } from '../src/analysis/parser';
 import { FILE_RULES } from '../src/rules/index';
 import { emptyContext } from '../src/rules/types';
 
@@ -50,6 +51,8 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
     process.exit(2);
   }
   const shapes = JSON.parse(readFileSync(input, 'utf8')) as FalsePositiveShape[];
+  // The fintech rules parse code, and parsing needs its grammars loaded first.
+  await loadGrammars(ALL_LANGUAGES);
   const { files, other } = candidates(shapes);
   for (const f of files) {
     const path = join(here, 'candidates', f.path);
