@@ -3,7 +3,7 @@ import { dirname, join, relative, resolve } from 'node:path';
 
 import type { Severity } from '@fortis/shared';
 
-import { cycloneDx, ecosystemOf, findLockfiles, goWorkModules, isDotnetProject, isPomXml, isRequirements, manifestFor, missingLockfiles, parseLockfile, type Ecosystem, type Locked } from './lockfiles';
+import {  cycloneDx, ecosystemOf, findLockfiles, goWorkModules, GRADLE_BUILD, isDotnetProject, isJvmBuild, isPomXml, isRequirements, manifestFor, missingLockfiles, parseLockfile, pomParent, SBT_BUILD, VERSION_CATALOG, type Ecosystem, type Locked  } from './lockfiles';
 import { fixedVersion, fixMessage, type OsvAffected } from './fix-version';
 import { globMatch } from './js-lockfiles';
 import { OsvCache } from './osv-cache';
@@ -89,6 +89,7 @@ export function readPackages(root: string, files: string[], opts: { sbom?: strin
   }
 
   let pomFiles = 0;
+  let jvmBuilds = 0;
   let pomChecked = 0;
   let pomSkipped = 0;
   let skippedElsewhere = 0;
@@ -97,19 +98,20 @@ export function readPackages(root: string, files: string[], opts: { sbom?: strin
   let dotnetProjects = 0;
   const lockfiles = chooseJsLockfiles(root, withGoWorkspaces(root, findLockfiles(files, opts.ignore), opts.ignore), notes);
   for (const file of lockfiles) {
-    if (sbomRead && (isPomXml(file) || isRequirements(file))) continue; // the SBOM already has this, and more
+    if (sbomRead && (isPomXml(file) || isRequirements(file) || isJvmBuild(file))) continue; // the SBOM already has this, and more
     const abs = join(root, file);
     if (!existsSync(abs)) continue;
     try {
       const manifestName = manifestFor(file);
       const manifestPath = manifestName ? join(root, dirname(file), manifestName) : nearestManifest(root, file);
-      const manifest = manifestPath && existsSync(manifestPath) ? readText(manifestPath) : undefined;
+      const manifest = manifestPath && existsSync(manifestPath) ? readText(manifestPath) : jvmContext(root, file);
       const workspaces = /(^|\/)yarn\.lock$/.test(file) && manifest ? workspaceManifests(join(root, dirname(file)), manifest) : undefined;
       const parsed = parseLockfile(file, readText(abs), manifest, workspaces);
       packages.push(...parsed.packages.map((p) => ({ ...p, file })));
       seen.add(ecosystemOf(file));
       if (parsed.directOnly && isDotnetProject(file)) dotnetProjects++;
-      else if (parsed.directOnly) directOnlyFiles++;
+      else if (parsed.directOnly && isRequirements(file)) directOnlyFiles++;
+      if (isJvmBuild(file)) jvmBuilds++;
       if (isPomXml(file)) {
         pomFiles++;
         pomChecked += parsed.packages.length;
@@ -127,9 +129,10 @@ export function readPackages(root: string, files: string[], opts: { sbom?: strin
   if (pomFiles) {
     const declared = pomChecked + pomSkipped;
     const versions = pomSkipped ? `; the other ${pomSkipped} get their version from a parent POM or BOM` : '';
-    notes.push(`pom.xml: checked ${pomChecked} of ${declared} declared dependencies${versions}. Transitive dependencies aren't covered: generate a CycloneDX SBOM and pass --sbom for those.`);
+    notes.push(`pom.xml: checked ${pomChecked} of ${declared} declared dependencies${versions}. Transitive dependencies aren't covered: generate a CycloneDX SBOM and pass --sbom for those (fortis ci init adds the step).`);
   }
   if (dotnetProjects) notes.push(`.NET project files: only the packages they reference were checked (${dotnetProjects === 1 ? '1 project' : `${dotnetProjects} projects`}). Transitive packages need the lockfile: set <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile> and commit packages.lock.json, or pass --sbom.`);
+  if (jvmBuilds) notes.push(`Gradle and sbt build files: only the dependencies they declare were checked. Transitive dependencies need a CycloneDX SBOM passed with --sbom (fortis ci init adds the step for Gradle), Gradle dependency locking, or sbt-dependency-lock's build.sbt.lock.`);
   if (directOnlyFiles) notes.push(`requirements files: only the packages they list were checked. Unless they're a full pip freeze, transitive dependencies aren't covered: use uv, Poetry or pip-compile, or pass --sbom for those.`);
   if (skippedElsewhere) {
     notes.push(`${skippedElsewhere === 1 ? '1 dependency has' : `${skippedElsewhere} dependencies have`} no exact version (pinned by range, unpinned, or installed from a branch, git, a tarball or a local folder), so ${skippedElsewhere === 1 ? "it wasn't" : "they weren't"} checked.`);
@@ -180,6 +183,57 @@ function withGoWorkspaces(root: string, files: string[], ignore?: string[]): str
   return out;
 }
 
+/**
+ * What a JVM build file needs from elsewhere in the repository: a pom.xml's parent POMs (found
+ * through <relativePath>), the build scripts that use a Gradle version catalog, or the build.sbt
+ * next to an sbt project folder.
+ */
+function jvmContext(root: string, file: string): string | undefined {
+  const read = (rel: string) => {
+    const abs = join(root, rel);
+    return existsSync(abs) ? readText(abs) : undefined;
+  };
+  if (isPomXml(file)) {
+    const parents: string[] = [];
+    let at = file;
+    let text = read(file);
+    for (let i = 0; i < 5 && text; i++) {
+      const parent = pomParent(text);
+      if (!parent) break;
+      const rel = relative(root, resolve(root, dirname(at), parent.relativePath.replace(/\/?$/, '').replace(/(?<!\.xml)$/, '/pom.xml'))).replace(/\\/g, '/');
+      const parentText = rel.startsWith('..') ? undefined : read(rel);
+      if (!parentText || (parent.artifactId && !parentText.includes(`<artifactId>${parent.artifactId}</artifactId>`))) break;
+      parents.push(parentText);
+      at = rel;
+      text = parentText;
+    }
+    return parents.length ? JSON.stringify(parents) : undefined;
+  }
+  if (VERSION_CATALOG.test(file)) {
+    // The project the catalog belongs to: the folder holding gradle/.
+    const project = dirname(dirname(file));
+    const builds: string[] = [];
+    const walk = (rel: string, depth: number) => {
+      if (depth > 3) return;
+      let names: string[] = [];
+      try {
+        names = readdirSync(join(root, rel));
+      } catch {
+        return;
+      }
+      for (const n of names) {
+        const child = rel === '.' ? n : `${rel}/${n}`;
+        if (GRADLE_BUILD.test(n)) builds.push(readText(join(root, child)));
+        else if (!/^(?:\.|build$|node_modules$)/.test(n) && statSync(join(root, child), { throwIfNoEntry: false })?.isDirectory()) walk(child, depth + 1);
+      }
+    };
+    walk(project, 0);
+    return builds.join('\n');
+  }
+  if (SBT_BUILD.test(file) && /(^|\/)project\/[^/]+\.scala$/.test(file)) return read(`${dirname(dirname(file))}/build.sbt`);
+  return undefined;
+}
+
 /** "fastapi, pydantic, uvicorn and 17 more" */
 function skippedList(names: string[], count: number): string {
   const shown = names.slice(0, 5);
@@ -197,6 +251,7 @@ export function pinAdvice(file: string): string {
   if (/^(package-lock\.json|npm-shrinkwrap\.json|pnpm-lock\.yaml|yarn\.lock)$/.test(base)) return 'Packages from git, a tarball or a local folder have no registry release to check: depend on a published version where you can.';
   if (/\.(?:cs|fs|vb)proj$|^packages\.config$|^Directory\.Packages\.props$/i.test(base)) return 'Floating versions and ranges (8.*, [1.0,2.0)) have no one version to check: use an exact version, or turn on the lockfile.';
   if (/^(go\.mod|modules\.txt)$/.test(base)) return 'A module replaced by a local folder has no release to check.';
+  if (/\.versions\.toml$|^build\.gradle(\.kts)?$|^build\.sbt$|\.scala$/.test(base)) return 'A version from a BOM or a variable, or a dynamic one (1.+), has no one version to check here: a CycloneDX SBOM, Gradle dependency locking or build.sbt.lock covers them.';
   return 'Pin exact versions in the lockfile to check them.';
 }
 

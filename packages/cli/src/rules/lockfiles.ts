@@ -76,37 +76,197 @@ function gradleLock(text: string): Parsed {
 const xmlTag = (block: string, tag: string) => new RegExp(`<${tag}>\\s*([^<]*?)\\s*</${tag}>`).exec(block)?.[1];
 
 /**
- * Direct dependencies only, read without running Maven: a version may come from this file's
- * properties or dependencyManagement. Anything from a parent POM or BOM is counted as skipped.
+ * Direct dependencies only, read without running Maven. A version may come from this file's
+ * properties or dependencyManagement, or from parent POMs in the same repository (`parents`, nearest
+ * first, as readPackages finds them through <relativePath>). A parent or imported BOM from outside the
+ * repository, such as spring-boot-starter-parent, sets the version of its own group's artifacts, which
+ * is how Spring Boot's starters get theirs.
  */
-function pomXml(text: string): Parsed {
-  const xml = text.replace(/<!--[\s\S]*?-->/g, '');
-  const props = new Map<string, string>();
-  for (const block of xml.match(/<properties>[\s\S]*?<\/properties>/g) ?? []) {
-    for (const m of block.matchAll(/<([\w.-]+)>\s*([^<]*?)\s*<\/\1>/g)) props.set(m[1]!, m[2]!);
+function pomXml(text: string, _file?: string, parentsJson?: string): Parsed {
+  const blank = (c: string) => c.replace(/[^\n]/g, ' ');
+  const strip = (x: string) => x.replace(/<!--[\s\S]*?-->/g, blank);
+  const xml = strip(text);
+  let parents: string[] = [];
+  try {
+    parents = parentsJson ? (JSON.parse(parentsJson) as string[]).map(strip) : [];
+  } catch {
+    parents = [];
   }
+  const outside = (x: string) => x.replace(/<(dependencies|dependencyManagement|build|reporting|profiles|modules|parent)>[\s\S]*?<\/\1>/g, '');
+  const parentBlock = /<parent>([\s\S]*?)<\/parent>/.exec(xml)?.[1] ?? '';
+  const props = new Map<string, string>();
+  // Outermost parent first, so nearer files win.
+  for (const x of [...parents].reverse().concat(xml)) {
+    for (const block of x.match(/<properties>[\s\S]*?<\/properties>/g) ?? []) {
+      for (const m of block.matchAll(/<([\w.-]+)>\s*([^<]*?)\s*<\/\1>/g)) props.set(m[1]!, m[2]!);
+    }
+  }
+  const own = outside(xml);
+  const version = xmlTag(own, 'version') ?? xmlTag(parentBlock, 'version');
+  const groupId = xmlTag(own, 'groupId') ?? xmlTag(parentBlock, 'groupId');
+  if (version) props.set('project.version', version).set('version', version).set('pom.version', version);
+  if (groupId) props.set('project.groupId', groupId);
+  if (xmlTag(parentBlock, 'version')) props.set('project.parent.version', xmlTag(parentBlock, 'version')!).set('parent.version', xmlTag(parentBlock, 'version')!);
   const resolve = (v: string | undefined) => v?.replace(/\$\{([^}]+)\}/g, (all, k: string) => props.get(k) ?? all);
 
   const managed = new Map<string, string>();
-  for (const block of xml.match(/<dependencyManagement>[\s\S]*?<\/dependencyManagement>/g) ?? []) {
-    for (const dep of block.match(/<dependency>[\s\S]*?<\/dependency>/g) ?? []) {
-      const version = resolve(xmlTag(dep, 'version'));
-      if (version) managed.set(`${xmlTag(dep, 'groupId')}:${xmlTag(dep, 'artifactId')}`, version);
+  /** Groups whose version a parent or BOM from outside the repository sets. */
+  const byGroup = new Map<string, string>();
+  for (const x of [...parents].reverse().concat(xml)) {
+    for (const block of x.match(/<dependencyManagement>[\s\S]*?<\/dependencyManagement>/g) ?? []) {
+      for (const dep of block.match(/<dependency>[\s\S]*?<\/dependency>/g) ?? []) {
+        const v = resolve(xmlTag(dep, 'version'));
+        const g = resolve(xmlTag(dep, 'groupId'));
+        if (!v) continue;
+        if (xmlTag(dep, 'scope') === 'import' && g) byGroup.set(g, v);
+        else managed.set(`${g}:${resolve(xmlTag(dep, 'artifactId'))}`, v);
+      }
     }
   }
+  // The outermost parent that isn't in the repository.
+  const outermost = parents.length ? (/<parent>([\s\S]*?)<\/parent>/.exec(parents[parents.length - 1]!)?.[1] ?? '') : parentBlock;
+  const externalGroup = resolve(xmlTag(outermost, 'groupId'));
+  const externalVersion = resolve(xmlTag(outermost, 'version'));
+  if (externalGroup && externalVersion && !byGroup.has(externalGroup)) byGroup.set(externalGroup, externalVersion);
 
   // Plugin dependencies under <build> never reach the application.
-  const used = xml.replace(/<dependencyManagement>[\s\S]*?<\/dependencyManagement>/g, '').replace(/<(build|reporting)>[\s\S]*?<\/\1>/g, '');
+  const used = xml.replace(/<dependencyManagement>[\s\S]*?<\/dependencyManagement>/g, blank).replace(/<(build|reporting)>[\s\S]*?<\/\1>/g, blank);
   const packages: Locked[] = [];
   let skipped = 0;
-  for (const whole of used.match(/<dependency>[\s\S]*?<\/dependency>/g) ?? []) {
-    const dep = whole.replace(/<exclusions>[\s\S]*?<\/exclusions>/, '');
-    const name = `${resolve(xmlTag(dep, 'groupId'))}:${resolve(xmlTag(dep, 'artifactId'))}`;
-    const version = resolve(xmlTag(dep, 'version')) ?? managed.get(name);
-    if (!version || /[${[(,]/.test(version) || name.includes('$')) skipped++;
-    else packages.push(pkg('Maven', name, version, xmlTag(dep, 'scope') === 'test'));
+  for (const m of used.matchAll(/<dependency>[\s\S]*?<\/dependency>/g)) {
+    const dep = m[0].replace(/<exclusions>[\s\S]*?<\/exclusions>/, '');
+    // `${project.version}`: another module of this same build, not a published package.
+    if (/^\$\{(?:project\.|pom\.)?version\}$/.test(xmlTag(dep, 'version') ?? '')) continue;
+    const group = resolve(xmlTag(dep, 'groupId'));
+    const name = `${group}:${resolve(xmlTag(dep, 'artifactId'))}`;
+    const v = resolve(xmlTag(dep, 'version')) ?? managed.get(name) ?? (group ? byGroup.get(group) : undefined);
+    if (!v || /[${[(,]/.test(v) || name.includes('$')) skipped++;
+    else packages.push(pkg('Maven', name, v, xmlTag(dep, 'scope') === 'test', lineOf(text, m.index!)));
   }
   return { packages, skipped };
+}
+
+/** The parent a pom.xml names, and where it says to find it. */
+export function pomParent(text: string): { relativePath: string; artifactId?: string } | null {
+  const block = /<parent>([\s\S]*?)<\/parent>/.exec(text.replace(/<!--[\s\S]*?-->/g, ''))?.[1];
+  if (!block) return null;
+  const relativePath = xmlTag(block, 'relativePath');
+  // An empty <relativePath/> means "look in the repository, not on disk".
+  if (relativePath === '' || /<relativePath\s*\/>/.test(block)) return null;
+  return { relativePath: relativePath ?? '../pom.xml', artifactId: xmlTag(block, 'artifactId') };
+}
+
+/** Gradle configurations used only for tests. */
+const GRADLE_TEST_CONFIG = /^(?:test|androidTest|testFixtures|integrationTest|functionalTest)/;
+
+/**
+ * A Gradle version catalog (gradle/libs.versions.toml). `buildFiles` is the project's build scripts,
+ * for which libraries are only ever used by test configurations. A library whose version comes from a
+ * BOM has none here, so it's counted as skipped.
+ */
+function versionCatalog(text: string, _file?: string, buildFiles?: string): Parsed {
+  const versions = new Map<string, string>();
+  const packages: Locked[] = [];
+  const skippedNames: string[] = [];
+  const uses = new Map<string, Set<string>>();
+  for (const m of (buildFiles ?? '').matchAll(/\b(\w+)\s*\(?\s*(?:platform\s*\(\s*)?libs\.([\w.]+)/g)) {
+    const accessor = m[2]!.replace(/\.get$/, '');
+    if (!uses.has(accessor)) uses.set(accessor, new Set());
+    uses.get(accessor)!.add(m[1]!);
+  }
+  const exact = (v: string | undefined) => (v && /^[\w.+-]+$/.test(v) && /\d/.test(v) && !/[+]$|latest/i.test(v) ? v : null);
+  let section = '';
+  for (const [i, raw] of text.split(/\r?\n/).entries()) {
+    const line = raw.replace(/\s+#.*$/, '').trim();
+    const head = /^\[([\w.-]+)\]$/.exec(line);
+    if (head) { section = head[1]!; continue; }
+    const kv = /^([\w.-]+)\s*=\s*(.+)$/.exec(line);
+    if (!kv) continue;
+    const [, key, value] = kv as unknown as [string, string, string];
+    if (section === 'versions') {
+      const plain = /^"([^"]*)"$/.exec(value)?.[1];
+      const rich = /\b(?:strictly|require|prefer)\s*=\s*"([^"]*)"/.exec(value)?.[1];
+      const v = plain ?? rich;
+      if (v) versions.set(key, v);
+      continue;
+    }
+    if (section !== 'libraries') continue;
+    let module: string | undefined;
+    let version: string | undefined;
+    const short = /^"([^":]+):([^":]+)(?::([^"]+))?"$/.exec(value);
+    if (short) {
+      module = `${short[1]}:${short[2]}`;
+      version = short[3];
+    } else {
+      const field = (f: string) => new RegExp(`\\b${f}\\s*=\\s*"([^"]*)"`).exec(value)?.[1];
+      module = field('module') ?? (field('group') && field('name') ? `${field('group')}:${field('name')}` : undefined);
+      const ref = /\bversion\.ref\s*=\s*"([^"]*)"/.exec(value)?.[1] ?? /\bversion\s*=\s*\{[^}]*\bref\s*=\s*"([^"]*)"/.exec(value)?.[1];
+      version = ref ? versions.get(ref) : (field('version') ?? /\bversion\s*=\s*\{[^}]*\b(?:strictly|require|prefer)\s*=\s*"([^"]*)"/.exec(value)?.[1]);
+    }
+    if (!module) continue;
+    const v = exact(version);
+    const accessor = key.replace(/[-_]/g, '.');
+    const configs = uses.get(accessor);
+    const dev = Boolean(configs?.size) && [...configs!].every((c) => GRADLE_TEST_CONFIG.test(c));
+    if (v) packages.push(pkg('Maven', module, v, dev, i + 1));
+    else skippedNames.push(module);
+  }
+  return { packages, skipped: skippedNames.length, skippedNames, directOnly: true };
+}
+
+/** build.gradle / build.gradle.kts: dependencies written out in full, `implementation("g:a:1.2.3")`. */
+function gradleBuild(text: string): Parsed {
+  const packages: Locked[] = [];
+  const skippedNames: string[] = [];
+  const code = text.replace(/\/\*[\s\S]*?\*\//g, (c) => c.replace(/[^\n]/g, ' ')).replace(/\/\/[^\n]*/g, '');
+  // The buildscript block holds the build's own plugins, not the app's dependencies.
+  const app = code.replace(/\bbuildscript\s*\{(?:[^{}]|\{(?:[^{}]|\{[^{}]*\})*\})*\}/g, (c) => c.replace(/[^\n]/g, ' '));
+  for (const m of app.matchAll(/\b(\w+)\s*\(?\s*(?:platform\s*\(\s*|enforcedPlatform\s*\(\s*)?["']([\w.-]+):([\w.-]+):([^"'@\s]+)(?:@\w+)?["']/g)) {
+    const config = m[1]!;
+    if (/^(?:classpath|id|kotlin|plugin|apply|maven|url)$/.test(config)) continue;
+    const version = m[4]!;
+    const name = `${m[2]}:${m[3]}`;
+    if (/[$+[(,]|latest/i.test(version)) skippedNames.push(name);
+    else packages.push(pkg('Maven', name, version, GRADLE_TEST_CONFIG.test(config), lineOf(text, m.index!)));
+  }
+  return { packages, skipped: skippedNames.length, skippedNames, directOnly: true };
+}
+
+/**
+ * build.sbt, and Scala files in project/ (`buildSbt` is then the build.sbt beside the project folder,
+ * for scalaVersion). `"org" %% "name" % "1.2.3"` becomes org:name_2.13 as Maven Central has it.
+ */
+function sbtBuild(text: string, file?: string, buildSbt?: string): Parsed {
+  const code = (t: string) => t.replace(/\/\*[\s\S]*?\*\//g, (c) => c.replace(/[^\n]/g, ' ')).replace(/\/\/[^\n]*/g, '');
+  const own = code(text);
+  const scalaVersion = /scalaVersion\s*:=\s*"([^"]+)"/.exec(own)?.[1] ?? /scalaVersion\s*:=\s*"([^"]+)"/.exec(code(buildSbt ?? ''))?.[1];
+  const binary = scalaVersion ? (scalaVersion.startsWith('3') ? '3' : scalaVersion.split('.').slice(0, 2).join('.')) : null;
+  const vals = new Map<string, string>();
+  for (const m of [own, code(buildSbt ?? '')].join('\n').matchAll(/\b(?:val|lazy\s+val|def)\s+(\w+)\s*(?::\s*String\s*)?=\s*"([^"]+)"/g)) vals.set(m[1]!, m[2]!);
+  const packages: Locked[] = [];
+  const skippedNames: string[] = [];
+  for (const m of own.matchAll(/"([\w.-]+)"\s*(%%%|%%|%)\s*"([\w.-]+)"\s*%\s*(?:"([^"]+)"|([\w.]+))(\s*%\s*(?:"[\w-]+"|[\w.]+))?/g)) {
+    const [, org, op, artifact, quoted, ident, scope] = m;
+    const version = quoted ?? vals.get(ident!.split('.').pop()!);
+    const name = op === '%' ? `${org}:${artifact}` : `${org}:${artifact}_${binary ?? '?'}`;
+    // %%% is Scala.js or Native, whose artifact names depend on the platform too.
+    if (!version || op === '%%%' || (op === '%%' && !binary) || /[+[(,]|latest/i.test(version)) skippedNames.push(name);
+    else packages.push(pkg('Maven', name, version, /test|it\b|integrationtest/i.test(scope ?? ''), lineOf(text, m.index!)));
+  }
+  void file;
+  return { packages, skipped: skippedNames.length, skippedNames, directOnly: true };
+}
+
+/** build.sbt.lock from sbt-dependency-lock: every dependency, transitive ones included. */
+function sbtLock(text: string): Parsed {
+  const lock = JSON.parse(text) as { dependencies?: { org?: string; name?: string; version?: string; configurations?: string[] }[] };
+  const packages: Locked[] = [];
+  for (const d of lock.dependencies ?? []) {
+    if (!d.org || !d.name || !d.version) continue;
+    const configs = d.configurations ?? [];
+    packages.push(pkg('Maven', `${d.org}:${d.name}`, d.version, configs.length > 0 && configs.every((c) => /^test/i.test(c))));
+  }
+  return { packages, skipped: 0 };
 }
 
 /** `replace` directives, from go.mod or go.work: what each module (at any version, or one) is swapped for. */
@@ -417,6 +577,12 @@ const VENDOR_MODULES = /(^|\/)vendor\/modules\.txt$/;
 export const DOTNET_PROJECT = /\.(?:cs|fs|vb)proj$/i;
 export const isDotnetProject = (path: string) => DOTNET_PROJECT.test(path);
 
+export const VERSION_CATALOG = /(^|\/)gradle\/[\w.-]+\.versions\.toml$/;
+export const GRADLE_BUILD = /(^|\/)build\.gradle(\.kts)?$/;
+export const SBT_BUILD = /(^|\/)build\.sbt$|(^|\/)project\/[\w-]+\.scala$/;
+/** Gradle and sbt build files, which list direct dependencies only. */
+export const isJvmBuild = (path: string) => VERSION_CATALOG.test(path) || GRADLE_BUILD.test(path) || SBT_BUILD.test(path);
+
 /**
  * `manifest`: a file beside the lockfile that it needs, such as package.json, Directory.Packages.props or go.work.
  * `workspaces`: the package.json of each workspace, for formats that need them (Yarn).
@@ -436,6 +602,10 @@ const FORMATS: Format[] = [
   { match: REQUIREMENTS, ecosystem: 'PyPI', parse: requirementsTxt },
   { match: /(^|\/)([\w-]+-)?gradle\.lockfile$/, ecosystem: 'Maven', parse: gradleLock },
   { match: /(^|\/)pom\.xml$/, ecosystem: 'Maven', parse: pomXml },
+  { match: VERSION_CATALOG, ecosystem: 'Maven', parse: versionCatalog },
+  { match: GRADLE_BUILD, ecosystem: 'Maven', parse: gradleBuild },
+  { match: SBT_BUILD, ecosystem: 'Maven', parse: sbtBuild },
+  { match: /(^|\/)build\.sbt\.lock$/, ecosystem: 'Maven', parse: sbtLock },
   { match: /(^|\/)go\.mod$/, ecosystem: 'Go', parse: goMod },
   { match: VENDOR_MODULES, ecosystem: 'Go', parse: vendorModules },
   { match: /(^|\/)packages\.lock\.json$/, ecosystem: 'NuGet', parse: nugetLock },
@@ -463,7 +633,6 @@ const MANIFESTS: { match: RegExp; ecosystem: Ecosystem; label: string; hint: str
   { match: /(^|\/)package\.json$/, ecosystem: 'npm', label: 'package.json', hint: 'commit package-lock.json, yarn.lock or pnpm-lock.yaml (Bun lockfiles are not read yet)' },
   { match: /(^|\/)composer\.json$/, ecosystem: 'Packagist', label: 'composer.json', hint: 'commit composer.lock' },
   { match: /(^|\/)(pyproject\.toml|Pipfile|setup\.py|setup\.cfg)$/, ecosystem: 'PyPI', label: 'Python project files', hint: 'run uv lock, poetry lock or pip-compile and commit the result, or pass --sbom' },
-  { match: /(^|\/)build\.gradle(\.kts)?$/, ecosystem: 'Maven', label: 'build.gradle', hint: 'turn on Gradle dependency locking, or pass --sbom' },
   { match: /\.(?:cs|fs|vb)proj$/, ecosystem: 'NuGet', label: '.NET project files', hint: 'set RestorePackagesWithLockFile, or pass --sbom' },
   { match: /(^|\/)Gemfile$/, ecosystem: 'RubyGems', label: 'Gemfile', hint: 'commit Gemfile.lock' },
   { match: /(^|\/)Cargo\.toml$/, ecosystem: 'crates.io', label: 'Cargo.toml', hint: 'commit Cargo.lock' },
@@ -491,11 +660,15 @@ export function findLockfiles(paths: string[], ignore: string[] = []): string[] 
   const dirOf = (p: string) => p.replace(/[^/]+$/, '');
   const nugetLocks = new Set(files.filter((p) => /(^|\/)packages\.lock\.json$/.test(p)).map(dirOf));
   const goVendored = new Set(files.filter((p) => VENDOR_MODULES.test(p)).map((p) => p.replace(/vendor\/modules\.txt$/, '')));
+  // A dependency lock lists transitive dependencies too: Gradle's beside its build, sbt's beside build.sbt.
+  const rootOf = (p: string) => p.replace(/(?:gradle\/[^/]+|project\/[^/]+|[^/]+)$/, '');
+  const locked = new Set(files.filter((p) => /(^|\/)([\w-]+-)?gradle\.lockfile$|(^|\/)build\.sbt\.lock$/.test(p)).map(rootOf));
   return files.filter(
     (p) =>
       !(REQUIREMENTS.test(p) && pythonLocks.has(projectDir(p))) &&
       !((DOTNET_PROJECT.test(p) || /(^|\/)packages\.config$/i.test(p)) && nugetLocks.has(dirOf(p))) &&
-      !(/(^|\/)go\.mod$/.test(p) && goVendored.has(dirOf(p))),
+      !(/(^|\/)go\.mod$/.test(p) && goVendored.has(dirOf(p))) &&
+      !(isJvmBuild(p) && locked.has(rootOf(p))),
   );
 }
 
