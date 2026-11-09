@@ -133,7 +133,7 @@ Microsoft reviews the first winget pull request by hand, so `winget install` wor
 |---|---|
 | #62: run migration `0002_secret_status.sql` with `pnpm db:migrate` when the API deploys. Until then the API accepts `secretStatus` but can't store it | Whoever deploys the API |
 | #64: for any provider it leaves unnamed, add a link to its key documentation, or a revoked key, to issue #7. Confirm the Africa's Talking key length the same way | A maintainer |
-| #61 to #64 each add changelog lines under 0.1.0-beta.12, which went to npm without them. Move those lines to the next version before releasing it | Whoever merges |
+| #61 to #64 each add a `0.1.0-beta.13 (unreleased)` section to the changelog, so the second one to merge will conflict there. Keep one heading with every line under it. To release, set that version in `packages/cli/package.json` and change "(unreleased)" to the date | Whoever merges and releases |
 
 ### Checks to run once
 
