@@ -18,7 +18,7 @@ const installStep = `      - name: Install Fortis
           version: ${VERSION}`;
 
 /** pom.xml alone can't show transitive dependencies, and Maven can list them all. */
-const sbomSteps = `      - uses: actions/setup-java@v4
+const sbomSteps = `      - uses: actions/setup-java@v6
         with:
           distribution: temurin
           java-version: '21' # match your build
@@ -28,7 +28,7 @@ const sbomSteps = `      - uses: actions/setup-java@v4
 `;
 
 /** A hand-written requirements file doesn't list what its packages need, but an installed environment does. */
-const pythonSbomSteps = `      - uses: actions/setup-python@v5
+const pythonSbomSteps = `      - uses: actions/setup-python@v7
         with:
           python-version: '3.12' # match your app
       - name: List every Python dependency (an SBOM for Fortis)
@@ -71,7 +71,7 @@ jobs:
     name: Code scan
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4${opts.history ? `
+      - uses: actions/checkout@v7${opts.history ? `
         with:
           fetch-depth: 0 # --history reads every commit; a scan without it needs only the latest` : ''}
 ${opts.maven ? sbomSteps : opts.pythonSbom ? pythonSbomSteps : ''}${installStep}
@@ -83,7 +83,7 @@ ${opts.maven ? sbomSteps : opts.pythonSbom ? pythonSbomSteps : ''}${installStep}
         if: always() && hashFiles('fortis.sarif') != ''
         # Code scanning is free on public repositories and needs GitHub Advanced Security on private ones.
         continue-on-error: true
-        uses: github/codeql-action/upload-sarif@v3
+        uses: github/codeql-action/upload-sarif@v4
         with:
           sarif_file: fortis.sarif
           category: fortis
@@ -94,7 +94,7 @@ ${opts.maven ? sbomSteps : opts.pythonSbom ? pythonSbomSteps : ''}${installStep}
     if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/${opts.stagingBranch}')
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 ${installStep}
       - name: Fortis test
         # --wait gives the new deploy time to come up before testing.
