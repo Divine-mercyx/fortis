@@ -7,11 +7,14 @@ import { requirementsTxt } from './rules/python-lockfiles';
 export const CI_PROVIDERS = ['github', 'gitlab', 'bitbucket', 'azure', 'jenkins', 'circleci', 'buildkite'] as const;
 export type CiProvider = (typeof CI_PROVIDERS)[number];
 /** history: also search git history for secrets, which needs the full history (fetch-depth: 0). */
-type CiOptions = { stagingBranch: string; target?: string; maven?: boolean; pythonSbom?: boolean; history?: boolean };
+type CiOptions = { stagingBranch: string; target?: string; maven?: boolean; gradle?: boolean; pythonSbom?: boolean; history?: boolean };
 
 const pkg = `fortis-watchdog@${VERSION}`;
 const SBOM_PATH = 'target/bom.json';
 const PYTHON_SBOM_PATH = 'bom.json';
+const GRADLE_SBOM_PATH = 'build/reports/cyclonedx/bom.json';
+/** CycloneDX's Gradle plugin, applied from an init script so the project's build files stay as they are. */
+const GRADLE_PLUGIN = 'org.cyclonedx.bom:org.cyclonedx.bom.gradle.plugin:3.5.1';
 
 const installStep = `      - name: Install Fortis
         uses: ${RELEASE_REPO}@cli-v${VERSION}
@@ -26,6 +29,25 @@ const sbomSteps = `      - uses: actions/setup-java@v6
       - name: List every Maven dependency (an SBOM for Fortis)
         continue-on-error: true
         run: mvn -B -q org.cyclonedx:cyclonedx-maven-plugin:makeAggregateBom -DoutputFormat=json -DoutputName=bom
+`;
+
+/** Gradle build files and version catalogs list direct dependencies only, and Gradle can list them all. */
+const gradleSbomSteps = `      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21' # match your build
+      - name: List every Gradle dependency (an SBOM for Fortis)
+        continue-on-error: true
+        run: |
+          cat > "$RUNNER_TEMP/fortis-sbom.gradle" <<'EOF'
+          import org.cyclonedx.gradle.CyclonedxPlugin
+          initscript {
+              repositories { gradlePluginPortal() }
+              dependencies { classpath '${GRADLE_PLUGIN}' }
+          }
+          rootProject { apply plugin: CyclonedxPlugin }
+          EOF
+          ./gradlew -q cyclonedxBom --init-script "$RUNNER_TEMP/fortis-sbom.gradle"
 `;
 
 /** A hand-written requirements file doesn't list what its packages need, but an installed environment does. */
@@ -76,9 +98,9 @@ jobs:
       - uses: actions/checkout@v7${opts.history ? `
         with:
           fetch-depth: 0 # --history reads every commit; a scan without it needs only the latest` : ''}
-${opts.maven ? sbomSteps : opts.pythonSbom ? pythonSbomSteps : ''}${installStep}
+${opts.maven ? sbomSteps : opts.gradle ? gradleSbomSteps : opts.pythonSbom ? pythonSbomSteps : ''}${installStep}
       - name: Fortis scan
-        run: fortis scan --ci --sarif fortis.sarif${opts.maven ? ` --sbom ${SBOM_PATH}` : opts.pythonSbom ? ` --sbom ${PYTHON_SBOM_PATH}` : ''}${opts.history ? ' --history' : ''} --pr-comment
+        run: fortis scan --ci --sarif fortis.sarif${opts.maven ? ` --sbom ${SBOM_PATH}` : opts.gradle ? ` --sbom ${GRADLE_SBOM_PATH}` : opts.pythonSbom ? ` --sbom ${PYTHON_SBOM_PATH}` : ''}${opts.history ? ' --history' : ''} --pr-comment
         env:
           FORTIS_KEY: \${{ secrets.FORTIS_KEY }}
           GITHUB_TOKEN: \${{ github.token }}
@@ -114,6 +136,12 @@ export function gitlabJobs(opts: CiOptions) {
     ? `# Maven: pom.xml alone can't show transitive dependencies. For those, add a job that runs
 #   mvn -B org.cyclonedx:cyclonedx-maven-plugin:makeAggregateBom -DoutputFormat=json -DoutputName=bom
 # keep ${SBOM_PATH} as an artifact, and add --sbom ${SBOM_PATH} to the scan below.
+`
+    : opts.gradle
+      ? `# Gradle: build files and version catalogs list direct dependencies only. For the rest, add a job that runs
+#   ./gradlew cyclonedxBom --init-script fortis-sbom.gradle
+# with an init script applying ${GRADLE_PLUGIN} (see the Fortis README), keep
+# ${GRADLE_SBOM_PATH} as an artifact, and add --sbom ${GRADLE_SBOM_PATH} to the scan below.
 `
     : opts.pythonSbom
       ? `# Python: requirements.txt doesn't list what its packages need. For those, add a job that installs them
@@ -402,6 +430,12 @@ function needsPythonSbom(root: string): boolean {
   return Boolean(requirementsTxt(readFileSync(requirements, 'utf8'), 'requirements.txt').directOnly);
 }
 
+/** A Gradle build with a wrapper and no dependency locking: its build files show direct dependencies only. */
+function usesGradleWithoutLock(root: string): boolean {
+  const gradle = ['settings.gradle', 'settings.gradle.kts', 'build.gradle', 'build.gradle.kts'].some((f) => existsSync(join(root, f)));
+  return gradle && existsSync(join(root, 'gradlew')) && !existsSync(join(root, 'gradle.lockfile'));
+}
+
 export function writeCi(root: string, provider: CiProvider, opts: { stagingBranch: string; target?: string; force?: boolean; history?: boolean }) {
   const template = TEMPLATES[provider];
   // The project's own pipeline is never overwritten, even with --force. One we wrote can be.
@@ -411,7 +445,7 @@ export function writeCi(root: string, provider: CiProvider, opts: { stagingBranc
   const abs = join(root, rel);
   if (existsSync(abs) && !opts.force) return { path: rel, written: false, mergeInto: taken ? template.path : undefined };
   mkdirSync(dirname(abs), { recursive: true });
-  const options = { ...opts, maven: existsSync(join(root, 'pom.xml')), pythonSbom: needsPythonSbom(root) };
+  const options = { ...opts, maven: existsSync(join(root, 'pom.xml')), gradle: usesGradleWithoutLock(root), pythonSbom: needsPythonSbom(root) };
   writeFileSync(abs, template.render(options));
   return { path: rel, written: true, mergeInto: taken ? template.path : undefined };
 }

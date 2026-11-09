@@ -61,7 +61,8 @@ Run `fortis rules` for the list and `fortis explain FX-OWN-001` for why a rule m
 | JavaScript | `package-lock.json`, `npm-shrinkwrap.json`, `yarn.lock`, `pnpm-lock.yaml` |
 | PHP | `composer.lock` |
 | Python | `uv.lock`, `poetry.lock`, `pdm.lock`, `pylock.toml`, `Pipfile.lock`, or pinned requirements files |
-| Java / Kotlin | `gradle.lockfile`, `pom.xml`, or an SBOM |
+| Java / Kotlin | `gradle.lockfile`, or without one: `gradle/libs.versions.toml` and dependencies written out in `build.gradle(.kts)`; `pom.xml`; or an SBOM |
+| Scala | `build.sbt.lock` from [sbt-dependency-lock](https://github.com/stringbean/sbt-dependency-lock), or `build.sbt` and `project/*.scala` |
 | Go | `go.mod`, following `go.work` to each module, or `vendor/modules.txt` when the module is vendored |
 | .NET | `packages.lock.json`, or without one: `PackageReference` versions in `.csproj`/`.fsproj`/`.vbproj`, central versions in `Directory.Packages.props`, and `packages.config` |
 | Ruby | `Gemfile.lock` |
@@ -75,12 +76,27 @@ Files are found in any folder of the repository. Dev and test dependencies are l
 
 **A hand-written `requirements.txt` lists only direct dependencies,** so the scan says what it couldn't cover. Use a lockfile, compile it with `pip-compile` or `uv pip compile`, or pass an SBOM from [`cyclonedx-py`](https://github.com/CycloneDX/cyclonedx-python). `fortis ci init` adds that step for you on GitHub Actions.
 
-**Maven needs an SBOM for full coverage.** `pom.xml` lists only direct dependencies, and a parent POM or BOM often decides their versions, so Fortis reports how many it could check. To cover everything, including transitive dependencies, have Maven list them and pass the result to Fortis. `fortis ci init` adds this step for you on GitHub Actions.
+**Java, Kotlin and Scala need an SBOM for full coverage.** Build files list only direct dependencies. Fortis fills in versions from properties, parent POMs in the repository and version catalogs, and gives a Spring Boot starter the version of `spring-boot-starter-parent`. It says how many it could check: a version that comes from a BOM outside the repository can't be known without running the build. To cover everything, including transitive dependencies, have the build list them and pass the result to Fortis. `fortis ci init` adds this step for you on GitHub Actions, for Maven and for Gradle.
 
 ```bash
+# Maven
 mvn org.cyclonedx:cyclonedx-maven-plugin:makeAggregateBom -DoutputFormat=json -DoutputName=bom
 fortis scan --sbom target/bom.json
+
+# Gradle: an init script applies CycloneDX's plugin without changing the build's files
+cat > fortis-sbom.gradle <<'EOF'
+import org.cyclonedx.gradle.CyclonedxPlugin
+initscript {
+    repositories { gradlePluginPortal() }
+    dependencies { classpath 'org.cyclonedx.bom:org.cyclonedx.bom.gradle.plugin:3.5.1' }
+}
+rootProject { apply plugin: CyclonedxPlugin }
+EOF
+./gradlew cyclonedxBom --init-script fortis-sbom.gradle
+fortis scan --sbom build/reports/cyclonedx/bom.json
 ```
+
+For sbt, add [sbt-dependency-lock](https://github.com/stringbean/sbt-dependency-lock), run `sbt dependencyLockWrite` and commit `build.sbt.lock`. Gradle's own [dependency locking](https://docs.gradle.org/current/userguide/dependency_locking.html) works too: commit `gradle.lockfile`.
 
 `--sbom` reads any CycloneDX JSON file, so it works for other languages too.
 

@@ -57,7 +57,7 @@ ${c.bold('Scan options')}
   --sarif <file>   write SARIF for GitHub code scanning, GitLab and IDEs
   --junit <file>   write JUnit XML for CI systems that show test reports
   --pr-comment     in CI, post one comment on the pull request listing what it adds, updated in place
-  --sbom <file>    also check a CycloneDX JSON SBOM (full Maven coverage, including transitive)
+  --sbom <file>    also check a CycloneDX JSON SBOM (full Maven and Gradle coverage, including transitive)
   --no-baseline    block on every finding, ignoring ${BASELINE_FILE}
   --submodules     also scan git submodules (skipped by default: they are separate repositories)
   --paths-from <f> only scan the files listed in f, one per line (- for stdin); never closes findings
