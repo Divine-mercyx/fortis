@@ -66,8 +66,11 @@ Run `fortis rules` for the list and `fortis explain FX-OWN-001` for why a rule m
 | Ruby | `Gemfile.lock` |
 | Rust | `Cargo.lock` |
 | Dart / Flutter | `pubspec.lock` |
+| Elixir / Erlang | `mix.lock`, `rebar.lock` |
+| Haskell | `cabal.project.freeze`, or `stack.yaml.lock` (which leaves out the snapshot's packages) |
+| R | `renv.lock` (CRAN packages; GitHub and Bioconductor ones are named, not checked) |
 
-Files are found in any folder of the repository. Dev and test dependencies are left out wherever they can be told apart (yarn workspaces can't, so those are all checked). Findings point at the package's line in the file. If a project has no lockfile, the scan says so.
+C and C++ packages (Conan, vcpkg) aren't checked yet, because OSV has no advisories for them; the scan says so rather than passing them. Files are found in any folder of the repository. Dev and test dependencies are left out wherever they can be told apart (yarn workspaces can't, so those are all checked). Findings point at the package's line in the file. If a project has no lockfile, the scan says so.
 
 **A hand-written `requirements.txt` lists only direct dependencies,** so the scan says what it couldn't cover. Use a lockfile, compile it with `pip-compile` or `uv pip compile`, or pass an SBOM from [`cyclonedx-py`](https://github.com/CycloneDX/cyclonedx-python). `fortis ci init` adds that step for you on GitHub Actions.
 

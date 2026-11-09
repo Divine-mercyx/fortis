@@ -25,6 +25,10 @@ const CASES: [string, string, string][] = [
   ['Go', 'go.mod', 'module x\n\nrequire golang.org/x/text v0.3.5\n'],
   ['NuGet', 'packages.lock.json', JSON.stringify({ version: 1, dependencies: { 'net8.0': { 'Newtonsoft.Json': { type: 'Direct', resolved: '12.0.1' } } } })],
   ['RubyGems', 'Gemfile.lock', 'GEM\n  remote: https://rubygems.org/\n  specs:\n    rack (2.2.3)\n'],
+  ['Hex (mix.lock)', 'mix.lock', '%{\n  "plug": {:hex, :plug, "1.3.0", "abc", [:mix], [], "hexpm", "def"},\n}\n'],
+  ['Hex (rebar.lock)', 'rebar.lock', '{"1.2.0",\n[{<<"plug">>,{pkg,<<"plug">>,<<"1.3.0">>},0}]}.\n'],
+  ['Hackage', 'cabal.project.freeze', 'constraints: any.aeson ==2.0.0.0\n'],
+  ['CRAN', 'renv.lock', JSON.stringify({ R: { Version: '4.3.0' }, Packages: { commonmark: { Package: 'commonmark', Version: '1.7', Source: 'Repository', Repository: 'CRAN' } } })],
 ];
 
 describe.skipIf(!process.env.FORTIS_LIVE_OSV)('real OSV', () => {

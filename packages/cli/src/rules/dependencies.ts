@@ -104,6 +104,7 @@ export function readPackages(root: string, files: string[], opts: { sbom?: strin
       const parsed = parseLockfile(file, readText(abs), manifest);
       packages.push(...parsed.packages.map((p) => ({ ...p, file })));
       seen.add(ecosystemOf(file));
+      if (parsed.note && !notes.includes(parsed.note)) notes.push(parsed.note);
       if (parsed.directOnly) directOnlyFiles++;
       if (isPomXml(file)) {
         pomFiles++;
@@ -152,6 +153,8 @@ export function pinAdvice(file: string): string {
   if (/^Pipfile\.lock$/.test(base)) return 'Run pipenv lock so every package has an exact version.';
   if (/^composer\.lock$/.test(base)) return 'Branch installs have no release to check: require a tagged version (composer require vendor/pkg:^x).';
   if (/\.(txt|in)$/.test(base)) return 'Lock exact versions to check them: uv lock or poetry lock, or pip-compile (uv pip compile requirements.in -o requirements.txt), or pip freeze > requirements.txt.';
+  if (/^(mix|rebar)\.lock$|^stack\.yaml\.lock$/.test(base)) return 'Git dependencies have no Hex or Hackage release to check: depend on a published version where you can.';
+  if (/^renv\.lock$/.test(base)) return 'Packages from GitHub or Bioconductor aren\'t in OSV\'s CRAN data: install from CRAN where you can.';
   return 'Pin exact versions in the lockfile to check them.';
 }
 
