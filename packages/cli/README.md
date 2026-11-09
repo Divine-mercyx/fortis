@@ -33,13 +33,33 @@ irm https://github.com/Divine-mercyx/fortis/releases/latest/download/install.ps1
 
 Then run `fortis init --key fts_…` in your repository.
 
-The scripts check the download against the release's `SHA256SUMS`. `FORTIS_VERSION` pins a version, and `FORTIS_INSTALL_DIR` changes the folder (default `~/.fortis/bin`). Builds exist for Linux (x64, arm64, glibc only), macOS (arm64, x64) and Windows (x64). On Alpine, use npm or the Docker image:
+Or with a package manager:
+
+```bash
+brew install divine-mercyx/tap/fortis
+```
+
+```powershell
+scoop bucket add fortis https://github.com/Divine-mercyx/scoop-bucket
+scoop install fortis
+winget install DivineMercyx.Fortis
+```
+
+The scripts check the download against the release's `SHA256SUMS`. `FORTIS_VERSION` pins a version, and `FORTIS_INSTALL_DIR` changes the folder (default `~/.fortis/bin`). Builds exist for Linux (x64, arm64), macOS (arm64, x64) and Windows (x64).
+
+On Alpine, the install script uses a musl build, which needs one package first: `apk add libstdc++`. The Docker image also works:
 
 ```bash
 docker run --rm -v "$PWD:/src" -w /src -e FORTIS_KEY ghcr.io/divine-mercyx/fortis fortis scan --ci
 ```
 
 To verify where a binary came from, run `gh attestation verify fortis-linux-x64.tar.gz --repo Divine-mercyx/fortis`.
+
+### Updating
+
+`fortis update` updates a binary from the install scripts, after checking it against the release's `SHA256SUMS`. If you installed another way, it tells you the command to use.
+
+Once a day, Fortis checks GitHub for a newer release and prints a notice if there is one. It sends nothing about your project, waits at most 1.5 seconds, and is off in CI. Turn it off with `FORTIS_NO_UPDATE_CHECK=1`.
 
 ## What it checks
 
@@ -125,6 +145,7 @@ For sbt, add [sbt-dependency-lock](https://github.com/stringbean/sbt-dependency-
 | `fortis scan --paths-from list.txt` | Only scan the files listed, one per line (`-` for stdin). Never closes findings. The VS Code extension uses this |
 | `fortis login <key>` / `fortis logout` | Save or remove the key for this machine |
 | `fortis whoami` | Project, workspace and plan for the key |
+| `fortis update` | Update a binary install to the latest version |
 | `fortis doctor` | Find what isn't working here, and how to fix it |
 
 Exit codes: `0` passed, `1` findings at or above the threshold, `2` usage or configuration error, including a full scan that found no files.
@@ -433,6 +454,15 @@ To release, bump `version` in `packages/cli/package.json` and push a matching ta
 - uses this version's changelog section below as the release notes. Before tagging, change its heading from "(unreleased)" to the release date;
 - builds, tests and publishes the wheels to PyPI (TestPyPI on a fork). `packages/python/build_wheel.py` makes one by hand.
 
+A tag also signs the macOS and Windows binaries, builds the Alpine ones, and updates the package managers. Each store or signing step without its secret is skipped. These are set up once, in a GitHub environment called `release` limited to `cli-v*` tags:
+
+| Secrets | What they need |
+|---|---|
+| `APPLE_CERT_P12_BASE64`, `APPLE_CERT_PASSWORD`, `APPLE_API_KEY_P8_BASE64`, `APPLE_API_KEY_ID`, `APPLE_API_ISSUER_ID` | An Apple Developer ID Application certificate, and an App Store Connect API key |
+| `WINDOWS_CERT_PFX_BASE64`, `WINDOWS_CERT_PASSWORD` | A code-signing certificate you can export as a PFX |
+| `PACKAGE_REPOS_TOKEN` | A token that can push to `Divine-mercyx/homebrew-tap` and `Divine-mercyx/scoop-bucket` |
+| `WINGET_TOKEN` | A classic token with the `public_repo` scope, for pull requests to `microsoft/winget-pkgs` |
+
 Workflow actions are pinned to commit SHAs, and runners to image versions, so a release can't change because an action moved its tag. Dependabot proposes updates to the pins.
 
 Release binaries for macOS and Linux are made from a small Node, built by `scripts/build-node-runtime.sh` without the parts the CLI never uses. CI caches it, and fails if a binary goes over 60 MB or its download over 25 MB.
@@ -481,6 +511,9 @@ It exits 1 if something stops Fortis doing its job. Things that are only worth k
 ## Changelog
 
 **0.1.0-beta.12** (unreleased)
+- `fortis update` updates a binary install, and a notice once a day says when a newer version exists. It's off in CI and with `FORTIS_NO_UPDATE_CHECK=1`.
+- The install script works on Alpine and other musl systems, with new `linux-x64-musl` and `linux-arm64-musl` builds. They need `apk add libstdc++`.
+- Install with Homebrew, Scoop or winget, and macOS and Windows binaries are signed, once the release setup is finished.
 - `fortis ci init` writes current major versions of GitHub's actions, so your workflow gets no Node.js 20 deprecation warnings.
 - `fortis ci init --provider` also writes pipelines for Bitbucket, Azure DevOps, Jenkins, CircleCI and Buildkite, using the binary or Docker image, so Node isn't needed.
 - `fortis scan --pr-comment` posts one comment per pull request on GitHub and GitLab, listing only what it adds, and updates it in place.

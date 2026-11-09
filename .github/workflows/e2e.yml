@@ -163,6 +163,59 @@ jobs:
       - name: e2e (install script)
         shell: bash
         run: bash packages/cli/scripts/e2e.sh installer packages/cli/release
+      - name: fortis update replaces the binary
+        shell: bash
+        run: |
+          EXE=packages/cli/dist-sea/fortis
+          [ "$RUNNER_OS" = "Windows" ] && EXE=$EXE.exe
+          node packages/cli/scripts/update-check.mjs "$EXE" packages/cli/release
+      - name: The binary still runs once signed (macOS)
+        if: runner.os == 'macOS'
+        env:
+          FORTIS_SIGN_CHECK: '1'
+        run: |
+          cp packages/cli/dist-sea/fortis "$RUNNER_TEMP/fortis-signed"
+          bash packages/cli/scripts/sign-macos.sh "$RUNNER_TEMP/fortis-signed"
+      - name: The binary still runs once signed (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          FORTIS_SIGN_CHECK: '1'
+        run: |
+          Copy-Item packages/cli/dist-sea/fortis.exe "$env:RUNNER_TEMP/fortis-signed.exe"
+          ./packages/cli/scripts/sign-windows.ps1 -Binary "$env:RUNNER_TEMP/fortis-signed.exe"
+
+  # Alpine on both CPUs, on a clean system with nothing but the installer.
+  musl:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-24.04, name: linux-x64-musl }
+          - { os: ubuntu-24.04-arm, name: linux-arm64-musl }
+    runs-on: ${{ matrix.os }}
+    name: Alpine · ${{ matrix.name }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - run: bash packages/cli/scripts/build-musl.sh ${{ matrix.name }} "$RUNNER_TEMP/release"
+      - run: bash packages/cli/scripts/alpine-check.sh "$RUNNER_TEMP/release"
+
+  # The latest published release, through generated manifests and the real package managers.
+  package-managers:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-15, windows-2025]
+    runs-on: ${{ matrix.os }}
+    name: brew, scoop and winget · ${{ matrix.os }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+      - shell: bash
+        run: bash packages/cli/scripts/package-install-check.sh
 
   docker:
     runs-on: ubuntu-24.04
