@@ -8,7 +8,7 @@ import { lineOf, TEST_PATH } from './types';
  * hand-written reader, so the CLI stays one dependency-free file. Ecosystem names are OSV's.
  */
 
-export type Ecosystem = 'npm' | 'Packagist' | 'PyPI' | 'Maven' | 'Go' | 'NuGet' | 'RubyGems' | 'crates.io' | 'Pub' | 'GitHub Actions' | 'Hex' | 'Hackage' | 'CRAN';
+export type Ecosystem = 'npm' | 'Packagist' | 'PyPI' | 'Maven' | 'Go' | 'NuGet' | 'RubyGems' | 'crates.io' | 'Pub' | 'GitHub Actions' | 'Hex' | 'Hackage' | 'CRAN' | 'SwiftURL';
 /** `line`: where the package is in its lockfile (npm-family lockfiles), so findings point at it. */
 export type Locked = { name: string; version: string; ecosystem: Ecosystem; dev: boolean; line?: number; direct?: boolean; via?: string };
 /** `skipped` counts declared packages with no exact version to check. `directOnly`: the file doesn't list what those packages need. */
@@ -618,6 +618,46 @@ function renvLock(text: string): Parsed {
   return { packages, skipped: skippedNames.length, skippedNames };
 }
 
+/**
+ * A repository URL as OSV's SwiftURL ecosystem names packages: no scheme, no `.git`.
+ * `https://github.com/vapor/vapor.git` and `git@github.com:vapor/vapor.git` are both
+ * `github.com/vapor/vapor`. OSV's names are case-sensitive, so the path's case is kept.
+ */
+export function swiftUrlName(url: string): string {
+  return url
+    .trim()
+    .replace(/^(?:[a-z+]+:\/\/)?(?:[^@/]+@)?([^/:]+)[:/]/i, (_, host: string) => `${host.toLowerCase()}/`)
+    .replace(/\.git$/, '')
+    .replace(/\/+$/, '');
+}
+
+/**
+ * Package.resolved, from Swift Package Manager or Xcode: version 1 (`object.pins` with
+ * `repositoryURL`), and versions 2 and 3 (`pins` with `location`). A pin to a branch or a commit
+ * has no release to check, and a registry package has no URL, so those are named instead.
+ */
+function packageResolved(text: string): Parsed {
+  type Pin = { package?: string; identity?: string; kind?: string; repositoryURL?: string; location?: string; state?: { version?: string | null; branch?: string | null; revision?: string } };
+  const doc = JSON.parse(text) as { pins?: Pin[]; object?: { pins?: Pin[] } };
+  const packages: Locked[] = [];
+  const skippedNames: string[] = [];
+  for (const pin of doc.pins ?? doc.object?.pins ?? []) {
+    const url = pin.location ?? pin.repositoryURL;
+    const name = pin.identity ?? pin.package ?? url ?? '?';
+    if (pin.kind === 'registry' || !url) skippedNames.push(`${name} (registry)`);
+    else if (pin.kind === 'localSourceControl' || pin.kind === 'fileSystem') skippedNames.push(`${name} (local folder)`);
+    else if (!pin.state?.version) skippedNames.push(`${name} (${pin.state?.branch ? `branch ${pin.state.branch}` : 'commit'})`);
+    else packages.push(pkg('SwiftURL', swiftUrlName(url), pin.state.version, false, lineOf(text, text.indexOf(url))));
+  }
+  return { packages, skipped: skippedNames.length, skippedNames };
+}
+
+/** The pods a Podfile.lock installs, `  - Name (1.2.3)` at the top level of PODS. */
+export function podsIn(text: string): string[] {
+  const pods = /^PODS:\r?\n([\s\S]*?)(?=^\S|$(?![\s\S]))/m.exec(text)?.[1] ?? '';
+  return [...pods.matchAll(/^ {2}- "?([^\s("]+)/gm)].map((m) => m[1]!).filter((name) => !name.includes('/'));
+}
+
 /** `manifest`: the file beside the lockfile that lists what production needs (package.json for Yarn, pyproject.toml for Poetry). */
 /**
  * The actions a workflow uses, at an exact version: `owner/action@v1.2.3`, or a commit pinned with
@@ -685,6 +725,7 @@ const FORMATS: Format[] = [
   { match: /(^|\/)cabal\.project\.freeze$/, ecosystem: 'Hackage', parse: cabalFreeze },
   { match: /(^|\/)stack\.yaml\.lock$/, ecosystem: 'Hackage', parse: stackLock },
   { match: /(^|\/)renv\.lock$/, ecosystem: 'CRAN', parse: renvLock },
+  { match: /(^|\/)Package\.resolved$/, ecosystem: 'SwiftURL', parse: packageResolved },
 ];
 
 export const isPomXml = (path: string) => /(^|\/)pom\.xml$/.test(path);
@@ -710,6 +751,7 @@ const MANIFESTS: { match: RegExp; ecosystem: Ecosystem; label: string; hint: str
   { match: /(^|\/)rebar\.config$/, ecosystem: 'Hex', label: 'rebar.config', hint: 'commit rebar.lock' },
   { match: /(^|\/)(stack\.yaml|cabal\.project|[\w.-]+\.cabal)$/, ecosystem: 'Hackage', label: 'Haskell project files', hint: 'run cabal freeze and commit cabal.project.freeze, or commit stack.yaml.lock' },
   { match: /(^|\/)(DESCRIPTION|renv\/activate\.R|[\w.-]+\.Rproj)$/, ecosystem: 'CRAN', label: 'R project files', hint: 'run renv::snapshot() and commit renv.lock' },
+  { match: /(^|\/)Package\.swift$/, ecosystem: 'SwiftURL', label: 'Package.swift', hint: 'commit Package.resolved' },
 ];
 
 /** Vendored and generated folders hold other people's manifests, not this project's. */
@@ -756,9 +798,9 @@ export const ecosystemOf = (file: string): Ecosystem => formatOf(file).ecosystem
 
 /** Ecosystems the project plainly uses but gave no versions for, so nothing was checked. */
 /** Ecosystems we can't read yet: say so, so a scan of such a project doesn't look like a clean pass. */
-const UNSUPPORTED: { match: RegExp; label: string }[] = [
-  { match: /(^|\/)(Package\.swift|Package\.resolved)$/, label: 'Swift packages' },
-  { match: /(^|\/)Podfile(\.lock)?$/, label: 'CocoaPods' },
+const UNSUPPORTED: { match: RegExp; label: string; why?: string }[] = [
+  // OSV, where the advisories come from, has no CocoaPods ecosystem, and GitHub's advisory database doesn't cover it either.
+  { match: /(^|\/)Podfile(\.lock)?$/, label: 'CocoaPods', why: "OSV, where Fortis gets its advisories, has no CocoaPods data. Pods that are also Swift packages are checked once they're added through Swift Package Manager" },
   // OSV has no ConanCenter or vcpkg advisories yet (its ecosystem list), so there's nothing to check these against.
   { match: /(^|\/)(conanfile\.(txt|py)|conan\.lock)$/, label: 'C and C++ packages from Conan' },
   { match: /(^|\/)vcpkg\.json$/, label: 'C and C++ packages from vcpkg' },
@@ -767,6 +809,6 @@ const UNSUPPORTED: { match: RegExp; label: string }[] = [
 export function missingLockfiles(paths: string[], ignore: string[], found: ReadonlySet<Ecosystem>): string[] {
   const files = relevant(paths, ignore);
   const missing = MANIFESTS.filter((m) => !found.has(m.ecosystem) && files.some((p) => m.match.test(p))).map((m) => `${m.label} found but no lockfile, so those dependencies weren't checked: ${m.hint}.`);
-  const unsupported = UNSUPPORTED.filter((u) => files.some((p) => u.match.test(p))).map((u) => `${u.label} aren't checked for vulnerabilities yet.`);
+  const unsupported = UNSUPPORTED.filter((u) => files.some((p) => u.match.test(p))).map((u) => `${u.label} aren't checked for vulnerabilities yet${u.why ? `: ${u.why}` : ''}.`);
   return [...missing, ...unsupported];
 }
