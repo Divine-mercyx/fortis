@@ -511,6 +511,10 @@ It exits 1 if something stops Fortis doing its job. Things that are only worth k
 
 ## Changelog
 
+**0.1.0-beta.13** (unreleased)
+- Mono and Dojah secret keys and Africa's Talking API keys are named, each with where to rotate it. Test keys are reported as high, live keys as critical, and public keys are left alone.
+- A secret key that starts `sk_live_` or `sk_test_` and matches no known shape is reported as Stripe, Paystack, Korapay or BudPay, since Korapay and BudPay use the same prefix.
+
 **0.1.0-beta.12** (2026-11-09)
 - `fortis update` updates a binary install, and a notice once a day says when a newer version exists. It's off in CI and with `FORTIS_NO_UPDATE_CHECK=1`.
 - The install script works on Alpine and other musl systems, with new `linux-x64-musl` and `linux-arm64-musl` builds. They need `apk add libstdc++`.
@@ -544,8 +548,6 @@ It exits 1 if something stops Fortis doing its job. Things that are only worth k
 - Stripe keys are named as Stripe (and Paystack as Paystack), with restricted keys and webhook secrets.
 - New token formats: SendGrid, Mailgun, Resend, Slack and Discord webhooks, Telegram, OpenAI, Anthropic, Azure Storage, DigitalOcean, Render, npm, PyPI, RubyGems, NuGet, Docker Hub, `.npmrc` tokens, Supabase `service_role` keys, Twilio auth tokens and Google service-account keys. `.npmrc`, `.pypirc`, `.netrc` and `.yarnrc` are now scanned.
 - SeerBit, OPay and Squad sandbox secret keys are named.
-- Mono and Dojah secret keys and Africa's Talking API keys are named, each with where to rotate it. Test keys are reported as high, live keys as critical, and public keys are left alone.
-- A secret key that starts `sk_live_` or `sk_test_` and matches no known shape is reported as Stripe, Paystack, Korapay or BudPay, since Korapay and BudPay use the same prefix.
 - A repository with only lockfiles now shows why the dependency check failed, instead of "Found no files to scan".
 - Windows: the hook finds the CLI from GitHub Desktop, VS Code and other apps, and CRLF files, BOMs and backslash paths are handled. A Windows baseline matches a Mac or Linux one.
 - Shallow CI clones, submodules (`--submodules`), worktrees, detached HEAD and sparse checkouts are handled. Large repositories are read one file at a time, with a time budget.
