@@ -384,3 +384,42 @@ describe('posting the comment', () => {
     expect(error.message).not.toContain('secret-token');
   });
 });
+
+describe('fortis ci init without a key', () => {
+  const renders = { github: githubWorkflow, gitlab: gitlabJobs, bitbucket: bitbucketPipeline, azure: azurePipeline, jenkins: jenkinsfile, circleci: circleciConfig, buildkite: buildkitePipeline };
+
+  it('writes the free code scan only: no staging test, and no key to set up', () => {
+    for (const [name, render] of Object.entries(renders)) {
+      const out = render({ stagingBranch: 'staging', free: true });
+      expect(out, name).toMatch(/fortis"? scan --ci/);
+      expect(out, name).not.toContain('fortis test');
+      expect(out, name).not.toMatch(/FORTIS_KEY|fortis-key|FORTIS_STAGING_URL/);
+    }
+  });
+
+  it('keeps the staging test when there is a key', () => {
+    for (const [name, render] of Object.entries(renders)) {
+      if (name === 'bitbucket') continue; // Bitbucket never had one: ZAP can't run there
+      expect(render({ stagingBranch: 'staging' }), name).toContain('test --target');
+    }
+  });
+
+  it('only adds the staging job when asked for, or when a key is saved', () => {
+    const run = (args: string[], home: string) => {
+      const root = mkdtempSync(join(tmpdir(), 'fortis-ci-free-'));
+      execFileSync('git', ['init', '-q'], { cwd: root });
+      const r = spawnSync(process.execPath, [join(__dirname, '..', 'node_modules', 'tsx', 'dist', 'cli.mjs'), join(__dirname, '..', 'src', 'index.ts'), 'ci', 'init', ...args], {
+        cwd: root, encoding: 'utf8', env: { ...process.env, FORTIS_KEY: '', HOME: home, USERPROFILE: home, XDG_CONFIG_HOME: home, APPDATA: home, NO_COLOR: '1', FORTIS_NO_UPDATE_CHECK: '1' },
+      });
+      const yml = readFileSync(join(root, '.github/workflows/fortis.yml'), 'utf8');
+      rmSync(root, { recursive: true, force: true });
+      return { out: r.stdout, yml };
+    };
+    const home = mkdtempSync(join(tmpdir(), 'fortis-ci-home-'));
+    const free = run([], home);
+    expect(free.yml).not.toContain('staging:');
+    expect(free.out).toContain('No secrets needed');
+    expect(run(['--staging'], home).yml).toContain('staging:');
+    rmSync(home, { recursive: true, force: true });
+  });
+});

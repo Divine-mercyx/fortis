@@ -9,7 +9,7 @@ import { ACCESS_CONFIG, hasWriteChecks, readAccessConfig, runAccessChecks, write
 import { checksFromGraphqlSchema, INTROSPECTION_QUERY, schemaFrom } from './access-graphql';
 import { checksFromRoutes, routesFromHar, routesFromOpenApi, routesFromPostman, type Route } from './access-import';
 import { BASELINE_FILE, readBaseline, splitByBaseline, writeBaseline } from './baseline';
-import { CI_PROVIDERS, detectProvider, NEXT_STEPS, writeCi, type CiProvider } from './ci';
+import { CI_PROVIDERS, detectProvider, FREE_NEXT_STEPS, NEXT_STEPS, writeCi, type CiProvider } from './ci';
 import { runDoctor, type Check } from './doctor';
 import { scanHistory } from './history';
 import { toJunit } from './junit';
@@ -43,6 +43,7 @@ ${c.bold('Usage')}
   fortis access init [--openapi|--postman|--har|--graphql <source>]  write ${ACCESS_CONFIG}, from your routes if given
   fortis baseline                                    accept today's findings so only new ones block
   fortis ci init [--provider <name>] [--history]     write a CI pipeline: ${CI_PROVIDERS.join(', ')}
+                                                     (no key: the free code scan only; --staging adds the staging test)
   fortis explain <RULE-ID>                           why a rule matters and how to fix it
   fortis update [version]                            update a binary install to the latest version, or this one
   fortis doctor [--strict] [--json] [--offline]      find what isn't working here, and how to fix it
@@ -748,7 +749,7 @@ async function cmdBaseline(flags: Flags): Promise<number> {
 
 async function cmdCi(args: string[], flags: Flags): Promise<number> {
   if (args[0] !== 'init') {
-    err(`Usage: fortis ci init [--provider ${CI_PROVIDERS.join('|')}] [--staging-branch staging] [--target URL] [--history] [--force]`);
+    err(`Usage: fortis ci init [--provider ${CI_PROVIDERS.join('|')}] [--staging] [--staging-branch staging] [--target URL] [--history] [--force]`);
     return 2;
   }
   const root = repoRoot(process.cwd());
@@ -762,7 +763,12 @@ async function cmdCi(args: string[], flags: Flags): Promise<number> {
     return 2;
   }
   const stagingBranch = str(flags['staging-branch']) ?? 'staging';
-  const res = writeCi(root, provider, { stagingBranch, target: str(flags.target) ?? readProjectConfig(root).target, force: Boolean(flags.force), history: Boolean(flags.history) });
+  const config = readProjectConfig(root);
+  const target = str(flags.target) ?? config.target;
+  // Without a key the pipeline is the free code scan only: the staging test needs a key and a verified
+  // target. Asking for staging (--staging, --target or --staging-branch) or having a key adds it.
+  const free = !resolveKey(apiUrl(str(flags.api) ?? config.apiUrl)) && !flags.staging && !str(flags.target) && !str(flags['staging-branch']);
+  const res = writeCi(root, provider, { stagingBranch, target, force: Boolean(flags.force), history: Boolean(flags.history), free });
   if (!res.written) {
     err(c.yellow(`! ${res.path} already exists. Use --force to overwrite it.`));
     return 2;
@@ -770,6 +776,11 @@ async function cmdCi(args: string[], flags: Flags): Promise<number> {
   log(c.green('✓'), `Wrote ${res.path}`);
   if (res.mergeInto) log(c.yellow('!'), `${res.mergeInto} is your own pipeline, so it wasn't changed. Copy what you need from ${res.path} into it.`);
   log('');
+  if (free) {
+    log(c.bold('Next:'), FREE_NEXT_STEPS[provider]);
+    log(c.grey('Every pull request and push gets a code scan with the free checks. With a Fortis key, run fortis ci init --force again to add the fintech rules and a staging test.'));
+    return 0;
+  }
   if (provider !== 'github' && provider !== 'gitlab') {
     log(c.bold('Next:'));
     for (const line of NEXT_STEPS[provider]) log(`  ${line}`);

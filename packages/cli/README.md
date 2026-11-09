@@ -213,7 +213,7 @@ This writes `.github/workflows/fortis.yml`, which needs no Node in your project:
 - **Every push to `staging`** (change it with `--staging-branch`) also gets a ZAP test, once the new deploy is answering.
 - **Maven projects, and Python projects with a hand-written `requirements.txt`,** also get a step that lists every dependency as an SBOM.
 
-Set the `FORTIS_KEY` secret and the `FORTIS_STAGING_URL` variable in the repository settings. Add `--sarif fortis.sarif` to any scan to write SARIF yourself.
+Without a Fortis key, it writes the code scan only, which needs no secrets: the free checks run without one. With a key, it adds the staging test (or pass `--staging`); set the `FORTIS_KEY` secret and the `FORTIS_STAGING_URL` variable in the repository settings. Add `--sarif fortis.sarif` to any scan to write SARIF yourself.
 
 ### Other CI systems
 
@@ -516,6 +516,8 @@ It exits 1 if something stops Fortis doing its job. Things that are only worth k
 - The install script works on Alpine and other musl systems, with new `linux-x64-musl` and `linux-arm64-musl` builds. They need `apk add libstdc++`.
 - Install with Homebrew, Scoop or winget, and macOS and Windows binaries are signed, once the release setup is finished.
 - `fortis ci init` writes current major versions of GitHub's actions, so your workflow gets no Node.js 20 deprecation warnings.
+- `fortis ci init` without a Fortis key writes the free code scan only, with no secrets to set up and no staging job. `--staging` adds it.
+- The generated GitHub workflow installs the pinned, checksum-checked binary instead of using the Fortis Action by tag, so Fortis's own SUP-GHA-001 rule doesn't report it.
 - `fortis ci init --provider` also writes pipelines for Bitbucket, Azure DevOps, Jenkins, CircleCI and Buildkite, using the binary or Docker image, so Node isn't needed.
 - `fortis scan --pr-comment` posts one comment per pull request on GitHub and GitLab, listing only what it adds, and updates it in place.
 - `fortis scan --junit` writes JUnit XML for CI test reports.
