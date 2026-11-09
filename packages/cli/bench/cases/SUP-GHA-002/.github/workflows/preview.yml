@@ -1,0 +1,32 @@
+name: preview
+on:
+  pull_request_target:
+    types: [opened, synchronize]
+jobs:
+  build:
+    if: github.event.pull_request.head.repo.full_name != github.repository
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}  # @hit
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}  # @hit
+          repository: ${{ github.event.pull_request.head.repo.full_name }}  # @hit
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.head_ref }}  # @hit
+      - uses: actions/checkout@v5
+        with:
+          ref: refs/pull/${{ github.event.pull_request.number }}/merge  # @hit
+      - run: gh pr checkout ${{ github.event.pull_request.number }}  # @hit
+      - run: git fetch origin pull/${{ github.event.number }}/head:pr  # @hit
+      - run: |
+          git fetch origin ${{ github.event.pull_request.head.sha }}  # @hit
+          git checkout ${{ github.event.pull_request.head.sha }}  # @hit
+          npm ci && npm run build
+      - name: Comment
+        env:
+          HEAD: ${{ github.event.pull_request.head.sha }}
+        run: echo "built $HEAD"

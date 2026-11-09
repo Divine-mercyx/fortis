@@ -1,0 +1,22 @@
+# Each of these stopped getting security fixes some time ago.
+FROM node:16 AS s0  # @hit
+FROM node:14-alpine AS s1  # @hit
+FROM node:18-bullseye-slim AS s2  # @hit
+FROM node:20.19.0 AS s3  # @hit
+FROM python:3.7-slim AS s4  # @hit
+FROM python:3.8 AS s5  # @hit
+FROM python:3.9-alpine AS s6  # @hit
+FROM debian:buster AS s7  # @hit
+FROM debian:10-slim AS s8  # @hit
+FROM debian:stretch AS s9  # @hit
+FROM ubuntu:18.04 AS s10  # @hit
+FROM ubuntu:bionic AS s11  # @hit
+FROM alpine:3.16 AS s12  # @hit
+FROM alpine:3.18 AS s13  # @hit
+FROM golang:1.20-alpine AS s14  # @hit
+FROM php:7.4-fpm AS s15  # @hit
+FROM php:8.0-apache AS s16  # @hit
+FROM ruby:2.7 AS s17  # @hit
+FROM mcr.microsoft.com/dotnet/aspnet:6.0 AS s18  # @hit
+FROM python:3.13-alpine3.17 AS s19  # @hit
+FROM node:24-buster AS s20  # @hit

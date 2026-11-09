@@ -1,0 +1,11 @@
+# FROM node is only a comment here
+FROM node:22.11-alpine AS deps
+FROM node@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef AS pinned
+FROM python:3.13-slim@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+FROM deps AS build
+FROM scratch
+FROM \
+  ghcr.io/acme/base:1.4.2
+# Rebuilt nightly on purpose. Docker only allows comments on their own line.
+# fortis-ignore-next-line
+FROM node AS reviewed

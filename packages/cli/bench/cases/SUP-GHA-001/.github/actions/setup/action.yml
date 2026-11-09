@@ -1,0 +1,6 @@
+name: setup
+runs:
+  using: composite
+  steps:
+    - uses: "pnpm/action-setup@v4" # @hit
+    - uses: 'actions/setup-node@v6'
