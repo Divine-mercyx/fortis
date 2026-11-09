@@ -29,6 +29,7 @@ const CASES: [string, string, string][] = [
   ['Hex (rebar.lock)', 'rebar.lock', '{"1.2.0",\n[{<<"plug">>,{pkg,<<"plug">>,<<"1.3.0">>},0}]}.\n'],
   ['Hackage', 'cabal.project.freeze', 'constraints: any.aeson ==2.0.0.0\n'],
   ['CRAN', 'renv.lock', JSON.stringify({ R: { Version: '4.3.0' }, Packages: { commonmark: { Package: 'commonmark', Version: '1.7', Source: 'Repository', Repository: 'CRAN' } } })],
+  ['SwiftURL', 'Package.resolved', JSON.stringify({ pins: [{ identity: 'vapor', kind: 'remoteSourceControl', location: 'https://github.com/vapor/vapor.git', state: { revision: 'x', version: '4.0.0' } }], version: 2 })],
 ];
 
 describe.skipIf(!process.env.FORTIS_LIVE_OSV)('real OSV', () => {

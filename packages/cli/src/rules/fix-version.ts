@@ -159,6 +159,8 @@ export function upgradeCommand(file: string, eco: Ecosystem, name: string, versi
       return base === 'stack.yaml.lock' ? `set ${name}-${version} in stack.yaml's extra-deps` : `allow ${name} ${version} in your .cabal file, then cabal freeze`;
     case 'CRAN':
       return `renv::install("${name}@${version}") then renv::snapshot()`;
+    case 'SwiftURL':
+      return `allow ${version} for https://${name} in Package.swift (or Xcode's package settings), then swift package update ${name.split('/').pop()}`;
   }
 }
 

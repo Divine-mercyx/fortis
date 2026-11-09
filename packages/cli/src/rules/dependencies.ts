@@ -3,7 +3,7 @@ import { dirname, join, relative, resolve } from 'node:path';
 
 import type { Severity } from '@fortis/shared';
 
-import {  cycloneDx, ecosystemOf, findLockfiles, goWorkModules, GRADLE_BUILD, isDotnetProject, isJvmBuild, isPomXml, isRequirements, manifestFor, missingLockfiles, parseLockfile, pomParent, SBT_BUILD, VERSION_CATALOG, type Ecosystem, type Locked  } from './lockfiles';
+import { cycloneDx, ecosystemOf, findLockfiles, goWorkModules, GRADLE_BUILD, isDotnetProject, isJvmBuild, isPomXml, isRequirements, manifestFor, missingLockfiles, parseLockfile, podsIn, pomParent, SBT_BUILD, VERSION_CATALOG, type Ecosystem, type Locked } from './lockfiles';
 import { fixedVersion, fixMessage, type OsvAffected } from './fix-version';
 import { globMatch } from './js-lockfiles';
 import { OsvCache } from './osv-cache';
@@ -142,6 +142,15 @@ export function readPackages(root: string, files: string[], opts: { sbom?: strin
 
   if (opts.allPaths) {
     const missing = missingLockfiles(opts.allPaths, opts.ignore ?? [], seen);
+    // Say which pods weren't checked, so a CocoaPods app can see what it's carrying.
+    for (const lock of opts.allPaths.filter((p) => /(^|\/)Podfile\.lock$/.test(p))) {
+      try {
+        const pods = podsIn(readText(join(root, lock)));
+        if (pods.length) missing.push(`  ${lock}: ${skippedList(pods, pods.length)}.`);
+      } catch {
+        /* unreadable: the general note still says CocoaPods weren't checked */
+      }
+    }
     if (missing.length) incomplete = true;
     notes.push(...missing);
   }
@@ -255,6 +264,7 @@ export function pinAdvice(file: string): string {
   if (/\.versions\.toml$|^build\.gradle(\.kts)?$|^build\.sbt$|\.scala$/.test(base)) return 'A version from a BOM or a variable, or a dynamic one (1.+), has no one version to check here: a CycloneDX SBOM, Gradle dependency locking or build.sbt.lock covers them.';
   if (/^(mix|rebar)\.lock$|^stack\.yaml\.lock$/.test(base)) return 'Git dependencies have no Hex or Hackage release to check: depend on a published version where you can.';
   if (/^renv\.lock$/.test(base)) return 'Packages from GitHub or Bioconductor aren\'t in OSV\'s CRAN data: install from CRAN where you can.';
+  if (/^Package\.resolved$/.test(base)) return 'A package pinned to a branch or a commit has no release to check: depend on a version where you can.';
   return 'Pin exact versions in the lockfile to check them.';
 }
 
