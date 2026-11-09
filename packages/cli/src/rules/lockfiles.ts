@@ -8,11 +8,11 @@ import { lineOf, TEST_PATH } from './types';
  * hand-written reader, so the CLI stays one dependency-free file. Ecosystem names are OSV's.
  */
 
-export type Ecosystem = 'npm' | 'Packagist' | 'PyPI' | 'Maven' | 'Go' | 'NuGet' | 'RubyGems' | 'crates.io' | 'Pub' | 'GitHub Actions';
+export type Ecosystem = 'npm' | 'Packagist' | 'PyPI' | 'Maven' | 'Go' | 'NuGet' | 'RubyGems' | 'crates.io' | 'Pub' | 'GitHub Actions' | 'Hex' | 'Hackage' | 'CRAN';
 /** `line`: where the package is in its lockfile (npm-family lockfiles), so findings point at it. */
 export type Locked = { name: string; version: string; ecosystem: Ecosystem; dev: boolean; line?: number; direct?: boolean; via?: string };
 /** `skipped` counts declared packages with no exact version to check. `directOnly`: the file doesn't list what those packages need. */
-export type Parsed = { packages: Locked[]; skipped: number; directOnly?: boolean; /** Names of the skipped packages, where the format shows them. */ skippedNames?: string[] };
+export type Parsed = { packages: Locked[]; skipped: number; directOnly?: boolean; /** Something the scan should say about what this file can't show. */ note?: string; /** Names of the skipped packages, where the format shows them. */ skippedNames?: string[] };
 
 const pkg = (ecosystem: Ecosystem, name: string, version: string, dev = false, line = 0): Locked => ({ name, version, ecosystem, dev, line });
 
@@ -554,6 +554,70 @@ export function cycloneDx(text: string): Parsed {
   return { packages, skipped };
 }
 
+/** mix.lock (Elixir): `"name": {:hex, :package, "1.2.3", ...}`. Git dependencies have no Hex release to check. */
+function mixLock(text: string): Parsed {
+  const packages: Locked[] = [];
+  const skippedNames: string[] = [];
+  for (const [i, line] of text.split(/\r?\n/).entries()) {
+    const hex = /^\s*"([^"]+)":\s*\{:hex,\s*:"?([\w.-]+)"?,\s*"([^"]+)"/.exec(line);
+    if (hex) packages.push(pkg('Hex', hex[2]!, hex[3]!, false, i + 1));
+    else if (/^\s*"([^"]+)":\s*\{:git\b/.test(line)) skippedNames.push(`${/^\s*"([^"]+)"/.exec(line)![1]} (git)`);
+  }
+  return { packages, skipped: skippedNames.length, skippedNames };
+}
+
+/** rebar.lock (Erlang): `{<<"name">>,{pkg,<<"package">>,<<"1.2.3">>},Level}`. Git dependencies are named instead. */
+function rebarLock(text: string): Parsed {
+  const packages: Locked[] = [];
+  const skippedNames: string[] = [];
+  for (const m of text.matchAll(/\{<<"([^"]+)">>,\s*\{pkg,\s*<<"([^"]+)">>,\s*<<"([^"]+)">>/g)) packages.push(pkg('Hex', m[2]!, m[3]!, false, lineOf(text, m.index!)));
+  for (const m of text.matchAll(/\{<<"([^"]+)">>,\s*\{git,/g)) skippedNames.push(`${m[1]} (git)`);
+  return { packages, skipped: skippedNames.length, skippedNames };
+}
+
+/** cabal.project.freeze (Haskell): `constraints: any.aeson ==2.2.3.0, ...`. Flag settings aren't versions. */
+function cabalFreeze(text: string): Parsed {
+  const packages: Locked[] = [];
+  for (const m of text.matchAll(/(?:^|[\s,:])(?:any\.)?([A-Za-z][\w-]*)\s*==\s*(\d[\d.]*)/gm)) packages.push(pkg('Hackage', m[1]!, m[2]!, false, lineOf(text, m.index!)));
+  return { packages, skipped: 0 };
+}
+
+/**
+ * stack.yaml.lock (Haskell): the packages from outside the snapshot, `hackage: name-1.2.3@sha256:...`.
+ * The snapshot's own packages (an LTS) aren't in the file, so the scan says so.
+ */
+function stackLock(text: string): Parsed {
+  const packages: Locked[] = [];
+  const skippedNames: string[] = [];
+  const [deps = '', snapshots = ''] = text.split(/^snapshots:\s*$/m);
+  // `completed` entries carry a hash; each package's `original` entry repeats it without one.
+  for (const m of deps.matchAll(/^\s+hackage:\s*([A-Za-z][\w-]*?)-(\d[\d.]*)@/gm)) packages.push(pkg('Hackage', m[1]!, m[2]!, false, lineOf(text, m.index!)));
+  for (const m of deps.matchAll(/^\s+(?:git|url):\s*(\S+)/gm)) skippedNames.push(`${m[1]!.replace(/\.git$/, '').split('/').pop()} (git)`);
+  const snapshot = /original:\s*(\S+)/.exec(snapshots)?.[1];
+  const note = snapshot
+    ? `stack.yaml.lock lists only packages from outside the ${snapshot} snapshot, so the snapshot's packages weren't checked. cabal freeze writes cabal.project.freeze with every package.`
+    : undefined;
+  return { packages, skipped: skippedNames.length, skippedNames, ...(note ? { note } : {}) };
+}
+
+/** CRAN, and the mirrors of it that renv records under their own names. */
+const CRAN_REPO = /^(?:CRAN|RSPM|PPM|P3M|CRAN-RSPM)$|cran/i;
+
+/** renv.lock (R): packages installed from CRAN. GitHub and Bioconductor ones aren't in OSV's CRAN data, so they're named. */
+function renvLock(text: string): Parsed {
+  const lock = JSON.parse(text) as { R?: { Repositories?: { Name?: string; URL?: string }[] }; Packages?: Record<string, { Package?: string; Version?: string; Source?: string; Repository?: string }> };
+  const cranNames = new Set((lock.R?.Repositories ?? []).filter((r) => CRAN_REPO.test(r.Name ?? '') || CRAN_REPO.test(r.URL ?? '')).map((r) => r.Name));
+  const packages: Locked[] = [];
+  const skippedNames: string[] = [];
+  for (const [key, p] of Object.entries(lock.Packages ?? {})) {
+    const name = p.Package ?? key;
+    const fromCran = p.Source === 'Repository' && (CRAN_REPO.test(p.Repository ?? '') || cranNames.has(p.Repository));
+    if (fromCran && p.Version) packages.push(pkg('CRAN', name, p.Version, false, lineOf(text, text.indexOf(`"${key}": {`))));
+    else skippedNames.push(`${name} (${p.Source === 'Repository' ? (p.Repository ?? 'another repository') : (p.Source ?? 'unknown source')})`);
+  }
+  return { packages, skipped: skippedNames.length, skippedNames };
+}
+
 /** `manifest`: the file beside the lockfile that lists what production needs (package.json for Yarn, pyproject.toml for Poetry). */
 /**
  * The actions a workflow uses, at an exact version: `owner/action@v1.2.3`, or a commit pinned with
@@ -616,6 +680,11 @@ const FORMATS: Format[] = [
   { match: /(^|\/)Cargo\.lock$/, ecosystem: 'crates.io', parse: cargoLock },
   { match: /(^|\/)pubspec\.lock$/, ecosystem: 'Pub', parse: pubspecLock },
   { match: /(^|\/)\.github\/workflows\/[^/]+\.ya?ml$/, ecosystem: 'GitHub Actions', parse: workflowActions },
+  { match: /(^|\/)mix\.lock$/, ecosystem: 'Hex', parse: mixLock },
+  { match: /(^|\/)rebar\.lock$/, ecosystem: 'Hex', parse: rebarLock },
+  { match: /(^|\/)cabal\.project\.freeze$/, ecosystem: 'Hackage', parse: cabalFreeze },
+  { match: /(^|\/)stack\.yaml\.lock$/, ecosystem: 'Hackage', parse: stackLock },
+  { match: /(^|\/)renv\.lock$/, ecosystem: 'CRAN', parse: renvLock },
 ];
 
 export const isPomXml = (path: string) => /(^|\/)pom\.xml$/.test(path);
@@ -637,6 +706,10 @@ const MANIFESTS: { match: RegExp; ecosystem: Ecosystem; label: string; hint: str
   { match: /(^|\/)Gemfile$/, ecosystem: 'RubyGems', label: 'Gemfile', hint: 'commit Gemfile.lock' },
   { match: /(^|\/)Cargo\.toml$/, ecosystem: 'crates.io', label: 'Cargo.toml', hint: 'commit Cargo.lock' },
   { match: /(^|\/)pubspec\.yaml$/, ecosystem: 'Pub', label: 'pubspec.yaml', hint: 'commit pubspec.lock' },
+  { match: /(^|\/)mix\.exs$/, ecosystem: 'Hex', label: 'mix.exs', hint: 'commit mix.lock' },
+  { match: /(^|\/)rebar\.config$/, ecosystem: 'Hex', label: 'rebar.config', hint: 'commit rebar.lock' },
+  { match: /(^|\/)(stack\.yaml|cabal\.project|[\w.-]+\.cabal)$/, ecosystem: 'Hackage', label: 'Haskell project files', hint: 'run cabal freeze and commit cabal.project.freeze, or commit stack.yaml.lock' },
+  { match: /(^|\/)(DESCRIPTION|renv\/activate\.R|[\w.-]+\.Rproj)$/, ecosystem: 'CRAN', label: 'R project files', hint: 'run renv::snapshot() and commit renv.lock' },
 ];
 
 /** Vendored and generated folders hold other people's manifests, not this project's. */
@@ -686,7 +759,9 @@ export const ecosystemOf = (file: string): Ecosystem => formatOf(file).ecosystem
 const UNSUPPORTED: { match: RegExp; label: string }[] = [
   { match: /(^|\/)(Package\.swift|Package\.resolved)$/, label: 'Swift packages' },
   { match: /(^|\/)Podfile(\.lock)?$/, label: 'CocoaPods' },
-  { match: /(^|\/)mix\.(exs|lock)$/, label: 'Elixir (mix)' },
+  // OSV has no ConanCenter or vcpkg advisories yet (its ecosystem list), so there's nothing to check these against.
+  { match: /(^|\/)(conanfile\.(txt|py)|conan\.lock)$/, label: 'C and C++ packages from Conan' },
+  { match: /(^|\/)vcpkg\.json$/, label: 'C and C++ packages from vcpkg' },
 ];
 
 export function missingLockfiles(paths: string[], ignore: string[], found: ReadonlySet<Ecosystem>): string[] {

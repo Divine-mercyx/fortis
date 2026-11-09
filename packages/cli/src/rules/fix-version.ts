@@ -153,6 +153,12 @@ export function upgradeCommand(file: string, eco: Ecosystem, name: string, versi
       return `dart pub add ${name}:^${version}`;
     case 'GitHub Actions':
       return `point uses: ${name} in ${base} at v${version}, pinned by its commit SHA`;
+    case 'Hex':
+      return base === 'rebar.lock' ? `raise ${name} to ${version} in rebar.config, then rebar3 upgrade ${name}` : `raise ${name} to ${version} in mix.exs, then mix deps.update ${name}`;
+    case 'Hackage':
+      return base === 'stack.yaml.lock' ? `set ${name}-${version} in stack.yaml's extra-deps` : `allow ${name} ${version} in your .cabal file, then cabal freeze`;
+    case 'CRAN':
+      return `renv::install("${name}@${version}") then renv::snapshot()`;
   }
 }
 
