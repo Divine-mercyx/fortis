@@ -1,4 +1,4 @@
-import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { execFileSync } from 'node:child_process';
 
@@ -63,6 +63,39 @@ function hooksDir(root: string): string {
     /* not set */
   }
   return join(root, '.git', 'hooks');
+}
+
+export type HookState = {
+  state: 'current' | 'managed' | 'generated' | 'husky-without-fortis' | 'outdated' | 'not-executable' | 'foreign' | 'missing';
+  /** The file git will actually run, wherever core.hooksPath points. */
+  path?: string;
+  /** The hook manager that runs Fortis, when one does. */
+  manager?: string;
+};
+
+const mentionsFortis = (path: string) => existsSync(path) && /\bfortis\b/.test(readFileSync(path, 'utf8'));
+
+/** Whether the hook git will run on push is the current Fortis one. Changes nothing. */
+export function hookStatus(root: string, platform: string = process.platform): HookState {
+  const path = join(hooksDir(root), 'pre-push');
+  const posixPath = path.replace(/\\/g, '/');
+  const current = existsSync(path) ? readFileSync(path, 'utf8') : null;
+
+  // Husky runs .husky/pre-push through the generated files in .husky/_ .
+  if (/\/\.husky(\/|$)/.test(posixPath)) {
+    if (mentionsFortis(join(root, '.husky', 'pre-push'))) return { state: 'managed', path: join(root, '.husky', 'pre-push'), manager: 'Husky' };
+    if (current?.includes(MARKER)) return { state: 'generated', path };
+    return { state: 'husky-without-fortis', path };
+  }
+  if (current?.includes('lefthook') && ['lefthook.yml', 'lefthook.yaml', '.lefthook.yml', '.lefthook.yaml'].some((f) => mentionsFortis(join(root, f)))) return { state: 'managed', path, manager: 'lefthook' };
+  if (current?.includes('pre-commit') && mentionsFortis(join(root, '.pre-commit-config.yaml'))) return { state: 'managed', path, manager: 'pre-commit' };
+
+  if (current === null) return { state: 'missing', path };
+  if (!current.includes(MARKER)) return { state: 'foreign', path };
+  if (!current.includes(RUN) && !current.includes(RUN.replace(/\n/g, '\n  '))) return { state: 'outdated', path };
+  // Windows has no executable bit, and git for Windows runs hooks regardless.
+  if (platform !== 'win32' && !(statSync(path).mode & 0o111)) return { state: 'not-executable', path };
+  return { state: 'current', path };
 }
 
 export function installHook(root: string): { path: string; status: 'installed' | 'already' | 'appended' | 'updated' } {

@@ -1,0 +1,5 @@
+// Encrypted at the application layer before it's written.
+model Card {
+  id          String @id
+  cardNumber  String
+}

@@ -13,6 +13,8 @@ import { allFiles, changedFiles, checkoutInfo, type PushedRef } from './git';
 export type ScanOptions = {
   root: string;
   scope: 'changed' | 'full';
+  /** Scan exactly these paths (relative to root) instead of working them out from git. */
+  only?: string[];
   packs: readonly RulePack[];
   ignore?: string[];
   offline?: boolean;
@@ -48,10 +50,7 @@ export type ScanResult = {
 
 /** Source files the fintech code rules can't read yet. */
 const UNCOVERED_LANGUAGES: [RegExp, string][] = [
-  [/\.(java|kt|kts|scala|groovy)$/i, 'Java/Kotlin'],
-  [/\.php$/i, 'PHP'],
-  [/\.go$/i, 'Go'],
-  [/\.cs$/i, 'C#'],
+  [/\.(scala|groovy)$/i, 'Scala/Groovy'],
   [/\.rb$/i, 'Ruby'],
   [/\.rs$/i, 'Rust'],
   [/\.(swift|dart)$/i, 'mobile'],
@@ -61,7 +60,7 @@ function uncoveredLanguagesNote(paths: string[]): string | null {
   const counts = UNCOVERED_LANGUAGES.map(([re, label]) => ({ label, n: paths.filter((p) => re.test(p) && !TEST_PATH.test(p)).length })).filter((c) => c.n);
   if (!counts.length) return null;
   const list = counts.sort((a, b) => b.n - a.n).map((c) => `${c.n} ${c.label}`).join(', ');
-  return `Fintech code rules cover JavaScript, TypeScript and Python so far: ${list} files had secrets and dependency checks only.`;
+  return `Fintech code rules cover JavaScript, TypeScript, Python, Go, C#, PHP, Java and Kotlin so far: ${list} files had secrets and dependency checks only.`;
 }
 
 const DEFAULT_BUDGET_MS = (Number(process.env.FORTIS_SCAN_BUDGET_SECONDS) || 600) * 1000;
@@ -72,7 +71,7 @@ export async function runScan(opts: ScanOptions): Promise<ScanResult> {
   const partial: string[] = [];
   const checkout = checkoutInfo(opts.root);
   const everything = () => allFiles(opts.root, { submodules: opts.submodules });
-  const paths = opts.scope === 'changed' ? changedFiles(opts.root, opts.pushed) : everything();
+  const paths = opts.only ?? (opts.scope === 'changed' ? changedFiles(opts.root, opts.pushed) : everything());
   const keep = makeFilter(opts.ignore);
   const candidates = paths.filter(keep);
   let rules = rulesFor(opts.packs);

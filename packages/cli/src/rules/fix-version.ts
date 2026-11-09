@@ -52,6 +52,40 @@ export function compareVersions(a: string, b: string): number {
   return 0;
 }
 
+/**
+ * Semantic Versioning order, for Go: everything after `-` is a pre-release, so the pseudo-version
+ * v1.2.4-0.20240101120000-abcdef123456 comes before v1.2.4, and v0.0.0-2024…-abcdef before anything.
+ */
+export function compareSemver(a: string, b: string): number {
+  const split = (v: string) => {
+    const t = v.trim().replace(/^v/i, '').replace(/\+.*$/, '');
+    const dash = t.indexOf('-');
+    return { core: (dash === -1 ? t : t.slice(0, dash)).split('.').map(Number), pre: dash === -1 ? null : t.slice(dash + 1).split('.') };
+  };
+  const x = split(a);
+  const y = split(b);
+  for (let i = 0; i < Math.max(x.core.length, y.core.length); i++) {
+    const d = (x.core[i] ?? 0) - (y.core[i] ?? 0);
+    if (d) return d;
+  }
+  if (!x.pre || !y.pre) return x.pre ? -1 : y.pre ? 1 : 0;
+  for (let i = 0; i < Math.max(x.pre.length, y.pre.length); i++) {
+    const p = x.pre[i];
+    const q = y.pre[i];
+    if (p === undefined) return -1;
+    if (q === undefined) return 1;
+    const pn = /^\d+$/.test(p);
+    const qn = /^\d+$/.test(q);
+    if (pn && qn && Number(p) !== Number(q)) return Number(p) - Number(q);
+    if (pn !== qn) return pn ? -1 : 1;
+    if (!pn && p !== q) return p < q ? -1 : 1;
+  }
+  return 0;
+}
+
+/** How to order this ecosystem's versions. */
+export const versionOrder = (eco: Ecosystem): ((a: string, b: string) => number) => (eco === 'Go' ? compareSemver : compareVersions);
+
 /** PyPI names compare case-insensitively with -, _ and . treated alike (PEP 503). */
 const sameName = (eco: Ecosystem, a: string, b: string) =>
   eco === 'PyPI' ? a.toLowerCase().replace(/[-_.]+/g, '-') === b.toLowerCase().replace(/[-_.]+/g, '-') : eco === 'NuGet' ? a.toLowerCase() === b.toLowerCase() : a === b;
@@ -64,8 +98,8 @@ export function advisoryFix(affected: OsvAffected[] | undefined, eco: Ecosystem,
     .filter((r) => r.type !== 'GIT')
     .flatMap((r) => r.events ?? [])
     .map((e) => e.fixed)
-    .filter((f): f is string => Boolean(f) && compareVersions(f!, installed) > 0)
-    .sort(compareVersions);
+    .filter((f): f is string => Boolean(f) && versionOrder(eco)(f!, installed) > 0)
+    .sort(versionOrder(eco));
   return fixes[0] ?? null;
 }
 
@@ -84,7 +118,7 @@ export function fixedVersion(
   for (const a of advisories) {
     const f = advisoryFix(a.affected, eco, name, installed);
     if (!f) unfixed.push(a.id);
-    else if (!best || compareVersions(f, best) > 0) best = f;
+    else if (!best || versionOrder(eco)(f, best) > 0) best = f;
   }
   return { version: unfixed.length ? null : best, partial: best, unfixed };
 }
@@ -117,6 +151,16 @@ export function upgradeCommand(file: string, eco: Ecosystem, name: string, versi
       return `set ${name} to ${version} in ${base}`;
     case 'Pub':
       return `dart pub add ${name}:^${version}`;
+    case 'GitHub Actions':
+      return `point uses: ${name} in ${base} at v${version}, pinned by its commit SHA`;
+    case 'Hex':
+      return base === 'rebar.lock' ? `raise ${name} to ${version} in rebar.config, then rebar3 upgrade ${name}` : `raise ${name} to ${version} in mix.exs, then mix deps.update ${name}`;
+    case 'Hackage':
+      return base === 'stack.yaml.lock' ? `set ${name}-${version} in stack.yaml's extra-deps` : `allow ${name} ${version} in your .cabal file, then cabal freeze`;
+    case 'CRAN':
+      return `renv::install("${name}@${version}") then renv::snapshot()`;
+    case 'SwiftURL':
+      return `allow ${version} for https://${name} in Package.swift (or Xcode's package settings), then swift package update ${name.split('/').pop()}`;
   }
 }
 

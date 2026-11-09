@@ -7,7 +7,7 @@
  *   pnpm --filter fortis-watchdog bench --update   # record current scores as the new floor
  */
 import { readdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { dirname, join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { ALL_LANGUAGES, loadGrammars } from '../src/analysis/parser';
@@ -73,7 +73,7 @@ const FAKES: Record<string, string> = {
 type Score = { tp: number; fp: number; fn: number; misses: string[]; falsePositives: string[] };
 
 /** Scored per language, so a strong JavaScript score can't hide a weak Python one. */
-const scoreKey = (ruleId: string, path: string) => (/\.py$/.test(path) ? `${ruleId}:py` : ruleId);
+const scoreKey = (ruleId: string, path: string) => (/\.py$/.test(path) ? `${ruleId}:py` : /\.go$/.test(path) ? `${ruleId}:go` : /\.cs$/.test(path) ? `${ruleId}:cs` : /\.php$/.test(path) ? `${ruleId}:php` : /\.java$/.test(path) ? `${ruleId}:java` : /\.kt$/.test(path) ? `${ruleId}:kt` : ruleId);
 
 export async function runBench(): Promise<Record<string, Score>> {
   await loadGrammars(ALL_LANGUAGES);
@@ -81,10 +81,14 @@ export async function runBench(): Promise<Record<string, Score>> {
   for (const ruleId of readdirSync(casesDir)) {
     const rules = FILE_RULES.filter((r) => r.id === ruleId);
     if (!rules.length) throw new Error(`bench/cases/${ruleId}: no rule with that ID`);
-    const files: SourceFile[] = readdirSync(join(casesDir, ruleId)).map((name) => {
+    const names = readdirSync(join(casesDir, ruleId), { recursive: true, withFileTypes: true })
+      .filter((e) => e.isFile())
+      .map((e) => relative(join(casesDir, ruleId), join(e.parentPath, e.name)).replace(/\\/g, '/'));
+    const files: SourceFile[] = names.map((name) => {
       const text = readFileSync(join(casesDir, ruleId, name), 'utf8').replace(/\{\{(\w+)\}\}/g, (_, k: string) => FAKES[k] ?? k);
-      // A realistic app path, so path-based rules (money words, test folders) behave as in a repo.
-      return { path: `src/${name.replace(/\.(txt)$/, '')}`, text, lines: text.split(/\r?\n/) };
+      // A realistic app path, so path-based rules (money words, test folders) behave as in a repo. A case in
+      // a subfolder keeps its own path, for rules that need one, such as .github/workflows/ci.yml.
+      return { path: name.includes('/') ? name : `src/${name.replace(/\.(txt)$/, '')}`, text, lines: text.split(/\r?\n/) };
     });
     const ctx = files.length ? buildContext(files) : emptyContext();
     // Each folder is one small project, so a case can follow a call into another file in it.

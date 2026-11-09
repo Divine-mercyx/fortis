@@ -43,7 +43,7 @@ const STACKS: Record<StackId, { label: string; install: string; run: string; not
     label: 'Other languages (Go, Java, PHP…)',
     install: `curl -fsSL ${CLI_INSTALL_URL}/install.sh | sh`,
     run: CLI_COMMAND,
-    note: `A standalone binary: no Node.js needed. On Windows, in PowerShell: irm ${CLI_INSTALL_URL}/install.ps1 | iex. Secrets, dependencies, staging tests (ZAP) and access checks work for your language. The fintech code rules read JavaScript, TypeScript and Python so far, and the scan tells you which files they skipped.`,
+    note: `A standalone binary: no Node.js needed. On Windows, in PowerShell: irm ${CLI_INSTALL_URL}/install.ps1 | iex. Secrets, dependencies, staging tests (ZAP) and access checks work for your language. The fintech code rules read JavaScript, TypeScript, Python, Go, C#, PHP, Java and Kotlin so far, and the scan tells you which files they skipped.`,
   },
 };
 
@@ -59,6 +59,7 @@ const NAV: { id: string; title: string; group: string }[] = [
   { id: 'cmd-access', title: 'fortis access', group: 'Commands' },
   { id: 'cmd-baseline', title: 'fortis baseline', group: 'Commands' },
   { id: 'cmd-ci', title: 'fortis ci init', group: 'Commands' },
+  { id: 'cmd-doctor', title: 'fortis doctor', group: 'Commands' },
   { id: 'cmd-account', title: 'login, logout, whoami', group: 'Commands' },
   { id: 'cmd-rules', title: 'explain and rules', group: 'Commands' },
   { id: 'pre-push', title: 'Pre-push hook', group: 'Guides' },
@@ -139,6 +140,7 @@ on:
 permissions:
   contents: read
   security-events: write
+  pull-requests: write
 
 jobs:
   scan:
@@ -151,9 +153,10 @@ jobs:
         with:
           version: ${CLI_VERSION}
       - name: Fortis scan
-        run: fortis scan --ci --sarif fortis.sarif
+        run: fortis scan --ci --sarif fortis.sarif --pr-comment
         env:
           FORTIS_KEY: \${{ secrets.FORTIS_KEY }}
+          GITHUB_TOKEN: \${{ github.token }}
       - name: Upload to GitHub code scanning
         if: always() && hashFiles('fortis.sarif') != ''
         continue-on-error: true   # free on public repos; needs Advanced Security on private ones
@@ -186,10 +189,12 @@ fortis-scan:
   stage: test
   image: ghcr.io/divine-mercyx/fortis:${CLI_VERSION}
   script:
-    - fortis scan --ci --sarif fortis.sarif
+    - fortis scan --ci --sarif fortis.sarif --junit fortis-junit.xml --pr-comment
   artifacts:
     when: always
     paths: [fortis.sarif]
+    reports:
+      junit: fortis-junit.xml
   rules:
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
     - if: $CI_COMMIT_BRANCH
@@ -227,8 +232,10 @@ const ACCESS_JSON = `{
 
 const PACK_LABEL: Record<RulePack, string> = { fintech: 'Fintech', secrets: 'Secrets', dependencies: 'Dependencies' };
 const RULE_LANG: Record<string, string> = {
-  'FX-SEC-001': 'Any file', 'SEC-GEN-001': 'Any file', 'DEP-OSV': 'Lockfiles for JavaScript, PHP, Python, Java, Go, .NET, Ruby, Rust and Dart/Flutter',
-  'FX-BOLA-001': 'Any language (running app)', 'FX-AUTH-001': 'Any language (running app)',
+  'FX-SEC-001': 'Any file', 'SEC-GEN-001': 'Any file', 'DEP-OSV': 'Lockfiles for JavaScript, PHP, Python, Java, Go, .NET, Ruby, Rust and Dart/Flutter, and GitHub Actions workflows',
+  'SUP-IMG-001': 'Dockerfiles', 'SUP-IMG-002': 'Production Dockerfiles', 'SUP-IMG-003': 'Dockerfiles',
+  'SUP-GHA-001': 'GitHub Actions workflows', 'SUP-GHA-002': 'GitHub Actions workflows',
+  'FX-BOLA-001': 'Any language (running app)', 'FX-BOLA-002': 'Any language (running app)', 'FX-AUTH-001': 'Any language (running app)',
 };
 
 /* ---------- Page ---------- */
@@ -356,7 +363,7 @@ export default function DocsPage() {
           <ul className="doc-list">
             <li><b>Node.js 18.17 or newer</b> if you install from npm. The standalone binary and the PyPI package need no Node.</li>
             <li><b>git</b>, for the pre-push hook and changed-file scans.</li>
-            <li><b>Docker</b>, only for <C>fortis test</C> (ZAP runs in the official <C>zaproxy/zap-stable</C> image).</li>
+            <li><b>Docker or a local ZAP</b>, only for <C>fortis test</C>. With Docker, ZAP runs in the official <C>zaproxy/zap-stable</C> image.</li>
             <li>A <b>Fortis key</b> for the fintech rules, dashboard sync, staging tests and access checks. Secrets and dependency checks run without one.</li>
           </ul>
           <div className="table-wrap doc-table">
@@ -441,6 +448,8 @@ export default function DocsPage() {
             ['--history', 'Also search every commit on every branch for secrets. A deleted key is still readable in history and must be rotated.'],
             ['--since <rev>', 'With --history, only search commits after this revision.'],
             ['--sarif <file>', 'Write SARIF 2.1.0 for GitHub code scanning, GitLab and IDEs.'],
+            ['--junit <file>', 'Write JUnit XML for CI systems that show test reports.'],
+            ['--pr-comment', 'On GitHub Actions and GitLab, post one comment on the pull request listing what it adds, updated in place.'],
             ['--json', 'Print machine-readable results instead of the report. Secrets in flagged lines are masked, as everywhere else.'],
             ['--no-upload', 'Keep results on this machine.'],
             ['--no-baseline', 'Report and block on every finding, ignoring .fortis-baseline.json.'],
@@ -453,7 +462,7 @@ export default function DocsPage() {
         </Section>
 
         <Section id="cmd-test" title="fortis test">
-          <p>Tests a running app with OWASP ZAP in Docker. Anything that isn&apos;t your own machine must be a verified, authorised <a href="#staging">staging target</a> on the project.</p>
+          <p>Tests a running app with OWASP ZAP, in Docker or from a local install when Docker isn&apos;t available. Anything that isn&apos;t your own machine must be a verified, authorised <a href="#staging">staging target</a> on the project.</p>
           <CodeLine cmd={run('test --target https://staging.yourapp.com [options]')} />
           <Options rows={[
             ['--target <url>', 'The app to test. Or set "target" once in .fortis.json.'],
@@ -462,11 +471,11 @@ export default function DocsPage() {
             ['--minutes <n>', 'How long to crawl (default 2, up to 60).'],
             ['--wait <seconds>', 'Wait for the target to come up first. Useful straight after a deploy.'],
             ['--local', 'Test localhost on this machine without registering it. Results stay local.'],
-            ['--zap-report <file>', 'Import a ZAP JSON report you ran yourself instead of running Docker.'],
+            ['--zap-report <file>', 'Import a ZAP JSON report you ran yourself instead of running ZAP.'],
             ['--fail-on <severity>', 'Exit 1 at this severity or above (default high).'],
             ['--json, --no-upload', 'As for scan.'],
           ]} />
-          <p><b>Testing behind login.</b> Put a staging test user&apos;s token in <C>FORTIS_ZAP_AUTH</C>. It is sent as <C>Authorization: Bearer …</C> to the target host only, passed to Docker through the environment rather than the command line, and removed from all output and uploads. Use <C>FORTIS_ZAP_AUTH_HEADER=Cookie</C> for cookie sessions.</p>
+          <p><b>Testing behind login.</b> Put a staging test user&apos;s token in <C>FORTIS_ZAP_AUTH</C>. It is sent as <C>Authorization: Bearer …</C> to the target host only, passed to ZAP through the environment rather than the command line, and removed from all output and uploads. Use <C>FORTIS_ZAP_AUTH_HEADER=Cookie</C> for cookie sessions.</p>
           <Block code={`FORTIS_ZAP_AUTH=eyJhbGciOi… ${run('test --target https://staging.yourapp.com')}`} />
           <p>Pausing the target in the dashboard stops a running test within about 20 seconds; nothing is uploaded.</p>
         </Section>
@@ -495,7 +504,7 @@ export default function DocsPage() {
           <p>Writes a ready-to-use pipeline: a scan on every pull request and push, and a ZAP test after each push to your staging branch.</p>
           <CodeLine cmd={run(`ci init${ci === 'gitlab' ? ' --provider gitlab' : ''} [--staging-branch staging] [--target URL] [--force]`)} />
           <Options rows={[
-            ['--provider github|gitlab', 'Which CI to write for. Detected from .gitlab-ci.yml when not given.'],
+            ['--provider <name>', 'Which CI to write for: github, gitlab, bitbucket, azure, jenkins, circleci or buildkite. Detected from the files in your repository when not given.'],
             ['--staging-branch <name>', 'The branch that deploys to staging (default staging).'],
             ['--target <url>', 'Write the staging URL into the file instead of reading it from a CI variable.'],
             ['--force', 'Overwrite an existing file.'],
@@ -565,20 +574,32 @@ export default function DocsPage() {
           <p>For each resource you list, Fortis finds records that belong to test customer A, then requests each one as test customer B and with no login at all. If either gets A&apos;s record back, that&apos;s a finding:</p>
           <ul className="doc-list">
             <li><b>FX-BOLA-001</b>: customer B can read customer A&apos;s record.</li>
+            <li><b>FX-BOLA-002</b>: customer B can change or delete customer A&apos;s record. Only checked with <C>--writes</C>.</li>
             <li><b>FX-AUTH-001</b>: the record is readable without logging in.</li>
           </ul>
           <p><b>Set it up</b></p>
           <ol className="doc-steps">
             <li>Create two ordinary customers on staging, and give customer A at least one loan, wallet or transfer.</li>
-            <li>Write the config: <CodeLine cmd={run('access init --openapi https://staging.yourapp.com/openapi.json')} /></li>
+            <li>Write the config: <CodeLine cmd={run('access init --openapi https://staging.yourapp.com/openapi.json')} /> Use <C>--postman</C> or <C>--har</C> with a file, or <C>--graphql</C> with your GraphQL URL, in the same way.</li>
             <li>Check the paths, then run it with the two tokens: <CodeLine cmd={`FORTIS_USER_A_TOKEN=… FORTIS_USER_B_TOKEN=… ${run('access --target https://staging.yourapp.com')}`} /></li>
           </ol>
           <Block lang=".fortis-access.json" code={ACCESS_JSON} />
           <ul className="doc-list">
             <li>Each check needs a <C>get</C> path containing <C>{'{id}'}</C>, plus either a <C>list</C> path (IDs are read from the first array of objects in the response, using <C>idField</C>, default <C>id</C>) or explicit <C>ids</C> that belong to user A.</li>
-            <li>Only GET requests are sent: nothing is created, changed or deleted. There is a short pause between requests and a cap of 200 per run.</li>
+            <li>By default the checks are read-only: nothing is created, changed or deleted. There is a short pause between requests and a cap of 200 per run.</li>
+            <li><C>--writes</C> needs a <C>writes</C> block on a check. Customer A creates a throwaway record, customer B tries to update and delete it, and customer A removes it afterwards. Existing records are never written to.</li>
+            <li>GraphQL often answers 200 when it refuses, so a response only counts as success if it has no errors and has data.</li>
             <li>A 404 that echoes the ID back (“loan 123 not found”) is correctly treated as protected.</li>
             <li>Tokens come from the environment only and are removed from all results. Never put them in the config file.</li>
+          </ul>
+        </Section>
+
+        <Section id="vscode" title="VS Code, Cursor and VSCodium">
+          <p>The Fortis Security extension scans each file when you save it and shows findings as problems at the right line. Hover for why a finding matters and how to fix it.</p>
+          <ul className="doc-list">
+            <li><b>Quick fixes:</b> ignore a line with a reason, open a dependency&apos;s advisory, or copy its upgrade command.</li>
+            <li><b>The CLI:</b> it uses the version in your project or on your PATH, or else the one it comes with.</li>
+            <li><b>Privacy:</b> the extension never uploads findings, and its results are masked like every other output. To sync, use your git hook or CI as usual.</li>
           </ul>
         </Section>
 
@@ -610,6 +631,7 @@ export default function DocsPage() {
                   ['FORTIS_ZAP_AUTH_HEADER', 'test', 'Header for FORTIS_ZAP_AUTH (default Authorization; e.g. Cookie).'],
                   ['FORTIS_ZAP_IMAGE', 'test', 'ZAP Docker image (default zaproxy/zap-stable).'],
                   ['FORTIS_ZAP_DOCKER_ARGS', 'test', 'Extra docker run flags, e.g. --add-host or --network.'],
+                  ['FORTIS_ZAP_PATH', 'test', 'Use the ZAP at this path (zap.sh or zap.bat) instead of Docker.'],
                   ['FORTIS_USER_A_TOKEN / FORTIS_USER_B_TOKEN', 'access', 'The two test customers’ tokens (names can be changed in the config).'],
                   ['CI', 'scan', 'Set by CI providers; turns on full-scan mode.'],
                   ['NO_COLOR / FORCE_COLOR', 'all', 'Turn terminal colours off or on.'],
@@ -626,7 +648,7 @@ export default function DocsPage() {
               <tbody>
                 <tr><td className="mono">0</td><td>Passed: nothing at or above the threshold.</td></tr>
                 <tr><td className="mono">1</td><td>Findings at or above the threshold (the push or build should stop).</td></tr>
-                <tr><td className="mono">2</td><td>Could not run: bad options, invalid key, target not ready, Docker missing, or a network error.</td></tr>
+                <tr><td className="mono">2</td><td>Could not run: bad options, invalid key, target not ready, neither Docker nor ZAP found, or a network error.</td></tr>
               </tbody>
             </table>
           </div>
@@ -720,7 +742,20 @@ export default function DocsPage() {
           </ul>
         </Section>
 
+        <Section id="cmd-doctor" title="fortis doctor">
+          <p>Finds what isn&apos;t working here, and prints the fix for each thing: the install, the git hook, <C>.fortis.json</C>, your key and plan, access to OSV and the Fortis API, git, lockfiles, Docker and your staging target.</p>
+          <CodeLine cmd={run('doctor')} />
+          <Options rows={[
+            ['--strict', 'Also fail on things that are only worth knowing, such as no key on the free plan.'],
+            ['--json', 'Print the results as data.'],
+            ['--offline', 'Skip the network checks.'],
+            ['--target <url>', 'Also check that this staging URL is ready to test.'],
+          ]} />
+          <p>It exits 1 if something stops Fortis doing its job.</p>
+        </Section>
+
         <Section id="troubleshooting" title="Troubleshooting">
+          <p>Start with <C>{run('doctor')}</C>. It detects each of these, except a wrong finding, and prints the fix.</p>
           <dl className="doc-faq">
             <dt>“No Fortis key found, so only the free checks ran”</dt>
             <dd>Run <C>{run('login fts_…')}</C>, or set <C>FORTIS_KEY</C>. Check with <C>{run('whoami')}</C>.</dd>

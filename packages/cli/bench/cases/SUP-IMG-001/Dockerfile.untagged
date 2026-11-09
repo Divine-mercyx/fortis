@@ -1,0 +1,37 @@
+# One stage per base image: none has a tag.
+FROM node AS s0  # @hit
+RUN true
+FROM python AS s1  # @hit
+RUN true
+FROM golang AS s2  # @hit
+RUN true
+FROM nginx AS s3  # @hit
+RUN true
+FROM alpine AS s4  # @hit
+RUN true
+FROM ubuntu AS s5  # @hit
+RUN true
+FROM debian AS s6  # @hit
+RUN true
+FROM redis AS s7  # @hit
+RUN true
+FROM ruby AS s8  # @hit
+RUN true
+FROM php AS s9  # @hit
+RUN true
+FROM mcr.microsoft.com/dotnet/aspnet AS s10  # @hit
+RUN true
+FROM ghcr.io/acme/payments-base AS s11  # @hit
+RUN true
+FROM registry.example.com:5000/team/api AS s12  # @hit
+RUN true
+FROM docker.io/library/node AS s13  # @hit
+RUN true
+FROM busybox AS s14  # @hit
+RUN true
+FROM eclipse-temurin AS s15  # @hit
+RUN true
+FROM gcr.io/distroless/nodejs AS s16  # @hit
+RUN true
+FROM amazonlinux AS s17  # @hit
+RUN true

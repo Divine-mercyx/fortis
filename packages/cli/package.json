@@ -18,6 +18,7 @@
   },
   "files": [
     "dist",
+    "fortis.schema.json",
     "README.md",
     "LICENSE"
   ],
@@ -42,6 +43,8 @@
     "fortis": "tsx src/index.ts",
     "prepublishOnly": "node build.mjs",
     "bench": "tsx bench/run.ts",
+    "corpus": "tsx bench/corpus.ts",
+    "feedback": "tsx bench/feedback.ts",
     "prepack": "node build.mjs"
   },
   "devDependencies": {
