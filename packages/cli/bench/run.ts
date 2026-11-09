@@ -70,6 +70,25 @@ const FAKES: Record<string, string> = {
   WEBHOOK_SECRET: ['whsec', rand(32)].join('_'),
 };
 
+// Encoded values (base64 in config, Kubernetes Secret data), from the fakes above.
+const b64 = (s: string) => Buffer.from(s).toString('base64');
+const PEM = [['-----BEGIN', 'PRIVATE KEY-----'].join(' '), 'MIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQC7', `${rand(64)}`, '-----END PRIVATE KEY-----', ''].join('\n');
+Object.assign(FAKES, {
+  PAYSTACK_LIVE_B64: b64(FAKES.PAYSTACK_LIVE!),
+  GH_TOKEN_B64: b64(FAKES.GH_TOKEN!),
+  GH_TOKEN_B64URL: Buffer.from(FAKES.GH_TOKEN!).toString('base64url'),
+  PEM_B64: b64(PEM),
+  PEM_JSON: JSON.stringify(PEM).slice(1, -1),
+  ENCRYPTED_PEM_JSON: JSON.stringify(PEM.replace(/PRIVATE KEY/g, 'ENCRYPTED PRIVATE KEY')).slice(1, -1),
+  PG_URL_B64: b64(`postgres://app:${rand(20)}@db.prod.example.com:5432/app`),
+  K8S_PASSWORD_B64: b64(rand(24)),
+  K8S_USER_B64: b64('admin'),
+  K8S_HOST_B64: b64('db.prod.example.com'),
+  PLAIN_TEXT_B64: b64('This is ordinary text that happens to be base64 encoded for transport.'),
+  SHA512_B64: Buffer.from(rand(64, '0123456789abcdef'), 'hex').toString('base64'),
+  PNG_B64: Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, ...Array.from({ length: 60 }, (_, i) => (i * 37) % 256)]).toString('base64'),
+});
+
 type Score = { tp: number; fp: number; fn: number; misses: string[]; falsePositives: string[] };
 
 /** Scored per language, so a strong JavaScript score can't hide a weak Python one. */

@@ -1,0 +1,7 @@
+{
+  "client_email": "deploy@example.iam.example.com",
+  "private_key": "{{PEM_JSON}}", "_": "@hit",
+  "signing_key": "{{ENCRYPTED_PEM_JSON}}", "__": "@hit",
+  "docs_example": "-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----\n",
+  "template": "-----BEGIN PRIVATE KEY-----\n<your private key>\n-----END PRIVATE KEY-----\n"
+}

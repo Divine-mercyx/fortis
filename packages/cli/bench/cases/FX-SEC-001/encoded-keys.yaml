@@ -1,0 +1,11 @@
+apiVersion: v1
+kind: Secret
+metadata:
+  name: payments
+type: Opaque
+data:
+  PAYSTACK_SECRET_KEY: {{PAYSTACK_LIVE_B64}} # @hit
+---
+# A Helm values file that base64s the key "so it isn't in plain text".
+payments:
+  paystackKeyB64: "{{PAYSTACK_LIVE_B64}}" # @hit

@@ -219,7 +219,7 @@ describe('SEC-GEN-001 SaaS, cloud and registry tokens', () => {
   });
 
   it('calls a PEM inside a service-account JSON a Google Cloud key', () => {
-    const src = `{\n  "type": "service_account",\n  "private_key": "-----BEGIN PRIVATE KEY-----\\nMIIE\\n"\n}`; // fortis-ignore: test input
+    const src = `{\n  "type": "service_account",\n  "private_key": "-----BEGIN PRIVATE KEY-----\\nMIIEvQIBADANBgkqhkiG9w0BAQEFAASC\\n"\n}`; // fortis-ignore: test input
     expect(run(genericSecretRule, 'deploy/sa.json', src).map((d) => [d.line, d.severity, d.title])).toEqual([[3, 'critical', 'Google Cloud service account key in code']]);
   });
 
