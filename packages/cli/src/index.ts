@@ -8,6 +8,7 @@ import { ApiError, client, toUpload, type CliTarget, type WhoAmI } from './api';
 import { ACCESS_CONFIG, checksFromOpenApi, readAccessConfig, runAccessChecks, writeAccessTemplate } from './access';
 import { BASELINE_FILE, readBaseline, splitByBaseline, writeBaseline } from './baseline';
 import { CI_PROVIDERS, detectProvider, NEXT_STEPS, writeCi, type CiProvider } from './ci';
+import { runDoctor, type Check } from './doctor';
 import { scanHistory } from './history';
 import { toJunit } from './junit';
 import { postPrComment, prContext } from './pr-comment';
@@ -40,6 +41,7 @@ ${c.bold('Usage')}
   fortis baseline                                    accept today's findings so only new ones block
   fortis ci init [--provider <name>] [--history]     write a CI pipeline: ${CI_PROVIDERS.join(', ')}
   fortis explain <RULE-ID>                           why a rule matters and how to fix it
+  fortis doctor [--strict] [--json] [--offline]      find what isn't working here, and how to fix it
   fortis rules                                       list every rule
 
 ${c.bold('Scan options')}
@@ -571,6 +573,26 @@ async function cmdAccess(args: string[], flags: Flags): Promise<number> {
   return blocking.length ? 1 : 0;
 }
 
+async function cmdDoctor(flags: Flags): Promise<number> {
+  const checks = await runDoctor({ cwd: process.cwd(), offline: Boolean(flags.offline), target: str(flags.target) });
+  const failed = checks.filter((check) => check.status === 'fail' || (flags.strict && check.status === 'note'));
+  if (flags.json) {
+    log(JSON.stringify({ problems: failed.length, checks }, null, 2));
+    return failed.length ? 1 : 0;
+  }
+  const mark: Record<Check['status'], string> = { ok: c.green('✓'), note: c.yellow('!'), fail: c.red('✖') };
+  log(c.bold('fortis doctor'));
+  log('');
+  for (const check of checks) {
+    log(`  ${mark[check.status]} ${check.message}`);
+    if (check.fix) log(c.grey(`    → ${check.fix}`));
+  }
+  log('');
+  if (failed.length) log(c.red(c.bold(`${failed.length} problem${failed.length === 1 ? '' : 's'} to fix.`)));
+  else log(c.green(c.bold('No problems found.')));
+  return failed.length ? 1 : 0;
+}
+
 async function resolvePacks(api: string, key: string | undefined): Promise<RulePack[]> {
   if (!key) return FREE_PACKS;
   try {
@@ -767,6 +789,8 @@ async function main(): Promise<number> {
         return 2;
       }
     }
+    case 'doctor':
+      return cmdDoctor(flags);
     case 'explain':
       if (!args[0] || !explain(args[0])) {
         err(`Unknown rule. Run ${c.bold('fortis rules')} to list them.`);

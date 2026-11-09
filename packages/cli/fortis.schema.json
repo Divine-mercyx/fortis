@@ -1,0 +1,46 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://cdn.jsdelivr.net/npm/fortis-watchdog/fortis.schema.json",
+  "title": "Fortis project settings (.fortis.json)",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "description": "Where editors find this schema."
+    },
+    "projectId": {
+      "type": "string",
+      "description": "The Fortis project this repository belongs to. Written by fortis init."
+    },
+    "apiUrl": {
+      "type": "string",
+      "format": "uri",
+      "description": "The Fortis API address, if it is not the default."
+    },
+    "failOn": {
+      "type": "string",
+      "enum": [
+        "critical",
+        "high",
+        "medium",
+        "low",
+        "info"
+      ],
+      "default": "critical",
+      "description": "Block a push or build at this severity or above."
+    },
+    "ignore": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Paths to leave out of scans, as globs. For example: fixtures/**"
+    },
+    "target": {
+      "type": "string",
+      "format": "uri",
+      "description": "The default staging URL for fortis test and fortis access."
+    }
+  }
+}
