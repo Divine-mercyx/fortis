@@ -511,7 +511,7 @@ It exits 1 if something stops Fortis doing its job. Things that are only worth k
 
 ## Changelog
 
-**0.1.0-beta.12** (unreleased)
+**0.1.0-beta.12** (2026-11-09)
 - `fortis update` updates a binary install, and a notice once a day says when a newer version exists. It's off in CI and with `FORTIS_NO_UPDATE_CHECK=1`.
 - The install script works on Alpine and other musl systems, with new `linux-x64-musl` and `linux-arm64-musl` builds. They need `apk add libstdc++`.
 - Install with Homebrew, Scoop or winget, and macOS and Windows binaries are signed, once the release setup is finished.
