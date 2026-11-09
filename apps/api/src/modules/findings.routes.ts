@@ -26,6 +26,13 @@ const listQuery = z.object({
   offset: z.coerce.number().int().min(0).max(100_000).default(0),
 });
 
+/** Code findings marked as false positives, for the benchmark. See scripts/false-positive-shapes.ts. */
+export const falsePositiveSql = sql`
+  select rule_id as "ruleId", file, snippet, org_id as "orgId"
+  from findings
+  where status = 'false_positive' and kind = 'code' and snippet is not null
+`;
+
 export const ruleHealthSql = sql`
   select rule_id as "ruleId",
     count(*)::int as total,
