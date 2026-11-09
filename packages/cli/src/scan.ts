@@ -52,8 +52,6 @@ export type ScanResult = {
 const UNCOVERED_LANGUAGES: [RegExp, string][] = [
   [/\.(java|kt|kts|scala|groovy)$/i, 'Java/Kotlin'],
   [/\.php$/i, 'PHP'],
-  [/\.go$/i, 'Go'],
-  [/\.cs$/i, 'C#'],
   [/\.rb$/i, 'Ruby'],
   [/\.rs$/i, 'Rust'],
   [/\.(swift|dart)$/i, 'mobile'],
@@ -63,7 +61,7 @@ function uncoveredLanguagesNote(paths: string[]): string | null {
   const counts = UNCOVERED_LANGUAGES.map(([re, label]) => ({ label, n: paths.filter((p) => re.test(p) && !TEST_PATH.test(p)).length })).filter((c) => c.n);
   if (!counts.length) return null;
   const list = counts.sort((a, b) => b.n - a.n).map((c) => `${c.n} ${c.label}`).join(', ');
-  return `Fintech code rules cover JavaScript, TypeScript and Python so far: ${list} files had secrets and dependency checks only.`;
+  return `Fintech code rules cover JavaScript, TypeScript, Python, Go and C# so far: ${list} files had secrets and dependency checks only.`;
 }
 
 const DEFAULT_BUDGET_MS = (Number(process.env.FORTIS_SCAN_BUDGET_SECONDS) || 600) * 1000;
