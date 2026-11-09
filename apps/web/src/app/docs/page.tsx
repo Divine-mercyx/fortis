@@ -139,6 +139,7 @@ on:
 permissions:
   contents: read
   security-events: write
+  pull-requests: write
 
 jobs:
   scan:
@@ -151,9 +152,10 @@ jobs:
         with:
           version: ${CLI_VERSION}
       - name: Fortis scan
-        run: fortis scan --ci --sarif fortis.sarif
+        run: fortis scan --ci --sarif fortis.sarif --pr-comment
         env:
           FORTIS_KEY: \${{ secrets.FORTIS_KEY }}
+          GITHUB_TOKEN: \${{ github.token }}
       - name: Upload to GitHub code scanning
         if: always() && hashFiles('fortis.sarif') != ''
         continue-on-error: true   # free on public repos; needs Advanced Security on private ones
@@ -186,10 +188,12 @@ fortis-scan:
   stage: test
   image: ghcr.io/divine-mercyx/fortis:${CLI_VERSION}
   script:
-    - fortis scan --ci --sarif fortis.sarif
+    - fortis scan --ci --sarif fortis.sarif --junit fortis-junit.xml --pr-comment
   artifacts:
     when: always
     paths: [fortis.sarif]
+    reports:
+      junit: fortis-junit.xml
   rules:
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
     - if: $CI_COMMIT_BRANCH
@@ -441,6 +445,8 @@ export default function DocsPage() {
             ['--history', 'Also search every commit on every branch for secrets. A deleted key is still readable in history and must be rotated.'],
             ['--since <rev>', 'With --history, only search commits after this revision.'],
             ['--sarif <file>', 'Write SARIF 2.1.0 for GitHub code scanning, GitLab and IDEs.'],
+            ['--junit <file>', 'Write JUnit XML for CI systems that show test reports.'],
+            ['--pr-comment', 'On GitHub Actions and GitLab, post one comment on the pull request listing what it adds, updated in place.'],
             ['--json', 'Print machine-readable results instead of the report. Secrets in flagged lines are masked, as everywhere else.'],
             ['--no-upload', 'Keep results on this machine.'],
             ['--no-baseline', 'Report and block on every finding, ignoring .fortis-baseline.json.'],
@@ -495,7 +501,7 @@ export default function DocsPage() {
           <p>Writes a ready-to-use pipeline: a scan on every pull request and push, and a ZAP test after each push to your staging branch.</p>
           <CodeLine cmd={run(`ci init${ci === 'gitlab' ? ' --provider gitlab' : ''} [--staging-branch staging] [--target URL] [--force]`)} />
           <Options rows={[
-            ['--provider github|gitlab', 'Which CI to write for. Detected from .gitlab-ci.yml when not given.'],
+            ['--provider <name>', 'Which CI to write for: github, gitlab, bitbucket, azure, jenkins, circleci or buildkite. Detected from the files in your repository when not given.'],
             ['--staging-branch <name>', 'The branch that deploys to staging (default staging).'],
             ['--target <url>', 'Write the staging URL into the file instead of reading it from a CI variable.'],
             ['--force', 'Overwrite an existing file.'],
