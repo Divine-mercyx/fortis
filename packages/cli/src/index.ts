@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { existsSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
+import { isAbsolute, join, relative, resolve } from 'node:path';
 
 import { MAX_FINDINGS_PER_SCAN, RULE_CATALOG, maskSnippet, SEVERITIES, type RulePack, type Severity } from '@fortis/shared';
 
@@ -60,6 +60,7 @@ ${c.bold('Scan options')}
   --sbom <file>    also check a CycloneDX JSON SBOM (full Maven coverage, including transitive)
   --no-baseline    block on every finding, ignoring ${BASELINE_FILE}
   --submodules     also scan git submodules (skipped by default: they are separate repositories)
+  --paths-from <f> only scan the files listed in f, one per line (- for stdin); never closes findings
   --osv-db <dir>   check dependencies against OSV's downloaded exports (air-gapped networks)
   --no-cache       ask OSV again instead of using answers cached in the last 6 hours
 
@@ -101,7 +102,7 @@ function parseArgs(argv: string[]): { cmd: string; args: string[]; flags: Flags 
     if (a.startsWith('--')) {
       const [k, v] = a.slice(2).split('=', 2) as [string, string | undefined];
       if (v !== undefined) flags[k] = v;
-      else if (['key', 'api', 'fail-on', 'target', 'mode', 'openapi', 'minutes', 'zap-report', 'sarif', 'since', 'provider', 'staging-branch', 'wait', 'config', 'sbom', 'ca', 'osv-db', 'junit', 'postman', 'har', 'graphql'].includes(k) && rest[i + 1] && !rest[i + 1]!.startsWith('--')) flags[k] = rest[++i]!;
+      else if (['key', 'api', 'fail-on', 'target', 'mode', 'openapi', 'minutes', 'zap-report', 'sarif', 'since', 'provider', 'staging-branch', 'wait', 'config', 'sbom', 'ca', 'osv-db', 'junit', 'postman', 'har', 'graphql', 'paths-from'].includes(k) && rest[i + 1] && !rest[i + 1]!.startsWith('--')) flags[k] = rest[++i]!;
       else flags[k] = true;
     } else args.push(a);
   }
@@ -109,6 +110,26 @@ function parseArgs(argv: string[]): { cmd: string; args: string[]; flags: Flags 
 }
 
 const str = (v: string | boolean | undefined) => (typeof v === 'string' ? v : undefined);
+
+/** Paths from a list, relative to the repository root. Anything outside the repository is dropped. */
+export function pathsInRepository(list: string, root: string, cwd: string): string[] {
+  const real = (p: string) => {
+    try {
+      return realpathSync.native(p);
+    } catch {
+      return p;
+    }
+  };
+  const top = real(root);
+  const out = new Set<string>();
+  for (const line of list.split(/\r?\n/)) {
+    const path = line.trim();
+    if (!path) continue;
+    const rel = relative(top, real(resolve(cwd, path)));
+    if (rel && !rel.startsWith('..') && !isAbsolute(rel)) out.add(rel.replace(/\\/g, '/'));
+  }
+  return [...out];
+}
 
 /** --osv-db and the OSV answer cache (on unless --no-cache). */
 const osvOptions = (flags: Flags) => ({ osvDb: str(flags['osv-db']), osvCacheDir: flags['no-cache'] ? undefined : osvCacheDir() });
@@ -120,6 +141,18 @@ async function cmdScan(flags: Flags): Promise<number> {
   const offline = Boolean(flags.offline);
   const key = offline ? undefined : resolveKey(api);
   const prePush = Boolean(flags['pre-push'] || flags.changed);
+  const pathsFrom = str(flags['paths-from']);
+  let only: string[] | undefined;
+  if (pathsFrom) {
+    try {
+      only = pathsInRepository(readFileSync(pathsFrom === '-' ? 0 : pathsFrom, 'utf8'), root, process.cwd());
+    } catch (e) {
+      err(c.red(`✖ Could not read --paths-from: ${(e as Error).message}`));
+      return 2;
+    }
+  }
+  // Scans of part of the repository can't say anything about the rest, so they never close findings.
+  const partialScope = prePush || Boolean(only);
   const ci = Boolean(flags.ci || process.env.CI);
   const json = Boolean(flags.json);
   const failOn = (str(flags['fail-on']) ?? config.failOn ?? 'critical') as Severity;
@@ -157,11 +190,11 @@ async function cmdScan(flags: Flags): Promise<number> {
       /* no stdin: fall back to comparing with the remote branch */
     }
   }
-  const result = await runScan({ root, scope: prePush ? 'changed' : 'full', packs, ignore: config.ignore, offline, pushed, sbom, submodules: Boolean(flags.submodules), ...osvOptions(flags) });
+  const result = await runScan({ root, scope: partialScope ? 'changed' : 'full', only, packs, ignore: config.ignore, offline, pushed, sbom, submodules: Boolean(flags.submodules), ...osvOptions(flags) });
   result.notes.unshift(...notes);
 
   // Git errors look like an empty repository. Passing here would also close every open finding.
-  if (!prePush && result.filesScanned === 0 && result.packagesChecked === 0) {
+  if (!partialScope && result.filesScanned === 0 && result.packagesChecked === 0) {
     // Only lockfiles, and the dependency check couldn't run: say why, not "no files".
     const depError = result.notes.find((n) => n.startsWith('Dependency check skipped:'));
     if (depError) {
@@ -201,7 +234,7 @@ async function cmdScan(flags: Flags): Promise<number> {
         scanId: randomUUID(),
         trigger: prePush ? 'pre-push' : ci ? 'ci' : 'manual',
         // A full scan that couldn't read every file (sparse checkout, time budget) mustn't close findings.
-        scope: prePush || result.partial.length ? 'changed' : 'full',
+        scope: partialScope || result.partial.length ? 'changed' : 'full',
         incompleteChecks: result.incompleteChecks.length ? result.incompleteChecks : undefined,
         commit: currentCommit(root),
         branch: currentBranch(root),
@@ -247,8 +280,9 @@ async function cmdScan(flags: Flags): Promise<number> {
   const blocking = fresh.filter((d) => meetsThreshold(d.severity, failOn));
   if (json) {
     // Masked like every other output: --json usually lands in CI logs.
-    const detections = result.detections.map((d) => ({ ...d, snippet: maskSnippet(d.snippet).slice(0, 300) }));
-    log(JSON.stringify({ ...result, detections, packs, failOn, blocking: blocking.length, baselined: known.length, upload: uploaded, prComment }, null, 2));
+    const accepted = new Set(known);
+    const detections = result.detections.map((d) => ({ ...d, snippet: maskSnippet(d.snippet).slice(0, 300), ...(accepted.has(d) ? { baseline: true } : {}) }));
+    log(JSON.stringify({ root, ...result, detections, packs, failOn, blocking: blocking.length, baselined: known.length, upload: uploaded, prComment }, null, 2));
   } else {
     printReport({ ...result, detections: fresh }, { failOn, prePush, packs });
     if (uploaded) {

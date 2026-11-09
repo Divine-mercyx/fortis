@@ -1,0 +1,8 @@
+**
+!dist/extension.js
+!dist/cli/fortis.mjs
+!package.json
+!README.md
+!CHANGELOG.md
+!LICENSE
+!icon.png

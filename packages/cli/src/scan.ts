@@ -13,6 +13,8 @@ import { allFiles, changedFiles, checkoutInfo, type PushedRef } from './git';
 export type ScanOptions = {
   root: string;
   scope: 'changed' | 'full';
+  /** Scan exactly these paths (relative to root) instead of working them out from git. */
+  only?: string[];
   packs: readonly RulePack[];
   ignore?: string[];
   offline?: boolean;
@@ -72,7 +74,7 @@ export async function runScan(opts: ScanOptions): Promise<ScanResult> {
   const partial: string[] = [];
   const checkout = checkoutInfo(opts.root);
   const everything = () => allFiles(opts.root, { submodules: opts.submodules });
-  const paths = opts.scope === 'changed' ? changedFiles(opts.root, opts.pushed) : everything();
+  const paths = opts.only ?? (opts.scope === 'changed' ? changedFiles(opts.root, opts.pushed) : everything());
   const keep = makeFilter(opts.ignore);
   const candidates = paths.filter(keep);
   let rules = rulesFor(opts.packs);
