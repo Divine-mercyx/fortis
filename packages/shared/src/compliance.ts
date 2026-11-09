@@ -18,6 +18,8 @@ export type FrameworkId = keyof typeof FRAMEWORKS;
 export type Control = { framework: FrameworkId; ref: string; title: string };
 
 const PCI = {
+  '3.3.1': 'Sensitive authentication data is not retained after authorisation',
+  '3.5.1': 'The primary account number is rendered unreadable anywhere it is stored',
   '6.2.3': 'Bespoke software is reviewed before release to find and correct vulnerabilities',
   '6.2.4': 'Software engineering techniques prevent common attacks (injection, access control, business logic, cryptography)',
   '6.3.1': 'Security vulnerabilities are identified and ranked',
@@ -51,6 +53,10 @@ const BY_RULE: Record<string, Control[]> = {
   'FX-SEC-001': [pci('8.6.2'), cbn('crypto'), cbn('appsec')],
   'SEC-GEN-001': [pci('8.6.2'), cbn('crypto'), cbn('appsec')],
   'FX-OWN-001': [pci('6.2.4'), cbn('access'), cbn('appsec'), ndpa('s.39')],
+  'FX-MONEY-001': [pci('6.2.4'), cbn('appsec')],
+  'FX-PCI-001': [pci('3.3.1'), pci('3.5.1'), cbn('data'), cbn('logging'), ndpa('s.39')],
+  'FX-REF-001': [pci('6.2.4'), cbn('appsec'), cbn('crypto')],
+  'FX-AMT-001': [pci('6.2.4'), cbn('appsec')],
   'FX-BOLA-001': [pci('6.2.4'), cbn('access'), cbn('vapt'), ndpa('s.39'), ndpa('s.40')],
   'FX-BOLA-002': [pci('6.2.4'), cbn('access'), cbn('vapt'), ndpa('s.39'), ndpa('s.40')],
   'FX-AUTH-001': [pci('6.2.4'), pci('8.3.1'), cbn('access'), cbn('vapt'), ndpa('s.39'), ndpa('s.40')],
