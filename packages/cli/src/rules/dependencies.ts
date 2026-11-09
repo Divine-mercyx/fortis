@@ -1,10 +1,11 @@
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { dirname, join, relative, resolve } from 'node:path';
 
 import type { Severity } from '@fortis/shared';
 
 import { cycloneDx, ecosystemOf, findLockfiles, isPomXml, isRequirements, manifestFor, missingLockfiles, parseLockfile, type Ecosystem, type Locked } from './lockfiles';
 import { fixedVersion, fixMessage, type OsvAffected } from './fix-version';
+import { globMatch } from './js-lockfiles';
 import { OsvCache } from './osv-cache';
 import { lookupLocal } from './osv-db';
 import type { Detection } from './types';
@@ -93,7 +94,8 @@ export function readPackages(root: string, files: string[], opts: { sbom?: strin
   let skippedElsewhere = 0;
   const skippedByFile: { file: string; names: string[]; count: number }[] = [];
   let directOnlyFiles = 0;
-  for (const file of findLockfiles(files, opts.ignore)) {
+  const lockfiles = chooseJsLockfiles(root, findLockfiles(files, opts.ignore), notes);
+  for (const file of lockfiles) {
     if (sbomRead && (isPomXml(file) || isRequirements(file))) continue; // the SBOM already has this, and more
     const abs = join(root, file);
     if (!existsSync(abs)) continue;
@@ -101,7 +103,8 @@ export function readPackages(root: string, files: string[], opts: { sbom?: strin
       const manifestName = manifestFor(file);
       const manifestPath = manifestName ? join(root, dirname(file), manifestName) : null;
       const manifest = manifestPath && existsSync(manifestPath) ? readText(manifestPath) : undefined;
-      const parsed = parseLockfile(file, readText(abs), manifest);
+      const workspaces = /(^|\/)yarn\.lock$/.test(file) && manifest ? workspaceManifests(join(root, dirname(file)), manifest) : undefined;
+      const parsed = parseLockfile(file, readText(abs), manifest, workspaces);
       packages.push(...parsed.packages.map((p) => ({ ...p, file })));
       seen.add(ecosystemOf(file));
       if (parsed.directOnly) directOnlyFiles++;
@@ -126,7 +129,7 @@ export function readPackages(root: string, files: string[], opts: { sbom?: strin
   }
   if (directOnlyFiles) notes.push(`requirements files: only the packages they list were checked. Unless they're a full pip freeze, transitive dependencies aren't covered: use uv, Poetry or pip-compile, or pass --sbom for those.`);
   if (skippedElsewhere) {
-    notes.push(`${skippedElsewhere === 1 ? '1 dependency has' : `${skippedElsewhere} dependencies have`} no exact version (pinned by range, unpinned or installed from a branch), so ${skippedElsewhere === 1 ? "it wasn't" : "they weren't"} checked.`);
+    notes.push(`${skippedElsewhere === 1 ? '1 dependency has' : `${skippedElsewhere} dependencies have`} no exact version (pinned by range, unpinned, or installed from a branch, git, a tarball or a local folder), so ${skippedElsewhere === 1 ? "it wasn't" : "they weren't"} checked.`);
     for (const s of skippedByFile) notes.push(`  ${s.file}: ${skippedList(s.names, s.count)}. ${pinAdvice(s.file)}`);
   }
 
@@ -152,7 +155,83 @@ export function pinAdvice(file: string): string {
   if (/^Pipfile\.lock$/.test(base)) return 'Run pipenv lock so every package has an exact version.';
   if (/^composer\.lock$/.test(base)) return 'Branch installs have no release to check: require a tagged version (composer require vendor/pkg:^x).';
   if (/\.(txt|in)$/.test(base)) return 'Lock exact versions to check them: uv lock or poetry lock, or pip-compile (uv pip compile requirements.in -o requirements.txt), or pip freeze > requirements.txt.';
+  if (/^(package-lock\.json|npm-shrinkwrap\.json|pnpm-lock\.yaml|yarn\.lock)$/.test(base)) return 'Packages from git, a tarball or a local folder have no registry release to check: depend on a published version where you can.';
   return 'Pin exact versions in the lockfile to check them.';
+}
+
+const JS_LOCKFILE = /(?:^|\/)(npm-shrinkwrap\.json|package-lock\.json|pnpm-lock\.yaml|yarn\.lock)$/;
+/** With no packageManager to go by. An npm lockfile beside a pnpm or Yarn one is usually left over from an `npm install`. */
+const JS_PREFERENCE = ['npm-shrinkwrap.json', 'pnpm-lock.yaml', 'yarn.lock', 'package-lock.json'];
+
+/**
+ * One JavaScript lockfile per folder. Two (an accidental mix) describe the same project differently,
+ * so one is chosen, by package.json's packageManager where it says, and the scan says which.
+ */
+export function chooseJsLockfiles(root: string, files: string[], notes: string[]): string[] {
+  const byDir = new Map<string, string[]>();
+  for (const f of files) {
+    if (!JS_LOCKFILE.test(f)) continue;
+    const dir = f.includes('/') ? f.slice(0, f.lastIndexOf('/')) : '';
+    byDir.set(dir, [...(byDir.get(dir) ?? []), f]);
+  }
+  const dropped = new Set<string>();
+  for (const [dir, list] of byDir) {
+    if (list.length < 2) continue;
+    const name = (f: string) => f.slice(f.lastIndexOf('/') + 1);
+    let manager = '';
+    try {
+      manager = (JSON.parse(readText(join(root, dir, 'package.json'))) as { packageManager?: string }).packageManager ?? '';
+    } catch {
+      /* no package.json: go by the usual order */
+    }
+    const tool = /^(npm|pnpm|yarn)@/.exec(manager)?.[1];
+    const wanted = { npm: ['npm-shrinkwrap.json', 'package-lock.json'], pnpm: ['pnpm-lock.yaml'], yarn: ['yarn.lock'] }[tool ?? ''] ?? [];
+    const chosen = list.find((f) => wanted.includes(name(f))) ?? [...list].sort((a, b) => JS_PREFERENCE.indexOf(name(a)) - JS_PREFERENCE.indexOf(name(b)))[0]!;
+    for (const f of list) if (f !== chosen) dropped.add(f);
+    const others = list.filter((f) => f !== chosen).map(name).join(' and ');
+    const why = tool && wanted.includes(name(chosen)) ? `package.json's packageManager says ${tool}` : `${others} next to it is usually left over`;
+    notes.push(`${dir || 'The repository root'} has more than one lockfile: checked ${name(chosen)} (${why}), not ${others}. Delete the one you don't use.`);
+  }
+  return files.filter((f) => !dropped.has(f));
+}
+
+/** The package.json of each Yarn workspace, from the patterns in the root package.json. */
+export function workspaceManifests(dir: string, rootManifest: string): string[] {
+  let patterns: string[] = [];
+  try {
+    const ws = (JSON.parse(rootManifest) as { workspaces?: string[] | { packages?: string[] } }).workspaces;
+    patterns = Array.isArray(ws) ? ws : (ws?.packages ?? []);
+  } catch {
+    return [];
+  }
+  const include = patterns.filter((p) => !p.startsWith('!'));
+  const exclude = patterns.filter((p) => p.startsWith('!')).map((p) => p.slice(1));
+  const out: string[] = [];
+  // Folders up to four levels down, which covers packages/*, apps/*/* and the like.
+  const walk = (rel: string, depth: number) => {
+    if (depth > 4) return;
+    let names: string[] = [];
+    try {
+      names = readdirSync(join(dir, rel));
+    } catch {
+      return;
+    }
+    for (const n of names) {
+      if (n === 'node_modules' || n.startsWith('.')) continue;
+      const child = rel ? `${rel}/${n}` : n;
+      try {
+        if (!statSync(join(dir, child)).isDirectory()) continue;
+      } catch {
+        continue;
+      }
+      if (include.some((p) => globMatch(p, child)) && !exclude.some((p) => globMatch(p, child)) && existsSync(join(dir, child, 'package.json'))) {
+        out.push(readText(join(dir, child, 'package.json')));
+      }
+      walk(child, depth + 1);
+    }
+  };
+  walk('', 1);
+  return out;
 }
 
 async function inPool<T>(items: T[], size: number, run: (item: T) => Promise<void>) {

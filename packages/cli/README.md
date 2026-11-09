@@ -67,7 +67,9 @@ Run `fortis rules` for the list and `fortis explain FX-OWN-001` for why a rule m
 | Rust | `Cargo.lock` |
 | Dart / Flutter | `pubspec.lock` |
 
-Files are found in any folder of the repository. Dev and test dependencies are left out wherever they can be told apart (yarn workspaces can't, so those are all checked). Findings point at the package's line in the file. If a project has no lockfile, the scan says so.
+Files are found in any folder of the repository. Dev and test dependencies are left out wherever they can be told apart; for Yarn workspaces, that's worked out from each workspace's own `package.json`. Findings point at the package's line in the file. If a project has no lockfile, the scan says so.
+
+**JavaScript packages from git, a tarball or a local folder** have no registry release for OSV to look up, so the scan names them in its notes instead of checking them. pnpm catalogs, npm `overrides` and Yarn or pnpm `resolutions` need nothing extra: the lockfile has the version that's installed. **If a folder has two lockfiles** (say `package-lock.json` beside `pnpm-lock.yaml`), the scan checks the one `packageManager` in `package.json` names, or else the pnpm or Yarn one, and says which.
 
 **A hand-written `requirements.txt` lists only direct dependencies,** so the scan says what it couldn't cover. Use a lockfile, compile it with `pip-compile` or `uv pip compile`, or pass an SBOM from [`cyclonedx-py`](https://github.com/CycloneDX/cyclonedx-python). `fortis ci init` adds that step for you on GitHub Actions.
 
