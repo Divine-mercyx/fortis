@@ -117,6 +117,8 @@ export function upgradeCommand(file: string, eco: Ecosystem, name: string, versi
       return `set ${name} to ${version} in ${base}`;
     case 'Pub':
       return `dart pub add ${name}:^${version}`;
+    case 'SwiftURL':
+      return `allow ${version} for https://${name} in Package.swift (or Xcode's package settings), then swift package update ${name.split('/').pop()}`;
   }
 }
 

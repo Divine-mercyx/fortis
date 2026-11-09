@@ -25,6 +25,7 @@ const CASES: [string, string, string][] = [
   ['Go', 'go.mod', 'module x\n\nrequire golang.org/x/text v0.3.5\n'],
   ['NuGet', 'packages.lock.json', JSON.stringify({ version: 1, dependencies: { 'net8.0': { 'Newtonsoft.Json': { type: 'Direct', resolved: '12.0.1' } } } })],
   ['RubyGems', 'Gemfile.lock', 'GEM\n  remote: https://rubygems.org/\n  specs:\n    rack (2.2.3)\n'],
+  ['SwiftURL', 'Package.resolved', JSON.stringify({ pins: [{ identity: 'vapor', kind: 'remoteSourceControl', location: 'https://github.com/vapor/vapor.git', state: { revision: 'x', version: '4.0.0' } }], version: 2 })],
 ];
 
 describe.skipIf(!process.env.FORTIS_LIVE_OSV)('real OSV', () => {

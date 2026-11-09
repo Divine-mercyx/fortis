@@ -261,7 +261,8 @@ describe('Rust and Dart', () => {
     expect(notes.join('\n')).toMatch(/Cargo\.toml found but no lockfile.*commit Cargo\.lock/);
     expect(notes.join('\n')).toMatch(/pubspec\.yaml found but no lockfile.*commit pubspec\.lock/);
     expect(notes.join('\n')).toMatch(/CocoaPods aren't checked/);
-    expect(notes.join('\n')).toMatch(/Swift packages aren't checked/);
+    // Swift packages are checked now, so Package.swift without Package.resolved asks for the lockfile.
+    expect(notes.join('\n')).toMatch(/Package\.swift found but no lockfile.*commit Package\.resolved/);
     expect(missingLockfiles(['Cargo.toml', 'Cargo.lock'], [], new Set(['crates.io']))).toEqual([]);
   });
 });

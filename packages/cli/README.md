@@ -66,8 +66,9 @@ Run `fortis rules` for the list and `fortis explain FX-OWN-001` for why a rule m
 | Ruby | `Gemfile.lock` |
 | Rust | `Cargo.lock` |
 | Dart / Flutter | `pubspec.lock` |
+| Swift (iOS, macOS) | `Package.resolved` from Swift Package Manager or Xcode, versions 1 to 3 |
 
-Files are found in any folder of the repository. Dev and test dependencies are left out wherever they can be told apart (yarn workspaces can't, so those are all checked). Findings point at the package's line in the file. If a project has no lockfile, the scan says so.
+CocoaPods aren't checked yet, because OSV has no CocoaPods advisories; the scan says so and names the pods in `Podfile.lock` rather than passing them. Files are found in any folder of the repository. Dev and test dependencies are left out wherever they can be told apart (yarn workspaces can't, so those are all checked). Findings point at the package's line in the file. If a project has no lockfile, the scan says so.
 
 **A hand-written `requirements.txt` lists only direct dependencies,** so the scan says what it couldn't cover. Use a lockfile, compile it with `pip-compile` or `uv pip compile`, or pass an SBOM from [`cyclonedx-py`](https://github.com/CycloneDX/cyclonedx-python). `fortis ci init` adds that step for you on GitHub Actions.
 

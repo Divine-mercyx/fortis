@@ -3,7 +3,7 @@ import { dirname, join, relative, resolve } from 'node:path';
 
 import type { Severity } from '@fortis/shared';
 
-import { cycloneDx, ecosystemOf, findLockfiles, isPomXml, isRequirements, manifestFor, missingLockfiles, parseLockfile, type Ecosystem, type Locked } from './lockfiles';
+import { cycloneDx, ecosystemOf, findLockfiles, isPomXml, isRequirements, manifestFor, missingLockfiles, parseLockfile, podsIn, type Ecosystem, type Locked } from './lockfiles';
 import { fixedVersion, fixMessage, type OsvAffected } from './fix-version';
 import { OsvCache } from './osv-cache';
 import { lookupLocal } from './osv-db';
@@ -132,6 +132,15 @@ export function readPackages(root: string, files: string[], opts: { sbom?: strin
 
   if (opts.allPaths) {
     const missing = missingLockfiles(opts.allPaths, opts.ignore ?? [], seen);
+    // Say which pods weren't checked, so a CocoaPods app can see what it's carrying.
+    for (const lock of opts.allPaths.filter((p) => /(^|\/)Podfile\.lock$/.test(p))) {
+      try {
+        const pods = podsIn(readText(join(root, lock)));
+        if (pods.length) missing.push(`  ${lock}: ${skippedList(pods, pods.length)}.`);
+      } catch {
+        /* unreadable: the general note still says CocoaPods weren't checked */
+      }
+    }
     if (missing.length) incomplete = true;
     notes.push(...missing);
   }
@@ -152,6 +161,7 @@ export function pinAdvice(file: string): string {
   if (/^Pipfile\.lock$/.test(base)) return 'Run pipenv lock so every package has an exact version.';
   if (/^composer\.lock$/.test(base)) return 'Branch installs have no release to check: require a tagged version (composer require vendor/pkg:^x).';
   if (/\.(txt|in)$/.test(base)) return 'Lock exact versions to check them: uv lock or poetry lock, or pip-compile (uv pip compile requirements.in -o requirements.txt), or pip freeze > requirements.txt.';
+  if (/^Package\.resolved$/.test(base)) return 'A package pinned to a branch or a commit has no release to check: depend on a version where you can.';
   return 'Pin exact versions in the lockfile to check them.';
 }
 
