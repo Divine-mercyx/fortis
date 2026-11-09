@@ -242,4 +242,24 @@ describe('access-check uploads', () => {
     expect(list.findings[0].title).toBe("User B can read user A's loan");
     expect((await accessUpload(key, id, [])).json().fixedCount).toBe(1);
   });
+
+  it('keeps write findings open after a run that did not test writes', async () => {
+    const { c, base, key } = await setup('plus');
+    const id = await readyTarget(c, base);
+    const write = { ruleId: 'FX-BOLA-002', severity: 'critical', title: "User B can update user A's loan", file: 'PUT /api/loans/{id}', detail: 'changed', fingerprint: 'access:bola-write:PUT /api/loans/{id}' };
+    await accessUpload(key, id, [bola, write]);
+    const scan = (incompleteChecks?: string[]) =>
+      app.inject({
+        method: 'POST', url: '/v1/cli/scans', headers: { authorization: `Bearer ${key}` },
+        payload: { scanId: randomUUID(), trigger: 'ci', kind: 'access', targetId: id, scope: 'full', cliVersion: '0.1.0', findings: [], incompleteChecks },
+      });
+
+    // Read-only: the read problem really is gone, but nothing tested the write problem.
+    expect((await scan(['access-writes'])).json().fixedCount).toBe(1);
+    const open = (await c.req({ method: 'GET', url: `/v1/orgs/${c.orgId}/findings?kind=access&status=open` })).json();
+    expect(open.findings.map((f: { ruleId: string }) => f.ruleId)).toEqual(['FX-BOLA-002']);
+
+    // A run with --writes that no longer sees it means it was fixed.
+    expect((await scan()).json().fixedCount).toBe(1);
+  });
 });

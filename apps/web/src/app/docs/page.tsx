@@ -233,7 +233,7 @@ const ACCESS_JSON = `{
 const PACK_LABEL: Record<RulePack, string> = { fintech: 'Fintech', secrets: 'Secrets', dependencies: 'Dependencies' };
 const RULE_LANG: Record<string, string> = {
   'FX-SEC-001': 'Any file', 'SEC-GEN-001': 'Any file', 'DEP-OSV': 'Lockfiles for JavaScript, PHP, Python, Java, Go, .NET, Ruby, Rust and Dart/Flutter',
-  'FX-BOLA-001': 'Any language (running app)', 'FX-AUTH-001': 'Any language (running app)',
+  'FX-BOLA-001': 'Any language (running app)', 'FX-BOLA-002': 'Any language (running app)', 'FX-AUTH-001': 'Any language (running app)',
 };
 
 /* ---------- Page ---------- */
@@ -361,7 +361,7 @@ export default function DocsPage() {
           <ul className="doc-list">
             <li><b>Node.js 18.17 or newer</b> if you install from npm. The standalone binary and the PyPI package need no Node.</li>
             <li><b>git</b>, for the pre-push hook and changed-file scans.</li>
-            <li><b>Docker</b>, only for <C>fortis test</C> (ZAP runs in the official <C>zaproxy/zap-stable</C> image).</li>
+            <li><b>Docker or a local ZAP</b>, only for <C>fortis test</C>. With Docker, ZAP runs in the official <C>zaproxy/zap-stable</C> image.</li>
             <li>A <b>Fortis key</b> for the fintech rules, dashboard sync, staging tests and access checks. Secrets and dependency checks run without one.</li>
           </ul>
           <div className="table-wrap doc-table">
@@ -460,7 +460,7 @@ export default function DocsPage() {
         </Section>
 
         <Section id="cmd-test" title="fortis test">
-          <p>Tests a running app with OWASP ZAP in Docker. Anything that isn&apos;t your own machine must be a verified, authorised <a href="#staging">staging target</a> on the project.</p>
+          <p>Tests a running app with OWASP ZAP, in Docker or from a local install when Docker isn&apos;t available. Anything that isn&apos;t your own machine must be a verified, authorised <a href="#staging">staging target</a> on the project.</p>
           <CodeLine cmd={run('test --target https://staging.yourapp.com [options]')} />
           <Options rows={[
             ['--target <url>', 'The app to test. Or set "target" once in .fortis.json.'],
@@ -469,11 +469,11 @@ export default function DocsPage() {
             ['--minutes <n>', 'How long to crawl (default 2, up to 60).'],
             ['--wait <seconds>', 'Wait for the target to come up first. Useful straight after a deploy.'],
             ['--local', 'Test localhost on this machine without registering it. Results stay local.'],
-            ['--zap-report <file>', 'Import a ZAP JSON report you ran yourself instead of running Docker.'],
+            ['--zap-report <file>', 'Import a ZAP JSON report you ran yourself instead of running ZAP.'],
             ['--fail-on <severity>', 'Exit 1 at this severity or above (default high).'],
             ['--json, --no-upload', 'As for scan.'],
           ]} />
-          <p><b>Testing behind login.</b> Put a staging test user&apos;s token in <C>FORTIS_ZAP_AUTH</C>. It is sent as <C>Authorization: Bearer …</C> to the target host only, passed to Docker through the environment rather than the command line, and removed from all output and uploads. Use <C>FORTIS_ZAP_AUTH_HEADER=Cookie</C> for cookie sessions.</p>
+          <p><b>Testing behind login.</b> Put a staging test user&apos;s token in <C>FORTIS_ZAP_AUTH</C>. It is sent as <C>Authorization: Bearer …</C> to the target host only, passed to ZAP through the environment rather than the command line, and removed from all output and uploads. Use <C>FORTIS_ZAP_AUTH_HEADER=Cookie</C> for cookie sessions.</p>
           <Block code={`FORTIS_ZAP_AUTH=eyJhbGciOi… ${run('test --target https://staging.yourapp.com')}`} />
           <p>Pausing the target in the dashboard stops a running test within about 20 seconds; nothing is uploaded.</p>
         </Section>
@@ -572,18 +572,21 @@ export default function DocsPage() {
           <p>For each resource you list, Fortis finds records that belong to test customer A, then requests each one as test customer B and with no login at all. If either gets A&apos;s record back, that&apos;s a finding:</p>
           <ul className="doc-list">
             <li><b>FX-BOLA-001</b>: customer B can read customer A&apos;s record.</li>
+            <li><b>FX-BOLA-002</b>: customer B can change or delete customer A&apos;s record. Only checked with <C>--writes</C>.</li>
             <li><b>FX-AUTH-001</b>: the record is readable without logging in.</li>
           </ul>
           <p><b>Set it up</b></p>
           <ol className="doc-steps">
             <li>Create two ordinary customers on staging, and give customer A at least one loan, wallet or transfer.</li>
-            <li>Write the config: <CodeLine cmd={run('access init --openapi https://staging.yourapp.com/openapi.json')} /></li>
+            <li>Write the config: <CodeLine cmd={run('access init --openapi https://staging.yourapp.com/openapi.json')} /> Use <C>--postman</C> or <C>--har</C> with a file, or <C>--graphql</C> with your GraphQL URL, in the same way.</li>
             <li>Check the paths, then run it with the two tokens: <CodeLine cmd={`FORTIS_USER_A_TOKEN=… FORTIS_USER_B_TOKEN=… ${run('access --target https://staging.yourapp.com')}`} /></li>
           </ol>
           <Block lang=".fortis-access.json" code={ACCESS_JSON} />
           <ul className="doc-list">
             <li>Each check needs a <C>get</C> path containing <C>{'{id}'}</C>, plus either a <C>list</C> path (IDs are read from the first array of objects in the response, using <C>idField</C>, default <C>id</C>) or explicit <C>ids</C> that belong to user A.</li>
-            <li>Only GET requests are sent: nothing is created, changed or deleted. There is a short pause between requests and a cap of 200 per run.</li>
+            <li>By default the checks are read-only: nothing is created, changed or deleted. There is a short pause between requests and a cap of 200 per run.</li>
+            <li><C>--writes</C> needs a <C>writes</C> block on a check. Customer A creates a throwaway record, customer B tries to update and delete it, and customer A removes it afterwards. Existing records are never written to.</li>
+            <li>GraphQL often answers 200 when it refuses, so a response only counts as success if it has no errors and has data.</li>
             <li>A 404 that echoes the ID back (“loan 123 not found”) is correctly treated as protected.</li>
             <li>Tokens come from the environment only and are removed from all results. Never put them in the config file.</li>
           </ul>
@@ -617,6 +620,7 @@ export default function DocsPage() {
                   ['FORTIS_ZAP_AUTH_HEADER', 'test', 'Header for FORTIS_ZAP_AUTH (default Authorization; e.g. Cookie).'],
                   ['FORTIS_ZAP_IMAGE', 'test', 'ZAP Docker image (default zaproxy/zap-stable).'],
                   ['FORTIS_ZAP_DOCKER_ARGS', 'test', 'Extra docker run flags, e.g. --add-host or --network.'],
+                  ['FORTIS_ZAP_PATH', 'test', 'Use the ZAP at this path (zap.sh or zap.bat) instead of Docker.'],
                   ['FORTIS_USER_A_TOKEN / FORTIS_USER_B_TOKEN', 'access', 'The two test customers’ tokens (names can be changed in the config).'],
                   ['CI', 'scan', 'Set by CI providers; turns on full-scan mode.'],
                   ['NO_COLOR / FORCE_COLOR', 'all', 'Turn terminal colours off or on.'],
@@ -633,7 +637,7 @@ export default function DocsPage() {
               <tbody>
                 <tr><td className="mono">0</td><td>Passed: nothing at or above the threshold.</td></tr>
                 <tr><td className="mono">1</td><td>Findings at or above the threshold (the push or build should stop).</td></tr>
-                <tr><td className="mono">2</td><td>Could not run: bad options, invalid key, target not ready, Docker missing, or a network error.</td></tr>
+                <tr><td className="mono">2</td><td>Could not run: bad options, invalid key, target not ready, neither Docker nor ZAP found, or a network error.</td></tr>
               </tbody>
             </table>
           </div>

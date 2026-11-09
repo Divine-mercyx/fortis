@@ -52,6 +52,7 @@ const BY_RULE: Record<string, Control[]> = {
   'SEC-GEN-001': [pci('8.6.2'), cbn('crypto'), cbn('appsec')],
   'FX-OWN-001': [pci('6.2.4'), cbn('access'), cbn('appsec'), ndpa('s.39')],
   'FX-BOLA-001': [pci('6.2.4'), cbn('access'), cbn('vapt'), ndpa('s.39'), ndpa('s.40')],
+  'FX-BOLA-002': [pci('6.2.4'), cbn('access'), cbn('vapt'), ndpa('s.39'), ndpa('s.40')],
   'FX-AUTH-001': [pci('6.2.4'), pci('8.3.1'), cbn('access'), cbn('vapt'), ndpa('s.39'), ndpa('s.40')],
   'FX-HOOK-001': [pci('6.2.4'), cbn('appsec')],
   'FX-TXN-001': [pci('6.2.4'), cbn('appsec')],

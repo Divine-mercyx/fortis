@@ -115,7 +115,7 @@ If the dependency check can't finish (OSV is down, or a lockfile can't be read),
 
 ## Testing a running app (OWASP ZAP)
 
-`fortis test` runs [OWASP ZAP](https://www.zaproxy.org/) in Docker against a staging URL and syncs the alerts to the dashboard.
+`fortis test` runs [OWASP ZAP](https://www.zaproxy.org/) against a staging URL and syncs the alerts to the dashboard. It uses Docker, or a ZAP installed on your machine when Docker isn't available.
 
 ```bash
 npx fortis test --target https://staging.yourapp.com            # baseline: passive, sends no attacks
@@ -126,7 +126,25 @@ npx fortis test --target http://localhost:3000 --local          # your own machi
 
 Before Fortis will test a URL, an admin adds it under **Project → Staging targets**, proves control of the domain with a DNS TXT record (`_fortis-verify.<host>`), and signs the testing authorisation. Active scans are never allowed against production targets. Pausing a target in the dashboard stops a running test within about 20 seconds.
 
-Needs Docker (image `zaproxy/zap-stable`, override with `FORTIS_ZAP_IMAGE`). For staging on a private network pass extra docker flags with `FORTIS_ZAP_DOCKER_ARGS`, for example `--add-host staging.internal:10.0.0.5`. Without Docker, run ZAP yourself and import its JSON report with `--zap-report report.json`. The default `--fail-on` for tests is `high`.
+With Docker, it uses the image `zaproxy/zap-stable` (override with `FORTIS_ZAP_IMAGE`). For staging on a private network pass extra docker flags with `FORTIS_ZAP_DOCKER_ARGS`, for example `--add-host staging.internal:10.0.0.5`. You can also run ZAP yourself and import its JSON report with `--zap-report report.json`. The default `--fail-on` for tests is `high`.
+
+### ZAP without Docker
+
+If Docker isn't installed or running, Fortis looks for a local ZAP and uses that. ZAP needs Java 17 or newer, unless you use a package that bundles it.
+
+| System | Install | Where Fortis looks |
+|---|---|---|
+| macOS | `brew install --cask zap`, or the installer from [zaproxy.org/download](https://www.zaproxy.org/download/) | `/Applications/ZAP.app`, `~/Applications/ZAP.app`, your `PATH` |
+| Linux | `sudo snap install zaproxy --classic`, or the installer from [zaproxy.org/download](https://www.zaproxy.org/download/) | `/usr/share/zaproxy`, `/opt/zaproxy`, `/snap/bin`, your `PATH` |
+| Windows | `winget install ZAP.ZAP`, or the installer from [zaproxy.org/download](https://www.zaproxy.org/download/) | `Program Files\ZAP\Zed Attack Proxy`, your `PATH` |
+
+Anywhere else, or to use a local ZAP even when Docker is running, set `FORTIS_ZAP_PATH` to its `zap.sh` or `zap.bat`:
+
+```bash
+FORTIS_ZAP_PATH=/path/to/zap.sh npx fortis test --target https://staging.yourapp.com
+```
+
+Fortis runs it with its own temporary settings folder, so a ZAP desktop session you have open is unaffected. The same rules apply to the target, and `FORTIS_ZAP_AUTH` works the same way.
 
 ## CI in one command
 
@@ -230,7 +248,7 @@ This searches every commit on every branch. A key that was committed and later d
 Set `FORTIS_ZAP_AUTH` to a staging test user's token before `fortis test`, and ZAP will crawl and test the pages and APIs behind login. Without it, ZAP only sees what an anonymous visitor sees. `FORTIS_ZAP_AUTH_HEADER` changes the header, for example to `Cookie`. The token:
 
 - is sent to the target host only;
-- is passed to Docker through the environment, never on the command line;
+- is passed to ZAP through the environment, never on the command line;
 - is scrubbed from all output.
 
 ## Access checks: can one customer see another's data?
@@ -245,7 +263,53 @@ Set it up with two ordinary test customers on staging, and give customer A at le
 1. finds A's records;
 2. requests each one as customer B, and again with no login at all.
 
-Django session logins work too: set `"header": "Cookie"` in `.fortis-access.json` and use `sessionid=…` as each user's token. If either request gets A's record back, that's **FX-BOLA-001** or **FX-AUTH-001**: broken access control, the most common way fintech data leaks. Only GET requests are sent, so nothing is created or changed. Access checks need Fortis Plus and a verified, authorised, non-production target.
+Django session logins work too: set `"header": "Cookie"` in `.fortis-access.json` and use `sessionid=…` as each user's token. If either request gets A's record back, that's **FX-BOLA-001** or **FX-AUTH-001**: broken access control, the most common way fintech data leaks. By default the checks are read-only: nothing is created, changed or deleted. Access checks need Fortis Plus and a verified, authorised, non-production target.
+
+### Checking updates and deletes
+
+`fortis access --writes` also checks whether customer B can change or delete customer A's records, which is **FX-BOLA-002**. It only runs for checks with a `writes` block:
+
+```json
+{
+  "name": "Loan",
+  "list": "/api/loans",
+  "get": "/api/loans/{id}",
+  "writes": {
+    "create": { "path": "/api/loans", "body": { "amount": 1, "note": "fortis-test" } },
+    "put": { "body": { "amount": 2, "note": "fortis-test-put" } },
+    "patch": { "body": { "note": "fortis-test-patch" } },
+    "delete": {}
+  }
+}
+```
+
+For each one, Fortis:
+
+1. creates a throwaway record as customer A;
+2. sends each update and delete as customer B;
+3. reads the record as customer A, and reports a finding only if it really changed or disappeared;
+4. deletes the throwaway record as customer A.
+
+Existing records are never written to. `put` and `patch` use the `get` path unless you give a `path`, and `{id}` in a body becomes the record's ID. Use values that differ from `create`, so a change can be seen. Without a `delete`, add a `"cleanup"` path, or Fortis tells you the record is still there. Runs without `--writes` don't close FX-BOLA-002 findings in the dashboard, because they didn't test for them.
+
+### GraphQL
+
+```bash
+FORTIS_USER_A_TOKEN=… npx fortis access init --graphql https://staging.yourapp.com/graphql
+```
+
+This introspects the schema and writes a check for each query that reads one record by ID. It adds that record's mutations under `writes` when it finds ones that create and then update or delete it. If introspection is turned off, save a schema from elsewhere as JSON and pass its file path. Check the generated values under `writes`, because they're placeholders.
+
+GraphQL often answers 200 when it refuses, so a response only counts as success if it has no `errors` and has data. Without `--writes`, only queries are sent, and a config with a mutation in `read` or `list` is rejected.
+
+### Building the config from Postman or HAR
+
+```bash
+npx fortis access init --postman collection.json
+npx fortis access init --har staging.har --target https://staging.yourapp.com
+```
+
+Each pairs a route like `GET /api/loans/{id}` with its list route, as `--openapi` does, and adds a `writes` block with empty bodies to fill in when it sees the create and write routes. Only the method and path are kept: headers, bodies, query strings and real record IDs never reach the config. A HAR file can hold live tokens, so don't commit it. Without `--target`, a HAR import uses the host with the most requests.
 
 ## Accuracy
 
@@ -384,6 +448,10 @@ It exits 1 if something stops Fortis doing its job. Things that are only worth k
 - Setups for pre-commit, lefthook and Husky are documented under "Other git hook managers".
 - `fortis doctor` finds what isn't working and prints the fix: the install, the hook, your key, network access, git, lockfiles and Docker.
 - A typo in `.fortis.json` is no longer silently ignored: Fortis warns and suggests the right name. A JSON Schema gives editors autocomplete.
+- `fortis access --writes` checks whether one customer can update or delete another's records, using throwaway records it creates first. It reports **FX-BOLA-002**. The default stays read-only.
+- Access checks cover GraphQL. `fortis access init --graphql <url>` introspects the schema and tests the queries and mutations that take an ID.
+- `fortis access init` also reads Postman collections (`--postman`) and HAR files (`--har`).
+- `fortis test` uses a locally installed ZAP when Docker isn't available. `FORTIS_ZAP_PATH` chooses a specific one.
 - Python is fully supported: `pip install fortis-watchdog`, the fintech rules for Django, Django REST, Flask and FastAPI, and dev packages told apart in uv and Poetry lockfiles.
 - `pip install` needs no Node, and the git hook finds the CLI in `.venv` or `venv` even when it isn't active, and through `uv run` and `poetry run`.
 - More secrets are caught in Python: real-looking defaults such as `os.getenv("KEY", "…")`, SQLAlchemy connection URLs, tokens in URLs, PyPI tokens and notebooks.
