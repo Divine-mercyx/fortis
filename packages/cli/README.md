@@ -314,7 +314,13 @@ Each pairs a route like `GET /api/loans/{id}` with its list route, as `--openapi
 
 ## Accuracy
 
-Every rule is measured against a labelled benchmark in `bench/cases`. A line marked `@hit` must be flagged, and a flag on any other line is a false positive. `pnpm bench` prints precision and recall per rule. The test suite fails if any rule drops below its recorded floor. When a rule is wrong on real code, we add that code to the benchmark first, then fix the rule.
+Every rule is measured against a labelled benchmark in `bench/cases`. A line marked `@hit` must be flagged, and a flag on any other line is a false positive. `pnpm bench` prints precision and recall per rule. The test suite fails if any rule drops below its recorded floor. When a rule is wrong on real code, we add that code to the benchmark first, then fix the rule. Every rule has at least 20 cases, and a test keeps it that way.
+
+**Real code.** `pnpm corpus` scans open-source fintech and payments projects in each supported language, pinned to fixed commits, and compares the findings with `bench/corpus.json`, where each one has been reviewed as right or wrong. It reports precision and recall per rule.
+
+**Every night.** `.github/workflows/nightly.yml` runs the corpus and the live OSV tests, opens one issue if either fails, and closes it when a run passes.
+
+**Your feedback.** False positives marked in the dashboard can become new benchmark cases. An operator exports them as a rule ID, a file extension and the shape of the line, for example `const x = await x.findById(req.params.id);`. Every name, string, number and comment is removed, and a shape is only exported once at least two workspaces have reported it. No code leaves the dashboard this way.
 
 ## Git checkouts in CI and large repositories
 
@@ -454,6 +460,7 @@ It exits 1 if something stops Fortis doing its job. Things that are only worth k
 - `fortis access init` also reads Postman collections (`--postman`) and HAR files (`--har`).
 - `fortis test` uses a locally installed ZAP when Docker isn't available. `FORTIS_ZAP_PATH` chooses a specific one.
 - `fortis scan --paths-from` scans only the files you list, and `--json` now includes the repository `root` and marks findings accepted in the baseline. The new VS Code extension uses both.
+- FX-OTP-001 also catches a code made with `Math.random` in a variable such as `verificationCode` or `resetToken`.
 - Python is fully supported: `pip install fortis-watchdog`, the fintech rules for Django, Django REST, Flask and FastAPI, and dev packages told apart in uv and Poetry lockfiles.
 - `pip install` needs no Node, and the git hook finds the CLI in `.venv` or `venv` even when it isn't active, and through `uv run` and `poetry run`.
 - More secrets are caught in Python: real-looking defaults such as `os.getenv("KEY", "…")`, SQLAlchemy connection URLs, tokens in URLs, PyPI tokens and notebooks.
