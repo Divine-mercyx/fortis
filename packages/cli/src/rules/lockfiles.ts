@@ -22,17 +22,27 @@ const pkg = (ecosystem: Ecosystem, name: string, version: string, dev = false, l
  * and work out dev-only packages, from the lockfile's own flag or, for pnpm v9 and Yarn, by walking
  * the dependency graph from package.json's production dependencies.
  */
-const fromJs = (list: LockedPackage[]): Parsed => ({ packages: list.map((p) => ({ ...p, ecosystem: 'npm' as const })), skipped: 0 });
+const SOURCE_LABEL = { git: 'git', tarball: 'tarball', local: 'local folder' } as const;
+/** Packages from git, a tarball or a local folder have no registry release for OSV, so they're named instead of checked. */
+const fromJs = (list: LockedPackage[]): Parsed => {
+  const other = list.filter((p) => p.source);
+  return {
+    packages: list.filter((p) => !p.source).map(({ source: _, ...p }) => ({ ...p, ecosystem: 'npm' as const })),
+    skipped: other.length,
+    skippedNames: other.map((p) => `${p.name} (${SOURCE_LABEL[p.source!]})`),
+  };
+};
 const npmLock = (text: string): Parsed => fromJs(parseNpmLock(text));
 const pnpmLock = (text: string): Parsed => fromJs(parsePnpmLock(text));
-const yarnLock = (text: string, _file: string, manifest?: string): Parsed => {
-  let pkgJson = {};
-  try {
-    pkgJson = manifest ? JSON.parse(manifest) : {};
-  } catch {
-    /* no readable package.json: every package counts as production */
-  }
-  return fromJs(parseYarnLock(text, pkgJson));
+const yarnLock = (text: string, _file: string, manifest?: string, workspaces: string[] = []): Parsed => {
+  const json = (t: string | undefined) => {
+    try {
+      return t ? JSON.parse(t) : {};
+    } catch {
+      return {}; // no readable package.json: every package counts as production
+    }
+  };
+  return fromJs(parseYarnLock(text, json(manifest), workspaces.map(json)));
 };
 
 function composerLock(text: string): Parsed {
@@ -235,7 +245,8 @@ function workflowActions(text: string): Parsed {
   return { packages, skipped: 0 };
 }
 
-type Format = { match: RegExp; ecosystem: Ecosystem; parse: (text: string, file: string, manifest?: string) => Parsed };
+/** `workspaces`: the package.json of each workspace, for formats that need them (Yarn). */
+type Format = { match: RegExp; ecosystem: Ecosystem; parse: (text: string, file: string, manifest?: string, workspaces?: string[]) => Parsed };
 
 const REQUIREMENTS = /(^|\/)[-_.\w]*requirements[-_.\w]*\.txt$|(^|\/)requirements\/[-_.\w]+\.txt$|(^|\/)constraints[-_.\w]*\.txt$/;
 
@@ -302,7 +313,7 @@ const formatOf = (file: string) => {
   return format;
 };
 
-export const parseLockfile = (file: string, text: string, manifest?: string): Parsed => formatOf(file).parse(text, file, manifest);
+export const parseLockfile = (file: string, text: string, manifest?: string, workspaces?: string[]): Parsed => formatOf(file).parse(text, file, manifest, workspaces);
 export const ecosystemOf = (file: string): Ecosystem => formatOf(file).ecosystem;
 
 /** Ecosystems the project plainly uses but gave no versions for, so nothing was checked. */
