@@ -109,6 +109,7 @@ export function readPackages(root: string, files: string[], opts: { sbom?: strin
       const parsed = parseLockfile(file, readText(abs), manifest, workspaces);
       packages.push(...parsed.packages.map((p) => ({ ...p, file })));
       seen.add(ecosystemOf(file));
+      if (parsed.note && !notes.includes(parsed.note)) notes.push(parsed.note);
       if (parsed.directOnly && isDotnetProject(file)) dotnetProjects++;
       else if (parsed.directOnly && isRequirements(file)) directOnlyFiles++;
       if (isJvmBuild(file)) jvmBuilds++;
@@ -252,6 +253,8 @@ export function pinAdvice(file: string): string {
   if (/\.(?:cs|fs|vb)proj$|^packages\.config$|^Directory\.Packages\.props$/i.test(base)) return 'Floating versions and ranges (8.*, [1.0,2.0)) have no one version to check: use an exact version, or turn on the lockfile.';
   if (/^(go\.mod|modules\.txt)$/.test(base)) return 'A module replaced by a local folder has no release to check.';
   if (/\.versions\.toml$|^build\.gradle(\.kts)?$|^build\.sbt$|\.scala$/.test(base)) return 'A version from a BOM or a variable, or a dynamic one (1.+), has no one version to check here: a CycloneDX SBOM, Gradle dependency locking or build.sbt.lock covers them.';
+  if (/^(mix|rebar)\.lock$|^stack\.yaml\.lock$/.test(base)) return 'Git dependencies have no Hex or Hackage release to check: depend on a published version where you can.';
+  if (/^renv\.lock$/.test(base)) return 'Packages from GitHub or Bioconductor aren\'t in OSV\'s CRAN data: install from CRAN where you can.';
   return 'Pin exact versions in the lockfile to check them.';
 }
 
