@@ -296,6 +296,52 @@ npx fortis scan --history
 
 This searches every commit on every branch. A key that was committed and later deleted can still be read by anyone who can clone the repository, so it must be rotated. Each secret is reported once, at the commit that introduced it.
 
+## Is a leaked key still live?
+
+```bash
+npx fortis scan --verify
+npx fortis scan --history --verify
+```
+
+`--verify` asks each leaked key's own provider whether the key still works, and labels the finding **live**, **revoked** or **unknown**. Rotate the live ones first. It's off by default, because it's the only check that sends a secret anywhere:
+
+- **Where keys go:** a key only goes to the API host of the provider that issued it, over HTTPS, and redirects aren't followed. Some `sk_live_` keys could be either Stripe or Paystack, going by their shape. Those aren't sent at all, because sending a Stripe key to Paystack would leak it.
+- **What the call does:** each provider gets one read-only call (reading a balance, an account or "who am I"). Nothing is created, changed, sent or charged.
+- **Limits:**
+  - each distinct key is checked once per scan, however many places it's in;
+  - at most 50 keys per scan, with the rest marked unknown;
+  - 4 calls at a time;
+  - 250 ms between calls to the same provider;
+  - a 5-second timeout per call.
+- **Unclear answers:** a timeout, a rate limit or a provider error means **unknown**: treat it as live.
+- **Where the label shows:** in the terminal and in `--json` (`secretStatus`), in SARIF (`properties.secretStatus`) and, on plans that sync findings, in the dashboard. A later scan without `--verify` keeps the last label. With `--offline`, nothing is checked.
+
+| Provider | Keys | Call | Live / revoked |
+|---|---|---|---|
+| Paystack | `sk_live_`, `sk_test_` (Paystack's 40-hex shape) | `GET api.paystack.co/balance` | 200 / 401 |
+| Stripe | `sk_live_`, `sk_test_` (Stripe's shape), `rk_` | `GET api.stripe.com/v1/balance` | 200, or 403 for a restricted key without balance access / 401 |
+| Flutterwave | `FLWSECK-`, `FLWSECK_TEST-` | `GET api.flutterwave.com/v3/balances` | 200 / 401 |
+| GitHub | `ghp_`, `gho_`, `ghu_`, `ghs_`, `ghr_` | `GET api.github.com/user` | 200, or 403 for an app installation token / 401 (a rate-limit 403 is unknown) |
+| Slack | `xoxb-`, `xoxp-` and other `xox` tokens | `POST slack.com/api/auth.test` (only says who the token is) | `ok: true` / `invalid_auth`, `token_revoked`, `token_expired`, `account_inactive` |
+| SendGrid | `SG.` | `GET api.sendgrid.com/v3/scopes` (the key's own permissions) | 200 / 401 |
+| Mailgun | `key-` | `GET /v3/domains` on `api.mailgun.net`, then `api.eu.mailgun.net` | 200 from either / 401 from both |
+| Resend | `re_` | `GET api.resend.com/domains` | 200, or `restricted_api_key` for a sending-only key / 401 |
+| Telegram | bot tokens | `GET api.telegram.org/bot…/getMe` (the bot's own name) | 200 / 401 or 404 |
+| Anthropic | `sk-ant-api` | `GET api.anthropic.com/v1/models` (runs no model, costs nothing) | 200 / 401 |
+| OpenAI | `sk-proj-`, `sk-svcacct-`, `sk-admin-`, legacy `sk-` | `GET api.openai.com/v1/models` (runs no model, costs nothing) | 200 / 401 |
+| npm | `npm_` | `GET registry.npmjs.org/-/whoami` | 200 / 401 |
+| DigitalOcean | `dop_v1_`, `doo_v1_`, `dor_v1_` | `GET api.digitalocean.com/v2/account` | 200 / 401 |
+| Render | `rnd_` | `GET api.render.com/v1/owners` | 200 / 401 |
+| Discord | webhook URLs | `GET` on the webhook URL (returns its name and posts nothing) | 200 / 401 or 404 |
+
+Other secrets aren't checked, and the scan says how many:
+
+- some need a second value to test: AWS access keys, Monnify;
+- some have no read-only call: Slack webhooks would post a message, and PyPI, RubyGems and Docker Hub tokens can't be tested without one;
+- some aren't tied to one service: private keys, database passwords, generic `apiKey = "…"` values.
+
+Treat those as live.
+
 ## Testing behind login
 
 Set `FORTIS_ZAP_AUTH` to a staging test user's token before `fortis test`, and ZAP will crawl and test the pages and APIs behind login. Without it, ZAP only sees what an anonymous visitor sees. `FORTIS_ZAP_AUTH_HEADER` changes the header, for example to `Cookie`. The token:
@@ -418,7 +464,7 @@ The folder can hold the zips (in subfolders too) or the advisories already unzip
 
 Rules run locally. When your plan syncs findings, the CLI sends the rule ID, severity, file path,
 line number and a masked copy of the line (secrets and BVN/NIN reduced to their last four characters).
-It never sends your source files. `--no-upload` keeps everything local.
+It never sends your source files. `--no-upload` keeps everything local. `fortis scan --verify` is the one exception that sends a secret: each leaked key goes to its own provider's API, and nowhere else, to check whether it still works (see [Is a leaked key still live?](#is-a-leaked-key-still-live)). Without that flag, no key leaves your machine.
 
 Rule packs are signed by the Fortis API with Ed25519 and verified before use. The signing key is pinned
 on first use; set `FORTIS_RULES_PUBLIC_KEY` to pin it explicitly in CI.
@@ -510,6 +556,10 @@ This checks each of these, and prints the fix for anything wrong:
 It exits 1 if something stops Fortis doing its job. Things that are only worth knowing, such as a newer version, no key on the free plan, or no Docker, are shown without failing. `--strict` fails on those too, `--json` prints the results as data, and `--offline` skips the network checks.
 
 ## Changelog
+
+**0.1.0-beta.13** (unreleased)
+- `fortis scan --verify` asks each leaked key's own provider, with one read-only call, whether it still works, and labels the finding live, revoked or unknown, so you know what to rotate first. 15 providers are covered, including Paystack, Stripe, Flutterwave, GitHub and Slack. It's off by default; keys only go to their own provider's API. Plans that sync findings show the label in the dashboard.
+- SARIF output keeps `fixedVersion` on dependency findings; a second `properties` object had been replacing it.
 
 **0.1.0-beta.12** (2026-11-09)
 - `fortis update` updates a binary install, and a notice once a day says when a newer version exists. It's off in CI and with `FORTIS_NO_UPDATE_CHECK=1`.

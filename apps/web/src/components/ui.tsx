@@ -122,6 +122,18 @@ export const StatusTag = ({ status }: { status: string }) => (
   </span>
 );
 
+/** Whether a leaked key still works, from `fortis scan --verify`. */
+const SECRET_TAG = {
+  live: { label: 'Live key', cls: 'p-critical', title: 'The provider accepted this key on the last check: rotate it first.' },
+  revoked: { label: 'Revoked', cls: 'p-ok', title: 'The provider rejected this key on the last check. Remove it from the code anyway.' },
+  unknown: { label: 'Liveness unknown', cls: 'p-mute', title: 'The last check got no clear answer (timeout, rate limit or provider error). Treat it as live.' },
+} as const;
+
+export const SecretTag = ({ status }: { status?: string | null }) => {
+  const tag = status ? SECRET_TAG[status as keyof typeof SECRET_TAG] : undefined;
+  return tag ? <span className={`pill ${tag.cls}`} title={tag.title}>{tag.label}</span> : null;
+};
+
 export const Skeleton = ({ h = 16, w = '100%' }: { h?: number; w?: number | string }) => (
   <div className="skeleton" style={{ height: h, width: w }} />
 );

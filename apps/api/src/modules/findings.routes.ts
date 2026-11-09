@@ -93,6 +93,7 @@ export async function findingsRoutes(app: FastifyInstance) {
           file: findings.file,
           line: findings.line,
           status: findings.status,
+          secretStatus: findings.secretStatus,
           firstSeenAt: findings.firstSeenAt,
           lastSeenAt: findings.lastSeenAt,
           fixedAt: findings.fixedAt,

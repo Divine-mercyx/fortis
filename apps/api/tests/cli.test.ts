@@ -176,6 +176,38 @@ describe('dependency findings', () => {
   });
 });
 
+describe('leaked key status from fortis scan --verify', () => {
+  it('stores it, keeps it through scans that did not check, and shows it in the list and the detail', async () => {
+    const { c, key } = await coreProject();
+    await upload(key, scanPayload([{ ...liveKeyFinding, secretStatus: 'live' }, ownershipFinding]));
+    let { rows } = await pool.query("select secret_status, secret_checked_at from findings where rule_id = 'FX-SEC-001'");
+    expect(rows[0].secret_status).toBe('live');
+    const firstCheck = rows[0].secret_checked_at as Date;
+    expect(firstCheck).toBeInstanceOf(Date);
+
+    // No --verify this time: the last check stands.
+    await upload(key, scanPayload([liveKeyFinding, ownershipFinding]));
+    ({ rows } = await pool.query("select secret_status, secret_checked_at from findings where rule_id = 'FX-SEC-001'"));
+    expect(rows[0]).toEqual({ secret_status: 'live', secret_checked_at: firstCheck });
+
+    // Rotated since: the next check says revoked.
+    await upload(key, scanPayload([{ ...liveKeyFinding, secretStatus: 'revoked' }, ownershipFinding]));
+    const list = await c.req({ method: 'GET', url: `/v1/orgs/${c.orgId}/findings?status=open` });
+    const byRule = Object.fromEntries(list.json().findings.map((f: { ruleId: string; secretStatus: string | null; id: string }) => [f.ruleId, f]));
+    expect(byRule['FX-SEC-001'].secretStatus).toBe('revoked');
+    expect(byRule['FX-OWN-001'].secretStatus).toBeNull();
+    const detail = await c.req({ method: 'GET', url: `/v1/orgs/${c.orgId}/findings/${byRule['FX-SEC-001'].id}` });
+    expect(detail.json().finding).toMatchObject({ secretStatus: 'revoked' });
+    expect(new Date(detail.json().finding.secretCheckedAt).getTime()).toBeGreaterThanOrEqual(firstCheck.getTime());
+  });
+
+  it('refuses a status that is not live, revoked or unknown', async () => {
+    const { key } = await coreProject();
+    const res = await upload(key, scanPayload([{ ...liveKeyFinding, secretStatus: 'probably' }]));
+    expect(res.statusCode).toBe(400);
+  });
+});
+
 describe('findings API', () => {
   it('lists by severity, changes status with a reason, and records the change', async () => {
     const { c, key } = await coreProject();

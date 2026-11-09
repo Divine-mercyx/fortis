@@ -19,6 +19,8 @@ export type Detection = {
   fix?: string;
   /** Dependency findings: the version that clears every advisory, or null when there is no fix yet. */
   fixedVersion?: string | null;
+  /** Secret findings, with --verify: whether the key still works, from one read-only call to its provider. */
+  secretStatus?: 'live' | 'revoked' | 'unknown';
 };
 
 /** Facts gathered from the whole repository, so a rule can see protection defined in another file. */

@@ -205,6 +205,9 @@ export const findings = pgTable(
     line: integer('line'),
     snippet: text('snippet'),
     detail: text('detail'),
+    /** Secret findings: live, revoked or unknown, from the last `fortis scan --verify`. Null when never checked. */
+    secretStatus: text('secret_status'),
+    secretCheckedAt: timestamp('secret_checked_at', { withTimezone: true }),
     status: text('status').notNull().default('open'),
     statusReason: text('status_reason'),
     firstSeenAt: timestamp('first_seen_at', { withTimezone: true }).notNull().defaultNow(),
