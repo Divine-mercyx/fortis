@@ -32,10 +32,11 @@ export type ProjectContext = {
 export const emptyContext = (): ProjectContext => ({ idempotencyHelpers: new Set() });
 
 /** Test code, fixtures, mocks and generated migrations: fintech checks skip these (secret checks still run). */
-const TEST_PATTERN = /(^|\/)(__tests__|__mocks__|tests?|spec|e2e|fixtures?|mocks?|migrations)\/|\.(test|spec|mock|mocks|fixture|stories)\.[cm]?[jt]sx?$|(^|\/)(test_[^/]*|[^/]*_test|conftest)\.py$|_test\.go$|(^|\/)testdata\/|(^|\/)[^/]*\.(Tests?|Specs?|IntegrationTests?|UnitTests?)\//i;
-/** WalletTests.cs is a test and Contest.cs isn't, so this part has to match case. */
+const TEST_PATTERN = /(^|\/)(__tests__|__mocks__|tests?|spec|e2e|fixtures?|mocks?|migrations)\/|\.(test|spec|mock|mocks|fixture|stories)\.[cm]?[jt]sx?$|(^|\/)(test_[^/]*|[^/]*_test|conftest)\.py$|_test\.go$|(^|\/)testdata\/|(^|\/)[^/]*\.(Tests?|Specs?|IntegrationTests?|UnitTests?)\/|(^|\/)[\w-]*integration-?tests?\//i;
+/** WalletTests.cs and WalletTest.java are tests and Contest.cs isn't, so these parts have to match case. */
 const CSHARP_TEST_FILE = /[a-z0-9](?:Tests?|Spec)\.cs$/;
-export const TEST_PATH = { test: (path: string) => TEST_PATTERN.test(path) || CSHARP_TEST_FILE.test(path) };
+const JVM_TEST_FILE = /[a-z0-9](?:Test|Tests|Spec|IT)\.(?:java|kt)$/;
+export const TEST_PATH = { test: (path: string) => TEST_PATTERN.test(path) || CSHARP_TEST_FILE.test(path) || JVM_TEST_FILE.test(path) };
 
 export type FileRule = {
   id: string;

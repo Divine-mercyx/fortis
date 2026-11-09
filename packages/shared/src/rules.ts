@@ -26,6 +26,8 @@ export type RuleMeta = {
   fixCsharp?: string;
   /** The fix in PHP's terms. */
   fixPhp?: string;
+  /** The fix in Java's and Kotlin's terms. */
+  fixJvm?: string;
 };
 
 /**
@@ -53,6 +55,7 @@ export const RULE_CATALOG: readonly RuleMeta[] = [
     fixGo: 'Filter by the signed-in user in the query, for example db.Where("id = ? AND user_id = ?", id, userID).First(&wallet), and return 404 when nothing matches.',
     fixCsharp: 'Filter by the signed-in user, for example FirstOrDefaultAsync(w => w.Id == id && w.UserId == userId), or use resource-based authorization with IAuthorizationService. [Authorize] alone only checks that someone is logged in.',
     fixPhp: "Check a policy with $this->authorize('view', $wallet), or scope the query to the signed-in user: $request->user()->wallets()->findOrFail($id).",
+    fixJvm: "Add @PreAuthorize or @PostAuthorize with an ownership check, or query by the signed-in user: walletRepository.findByIdAndOwnerId(id, userId). Return 404 when nothing matches.",
   },
   {
     id: 'FX-HOOK-001',
@@ -65,6 +68,7 @@ export const RULE_CATALOG: readonly RuleMeta[] = [
     fixGo: "Compute the HMAC of the raw body with crypto/hmac, and compare it to the provider's signature header with hmac.Equal before acting.",
     fixCsharp: "Compute the HMAC of the raw body with HMACSHA512, and compare it to the provider's signature header with CryptographicOperations.FixedTimeEquals before acting.",
     fixPhp: "Compute hash_hmac('sha512', $request->getContent(), $secret), and compare it to the provider's signature header with hash_equals before acting.",
+    fixJvm: "Compute the HMAC of the raw body with Mac.getInstance(\"HmacSHA512\"), and compare it to the provider's signature header with MessageDigest.isEqual before acting.",
   },
   {
     id: 'FX-TXN-001',
@@ -77,6 +81,7 @@ export const RULE_CATALOG: readonly RuleMeta[] = [
     fixGo: 'Do the update in one statement, such as db.Model(&wallet).Update("balance", gorm.Expr("balance - ?", amount)), or lock the row inside db.Transaction with clause.Locking.',
     fixCsharp: 'Do the update in one statement with ExecuteUpdateAsync and SetProperty, or use BeginTransaction with a row lock, or a concurrency token.',
     fixPhp: "Use $wallet->decrement('balance', $amount), or lock the row with lockForUpdate() inside DB::transaction().",
+    fixJvm: "Make the method @Transactional and load the row with @Lock(LockModeType.PESSIMISTIC_WRITE), or update it in one statement with @Modifying @Query.",
   },
   {
     id: 'FX-PII-002',
@@ -105,6 +110,7 @@ export const RULE_CATALOG: readonly RuleMeta[] = [
     fixGo: 'Generate with crypto/rand, never math/rand. Never log or return it, and limit attempts.',
     fixCsharp: 'Generate with RandomNumberGenerator.GetInt32, never System.Random. Never log or return it, and limit attempts.',
     fixPhp: "Generate with random_int(), never rand() or mt_rand(). Never log or return it, and limit attempts.",
+    fixJvm: "Generate with SecureRandom, never java.util.Random or Math.random(). Never log or return it, and limit attempts.",
   },
   {
     id: 'SEC-GEN-001',
@@ -223,11 +229,12 @@ export const RULE_CATALOG: readonly RuleMeta[] = [
 ];
 
 /** The fix for a finding, in the language of the file it's in. */
-export function fixFor(rule: Pick<RuleMeta, 'fix' | 'fixPython' | 'fixGo' | 'fixCsharp' | 'fixPhp'>, file: string): string {
+export function fixFor(rule: Pick<RuleMeta, 'fix' | 'fixPython' | 'fixGo' | 'fixCsharp' | 'fixPhp' | 'fixJvm'>, file: string): string {
   if (/\.py$/i.test(file) && rule.fixPython) return rule.fixPython;
   if (/\.go$/i.test(file) && rule.fixGo) return rule.fixGo;
   if (/\.cs$/i.test(file) && rule.fixCsharp) return rule.fixCsharp;
   if (/\.php$/i.test(file) && rule.fixPhp) return rule.fixPhp;
+  if (/\.(java|kt)$/i.test(file) && rule.fixJvm) return rule.fixJvm;
   return rule.fix;
 }
 
