@@ -1,0 +1,7 @@
+services:
+  api:
+    environment:
+      PAYSTACK_SECRET_KEY: {{PAYSTACK_TEST}} # @hit
+      MONNIFY_API_KEY: {{MONNIFY_PROD}} # @hit
+      FLUTTERWAVE_PUBLIC_KEY: ${FLUTTERWAVE_PUBLIC_KEY}
+      SQUAD_KEY: ${SQUAD_KEY}

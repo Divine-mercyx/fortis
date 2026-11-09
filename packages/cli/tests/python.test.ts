@@ -6,7 +6,8 @@ import { describe, expect, it } from 'vitest';
 
 import { cvssSeverity, scanDependencies } from '../src/rules/dependencies';
 import { findLockfiles, parseLockfile } from '../src/rules/lockfiles';
-import { isRequestHandler, pyClasses, pyCodeOnly, pyFunctions, pyStatementAt } from '../src/rules/python';
+import { factsFor } from '../src/analysis/facts';
+import { pyCodeOnly, pyStatementAt } from '../src/rules/python';
 import { TEST_PATH, type SourceFile } from '../src/rules/types';
 import { buildContext } from '../src/scan';
 
@@ -32,8 +33,8 @@ describe('reading Python', () => {
     expect(pyStatementAt(file, 1)).not.toContain('other');
   });
 
-  it('finds functions with their decorators, parameters, class and body', () => {
-    const file = source(`@login_required
+  it('finds functions with their decorators, parameters and class', () => {
+    const { fns } = factsFor(source(`@login_required
 @app.route(
     "/wallets/<id>",
     methods=["POST"],
@@ -52,19 +53,16 @@ class TransferView(APIView):
 
 def after():
     pass
-`);
-    const [wallet, post, after] = pyFunctions(file);
-    expect(wallet).toMatchObject({ name: 'wallet', params: ['id', 'db'], line: 6, bodyLine: 7, endLine: 10 });
+`));
+    const [, wallet, post, after] = fns;
+    expect(wallet).toMatchObject({ name: 'wallet', params: ['id', 'db'], line: 6, endLine: 10, handler: true });
     expect(wallet!.decorators.map((d) => d.line)).toEqual([1, 2]);
-    expect(wallet!.body).toContain('lookup(id)');
-    expect(post).toMatchObject({ name: 'post', className: 'TransferView', classBases: 'APIView', params: ['request', 'pk'] });
-    expect(after!.className).toBeUndefined();
-    expect(after!.decorators).toEqual([]);
-    expect(pyClasses(file).map((c) => c.name)).toEqual(['TransferView']);
+    expect(post).toMatchObject({ name: 'post', owner: 'TransferView', params: ['request', 'pk'], handler: true });
+    expect(after).toMatchObject({ owner: undefined, decorators: [], handler: false });
   });
 
   it('tells request handlers from other functions', () => {
-    const fns = pyFunctions(source(`def django_view(request, pk):
+    const { fns } = factsFor(source(`def django_view(request, pk):
     pass
 
 def helper(wallet_id):
@@ -80,7 +78,7 @@ class Detail(APIView):
     def _load(self, request):
         pass
 `));
-    expect(fns.map((f) => [f.name, isRequestHandler(f)])).toEqual([
+    expect(fns.slice(1).map((f) => [f.name, f.handler])).toEqual([
       ['django_view', true], ['helper', false], ['fastapi_route', true], ['get', true], ['_load', false],
     ]);
   });

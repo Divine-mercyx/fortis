@@ -1,0 +1,48 @@
+name: New rule
+description: Suggest something Fortis should detect, or a pattern a rule gets wrong.
+labels: [enhancement, 'area: fintech rules']
+body:
+  - type: markdown
+    attributes:
+      value: Rules are built from benchmark cases, so examples help most. Use made-up values, not real keys or customer data.
+  - type: textarea
+    id: risk
+    attributes:
+      label: What should be detected, and why does it matter?
+      description: What could go wrong in production if this code ships.
+    validations:
+      required: true
+  - type: input
+    id: stack
+    attributes:
+      label: Language and framework
+      placeholder: TypeScript with Express, Python with Django
+    validations:
+      required: true
+  - type: textarea
+    id: flag
+    attributes:
+      label: Code that should be flagged
+      render: text
+    validations:
+      required: true
+  - type: textarea
+    id: safe
+    attributes:
+      label: Similar code that should not be flagged
+      description: The safe version of the same code.
+      render: text
+    validations:
+      required: true
+  - type: dropdown
+    id: severity
+    attributes:
+      label: Suggested severity
+      options:
+        - critical
+        - high
+        - medium
+        - low
+        - info
+    validations:
+      required: true

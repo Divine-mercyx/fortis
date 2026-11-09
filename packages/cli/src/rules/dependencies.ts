@@ -1,12 +1,13 @@
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { dirname, join, relative, resolve } from 'node:path';
 
 import type { Severity } from '@fortis/shared';
 
-import { cycloneDx, ecosystemOf, findLockfiles, isPomXml, isRequirements, manifestFor, missingLockfiles, parseLockfile, type Ecosystem, type Locked } from './lockfiles';
+import { cycloneDx, ecosystemOf, findLockfiles, goWorkModules, GRADLE_BUILD, isDotnetProject, isJvmBuild, isPomXml, isRequirements, manifestFor, missingLockfiles, parseLockfile, podsIn, pomParent, SBT_BUILD, VERSION_CATALOG, type Ecosystem, type Locked } from './lockfiles';
 import { fixedVersion, fixMessage, type OsvAffected } from './fix-version';
+import { globMatch } from './js-lockfiles';
 import { OsvCache } from './osv-cache';
-import { lookupLocal } from './osv-db';
+import { affects, lookupLocal, type DbAdvisory } from './osv-db';
 import type { Detection } from './types';
 
 /*
@@ -88,23 +89,30 @@ export function readPackages(root: string, files: string[], opts: { sbom?: strin
   }
 
   let pomFiles = 0;
+  let jvmBuilds = 0;
   let pomChecked = 0;
   let pomSkipped = 0;
   let skippedElsewhere = 0;
   const skippedByFile: { file: string; names: string[]; count: number }[] = [];
   let directOnlyFiles = 0;
-  for (const file of findLockfiles(files, opts.ignore)) {
-    if (sbomRead && (isPomXml(file) || isRequirements(file))) continue; // the SBOM already has this, and more
+  let dotnetProjects = 0;
+  const lockfiles = chooseJsLockfiles(root, withGoWorkspaces(root, findLockfiles(files, opts.ignore), opts.ignore), notes);
+  for (const file of lockfiles) {
+    if (sbomRead && (isPomXml(file) || isRequirements(file) || isJvmBuild(file))) continue; // the SBOM already has this, and more
     const abs = join(root, file);
     if (!existsSync(abs)) continue;
     try {
       const manifestName = manifestFor(file);
-      const manifestPath = manifestName ? join(root, dirname(file), manifestName) : null;
-      const manifest = manifestPath && existsSync(manifestPath) ? readText(manifestPath) : undefined;
-      const parsed = parseLockfile(file, readText(abs), manifest);
+      const manifestPath = manifestName ? join(root, dirname(file), manifestName) : nearestManifest(root, file);
+      const manifest = manifestPath && existsSync(manifestPath) ? readText(manifestPath) : jvmContext(root, file);
+      const workspaces = /(^|\/)yarn\.lock$/.test(file) && manifest ? workspaceManifests(join(root, dirname(file)), manifest) : undefined;
+      const parsed = parseLockfile(file, readText(abs), manifest, workspaces);
       packages.push(...parsed.packages.map((p) => ({ ...p, file })));
       seen.add(ecosystemOf(file));
-      if (parsed.directOnly) directOnlyFiles++;
+      if (parsed.note && !notes.includes(parsed.note)) notes.push(parsed.note);
+      if (parsed.directOnly && isDotnetProject(file)) dotnetProjects++;
+      else if (parsed.directOnly && isRequirements(file)) directOnlyFiles++;
+      if (isJvmBuild(file)) jvmBuilds++;
       if (isPomXml(file)) {
         pomFiles++;
         pomChecked += parsed.packages.length;
@@ -122,20 +130,118 @@ export function readPackages(root: string, files: string[], opts: { sbom?: strin
   if (pomFiles) {
     const declared = pomChecked + pomSkipped;
     const versions = pomSkipped ? `; the other ${pomSkipped} get their version from a parent POM or BOM` : '';
-    notes.push(`pom.xml: checked ${pomChecked} of ${declared} declared dependencies${versions}. Transitive dependencies aren't covered: generate a CycloneDX SBOM and pass --sbom for those.`);
+    notes.push(`pom.xml: checked ${pomChecked} of ${declared} declared dependencies${versions}. Transitive dependencies aren't covered: generate a CycloneDX SBOM and pass --sbom for those (fortis ci init adds the step).`);
   }
+  if (dotnetProjects) notes.push(`.NET project files: only the packages they reference were checked (${dotnetProjects === 1 ? '1 project' : `${dotnetProjects} projects`}). Transitive packages need the lockfile: set <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile> and commit packages.lock.json, or pass --sbom.`);
+  if (jvmBuilds) notes.push(`Gradle and sbt build files: only the dependencies they declare were checked. Transitive dependencies need a CycloneDX SBOM passed with --sbom (fortis ci init adds the step for Gradle), Gradle dependency locking, or sbt-dependency-lock's build.sbt.lock.`);
   if (directOnlyFiles) notes.push(`requirements files: only the packages they list were checked. Unless they're a full pip freeze, transitive dependencies aren't covered: use uv, Poetry or pip-compile, or pass --sbom for those.`);
   if (skippedElsewhere) {
-    notes.push(`${skippedElsewhere === 1 ? '1 dependency has' : `${skippedElsewhere} dependencies have`} no exact version (pinned by range, unpinned or installed from a branch), so ${skippedElsewhere === 1 ? "it wasn't" : "they weren't"} checked.`);
+    notes.push(`${skippedElsewhere === 1 ? '1 dependency has' : `${skippedElsewhere} dependencies have`} no exact version (pinned by range, unpinned, or installed from a branch, git, a tarball or a local folder), so ${skippedElsewhere === 1 ? "it wasn't" : "they weren't"} checked.`);
     for (const s of skippedByFile) notes.push(`  ${s.file}: ${skippedList(s.names, s.count)}. ${pinAdvice(s.file)}`);
   }
 
   if (opts.allPaths) {
     const missing = missingLockfiles(opts.allPaths, opts.ignore ?? [], seen);
+    // Say which pods weren't checked, so a CocoaPods app can see what it's carrying.
+    for (const lock of opts.allPaths.filter((p) => /(^|\/)Podfile\.lock$/.test(p))) {
+      try {
+        const pods = podsIn(readText(join(root, lock)));
+        if (pods.length) missing.push(`  ${lock}: ${skippedList(pods, pods.length)}.`);
+      } catch {
+        /* unreadable: the general note still says CocoaPods weren't checked */
+      }
+    }
     if (missing.length) incomplete = true;
     notes.push(...missing);
   }
   return { packages, notes, incomplete };
+}
+
+/**
+ * For formats whose manifest isn't beside them: the nearest Directory.Packages.props above a .NET
+ * project (as MSBuild finds it), or the go.work that uses a Go module.
+ */
+function nearestManifest(root: string, file: string): string | null {
+  const dotnet = isDotnetProject(file);
+  const go = /(^|\/)go\.mod$/.test(file);
+  if (!dotnet && !go) return null;
+  const moduleDir = dirname(file);
+  for (let dir = moduleDir; ; dir = dirname(dir)) {
+    const candidate = join(root, dir, dotnet ? 'Directory.Packages.props' : 'go.work');
+    if (existsSync(candidate)) {
+      if (dotnet) return candidate;
+      const uses = goWorkModules(readText(candidate)).map((u) => relative(root, resolve(root, dir, u)).replace(/\\/g, '/') || '.');
+      if (uses.includes(moduleDir === '.' ? '.' : moduleDir)) return candidate;
+    }
+    if (dir === '.' || dir === '' || dir === dirname(dir)) return null;
+  }
+}
+
+/** Every module a go.work uses gets its go.mod read, even if nothing else pointed at it. */
+function withGoWorkspaces(root: string, files: string[], ignore?: string[]): string[] {
+  const out = [...files];
+  const works = new Set(files.filter((f) => /(^|\/)go\.mod$/.test(f)).map((f) => dirname(f)));
+  for (const dir of ['.', ...works]) {
+    const work = join(root, dir, 'go.work');
+    if (!existsSync(work)) continue;
+    for (const use of goWorkModules(readText(work))) {
+      const mod = relative(root, resolve(root, dir, use, 'go.mod')).replace(/\\/g, '/');
+      if (mod.startsWith('..') || out.includes(mod) || !existsSync(join(root, mod))) continue;
+      if (findLockfiles([mod], ignore).length) out.push(mod);
+    }
+  }
+  return out;
+}
+
+/**
+ * What a JVM build file needs from elsewhere in the repository: a pom.xml's parent POMs (found
+ * through <relativePath>), the build scripts that use a Gradle version catalog, or the build.sbt
+ * next to an sbt project folder.
+ */
+function jvmContext(root: string, file: string): string | undefined {
+  const read = (rel: string) => {
+    const abs = join(root, rel);
+    return existsSync(abs) ? readText(abs) : undefined;
+  };
+  if (isPomXml(file)) {
+    const parents: string[] = [];
+    let at = file;
+    let text = read(file);
+    for (let i = 0; i < 5 && text; i++) {
+      const parent = pomParent(text);
+      if (!parent) break;
+      const rel = relative(root, resolve(root, dirname(at), parent.relativePath.replace(/\/?$/, '').replace(/(?<!\.xml)$/, '/pom.xml'))).replace(/\\/g, '/');
+      const parentText = rel.startsWith('..') ? undefined : read(rel);
+      if (!parentText || (parent.artifactId && !parentText.includes(`<artifactId>${parent.artifactId}</artifactId>`))) break;
+      parents.push(parentText);
+      at = rel;
+      text = parentText;
+    }
+    return parents.length ? JSON.stringify(parents) : undefined;
+  }
+  if (VERSION_CATALOG.test(file)) {
+    // The project the catalog belongs to: the folder holding gradle/.
+    const project = dirname(dirname(file));
+    const builds: string[] = [];
+    const walk = (rel: string, depth: number) => {
+      if (depth > 3) return;
+      let names: string[] = [];
+      try {
+        names = readdirSync(join(root, rel));
+      } catch {
+        return;
+      }
+      for (const n of names) {
+        const child = rel === '.' ? n : `${rel}/${n}`;
+        if (GRADLE_BUILD.test(n)) builds.push(readText(join(root, child)));
+        else if (!/^(?:\.|build$|node_modules$)/.test(n) && statSync(join(root, child), { throwIfNoEntry: false })?.isDirectory()) walk(child, depth + 1);
+      }
+    };
+    walk(project, 0);
+    return builds.join('\n');
+  }
+  if (SBT_BUILD.test(file) && /(^|\/)project\/[^/]+\.scala$/.test(file)) return read(`${dirname(dirname(file))}/build.sbt`);
+  return undefined;
 }
 
 /** "fastapi, pydantic, uvicorn and 17 more" */
@@ -152,7 +258,89 @@ export function pinAdvice(file: string): string {
   if (/^Pipfile\.lock$/.test(base)) return 'Run pipenv lock so every package has an exact version.';
   if (/^composer\.lock$/.test(base)) return 'Branch installs have no release to check: require a tagged version (composer require vendor/pkg:^x).';
   if (/\.(txt|in)$/.test(base)) return 'Lock exact versions to check them: uv lock or poetry lock, or pip-compile (uv pip compile requirements.in -o requirements.txt), or pip freeze > requirements.txt.';
+  if (/^(package-lock\.json|npm-shrinkwrap\.json|pnpm-lock\.yaml|yarn\.lock)$/.test(base)) return 'Packages from git, a tarball or a local folder have no registry release to check: depend on a published version where you can.';
+  if (/\.(?:cs|fs|vb)proj$|^packages\.config$|^Directory\.Packages\.props$/i.test(base)) return 'Floating versions and ranges (8.*, [1.0,2.0)) have no one version to check: use an exact version, or turn on the lockfile.';
+  if (/^(go\.mod|modules\.txt)$/.test(base)) return 'A module replaced by a local folder has no release to check.';
+  if (/\.versions\.toml$|^build\.gradle(\.kts)?$|^build\.sbt$|\.scala$/.test(base)) return 'A version from a BOM or a variable, or a dynamic one (1.+), has no one version to check here: a CycloneDX SBOM, Gradle dependency locking or build.sbt.lock covers them.';
+  if (/^(mix|rebar)\.lock$|^stack\.yaml\.lock$/.test(base)) return 'Git dependencies have no Hex or Hackage release to check: depend on a published version where you can.';
+  if (/^renv\.lock$/.test(base)) return 'Packages from GitHub or Bioconductor aren\'t in OSV\'s CRAN data: install from CRAN where you can.';
+  if (/^Package\.resolved$/.test(base)) return 'A package pinned to a branch or a commit has no release to check: depend on a version where you can.';
   return 'Pin exact versions in the lockfile to check them.';
+}
+
+const JS_LOCKFILE = /(?:^|\/)(npm-shrinkwrap\.json|package-lock\.json|pnpm-lock\.yaml|yarn\.lock)$/;
+/** With no packageManager to go by. An npm lockfile beside a pnpm or Yarn one is usually left over from an `npm install`. */
+const JS_PREFERENCE = ['npm-shrinkwrap.json', 'pnpm-lock.yaml', 'yarn.lock', 'package-lock.json'];
+
+/**
+ * One JavaScript lockfile per folder. Two (an accidental mix) describe the same project differently,
+ * so one is chosen, by package.json's packageManager where it says, and the scan says which.
+ */
+export function chooseJsLockfiles(root: string, files: string[], notes: string[]): string[] {
+  const byDir = new Map<string, string[]>();
+  for (const f of files) {
+    if (!JS_LOCKFILE.test(f)) continue;
+    const dir = f.includes('/') ? f.slice(0, f.lastIndexOf('/')) : '';
+    byDir.set(dir, [...(byDir.get(dir) ?? []), f]);
+  }
+  const dropped = new Set<string>();
+  for (const [dir, list] of byDir) {
+    if (list.length < 2) continue;
+    const name = (f: string) => f.slice(f.lastIndexOf('/') + 1);
+    let manager = '';
+    try {
+      manager = (JSON.parse(readText(join(root, dir, 'package.json'))) as { packageManager?: string }).packageManager ?? '';
+    } catch {
+      /* no package.json: go by the usual order */
+    }
+    const tool = /^(npm|pnpm|yarn)@/.exec(manager)?.[1];
+    const wanted = { npm: ['npm-shrinkwrap.json', 'package-lock.json'], pnpm: ['pnpm-lock.yaml'], yarn: ['yarn.lock'] }[tool ?? ''] ?? [];
+    const chosen = list.find((f) => wanted.includes(name(f))) ?? [...list].sort((a, b) => JS_PREFERENCE.indexOf(name(a)) - JS_PREFERENCE.indexOf(name(b)))[0]!;
+    for (const f of list) if (f !== chosen) dropped.add(f);
+    const others = list.filter((f) => f !== chosen).map(name).join(' and ');
+    const why = tool && wanted.includes(name(chosen)) ? `package.json's packageManager says ${tool}` : `${others} next to it is usually left over`;
+    notes.push(`${dir || 'The repository root'} has more than one lockfile: checked ${name(chosen)} (${why}), not ${others}. Delete the one you don't use.`);
+  }
+  return files.filter((f) => !dropped.has(f));
+}
+
+/** The package.json of each Yarn workspace, from the patterns in the root package.json. */
+export function workspaceManifests(dir: string, rootManifest: string): string[] {
+  let patterns: string[] = [];
+  try {
+    const ws = (JSON.parse(rootManifest) as { workspaces?: string[] | { packages?: string[] } }).workspaces;
+    patterns = Array.isArray(ws) ? ws : (ws?.packages ?? []);
+  } catch {
+    return [];
+  }
+  const include = patterns.filter((p) => !p.startsWith('!'));
+  const exclude = patterns.filter((p) => p.startsWith('!')).map((p) => p.slice(1));
+  const out: string[] = [];
+  // Folders up to four levels down, which covers packages/*, apps/*/* and the like.
+  const walk = (rel: string, depth: number) => {
+    if (depth > 4) return;
+    let names: string[] = [];
+    try {
+      names = readdirSync(join(dir, rel));
+    } catch {
+      return;
+    }
+    for (const n of names) {
+      if (n === 'node_modules' || n.startsWith('.')) continue;
+      const child = rel ? `${rel}/${n}` : n;
+      try {
+        if (!statSync(join(dir, child)).isDirectory()) continue;
+      } catch {
+        continue;
+      }
+      if (include.some((p) => globMatch(p, child)) && !exclude.some((p) => globMatch(p, child)) && existsSync(join(dir, child, 'package.json'))) {
+        out.push(readText(join(dir, child, 'package.json')));
+      }
+      walk(child, depth + 1);
+    }
+  };
+  walk('', 1);
+  return out;
 }
 
 async function inPool<T>(items: T[], size: number, run: (item: T) => Promise<void>) {
@@ -217,7 +405,8 @@ export async function scanDependencies(
         const res = await fetchImpl(`${base}/v1/querybatch`, {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ queries: chunk.map((p) => ({ package: { name: p.name, ecosystem: p.ecosystem }, version: p.version })) }),
+          // OSV's API doesn't match versions for GitHub Actions, so those are asked for every advisory and matched below.
+          body: JSON.stringify({ queries: chunk.map((p) => ({ package: { name: p.name, ecosystem: p.ecosystem }, ...(p.ecosystem === 'GitHub Actions' ? {} : { version: p.version }) })) }),
           signal: AbortSignal.timeout(15_000),
         });
         if (!res.ok) throw new Error(`OSV responded ${res.status}`);
@@ -263,7 +452,15 @@ export async function scanDependencies(
       cache?.save();
     }
 
-    const byKey = new Map(hits.map((h) => [keyOf(h.pkg), h]));
+    // An action's advisories came back for every version: keep those whose ranges include this one.
+    for (const h of hits) {
+      if (h.pkg.ecosystem !== 'GitHub Actions') continue;
+      h.ids = h.ids.filter((id) => {
+        const v = details.get(id);
+        return v ? affects(v as DbAdvisory, h.pkg.ecosystem, h.pkg.name, h.pkg.version) : false;
+      });
+    }
+    const byKey = new Map(hits.filter((h) => h.ids.length).map((h) => [keyOf(h.pkg), h]));
     const detections: Detection[] = [];
     for (const where of new Map(located.map((p) => [`${p.file}|${keyOf(p)}`, p])).values()) {
       const hit = byKey.get(keyOf(where));

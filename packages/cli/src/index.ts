@@ -1,16 +1,21 @@
 import { randomUUID } from 'node:crypto';
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
-import { basename, dirname, join } from 'node:path';
+import { existsSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
+import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path';
 
 import { MAX_FINDINGS_PER_SCAN, RULE_CATALOG, maskSnippet, SEVERITIES, type RulePack, type Severity } from '@fortis/shared';
 
 import { ApiError, client, toUpload, type CliTarget, type WhoAmI } from './api';
-import { ACCESS_CONFIG, checksFromOpenApi, readAccessConfig, runAccessChecks, writeAccessTemplate } from './access';
+import { ACCESS_CONFIG, hasWriteChecks, readAccessConfig, runAccessChecks, writeAccessTemplate, type AccessConfig } from './access';
+import { checksFromGraphqlSchema, INTROSPECTION_QUERY, schemaFrom } from './access-graphql';
+import { checksFromRoutes, routesFromHar, routesFromOpenApi, routesFromPostman, type Route } from './access-import';
 import { BASELINE_FILE, readBaseline, splitByBaseline, writeBaseline } from './baseline';
-import { detectProvider, writeCi, type CiProvider } from './ci';
+import { CI_PROVIDERS, detectProvider, NEXT_STEPS, writeCi, type CiProvider } from './ci';
+import { runDoctor, type Check } from './doctor';
 import { scanHistory } from './history';
+import { toJunit } from './junit';
+import { postPrComment, prContext } from './pr-comment';
 import { githubAnnotations, toSarif } from './sarif';
-import { dockerAvailable, isLocalHost, parseZapReport, reportOrigins, runZap, waitForTarget, ZAP_IMAGE, type DastFinding, type ZapAuth, type ZapReport } from './dast';
+import { chooseZapEngine, isLocalHost, parseZapReport, reportOrigins, runZap, waitForTarget, ZAP_IMAGE, type DastFinding, type ZapAuth, type ZapReport } from './dast';
 import { PROJECT_CONFIG, readProjectConfig, removeKey, resolveKey, saveKey, writeProjectConfig } from './config';
 import { apiUrl, VERSION } from './env';
 import { checkoutInfo, currentBranch, currentCommit, parsePushRefs, repoRoot, type PushedRef } from './git';
@@ -34,12 +39,13 @@ ${c.bold('Usage')}
   fortis logout [--api URL]                          remove the saved key
   fortis whoami                                      show the project and plan for your key
   fortis test --target <url> [options]               ZAP test of a running staging app
-  fortis access --target <url>                       can test user B read test user A's records? (BOLA)
-  fortis access init [--openapi URL]                 write ${ACCESS_CONFIG} (from your OpenAPI spec if given)
+  fortis access --target <url> [--writes]            can test user B read, change or delete test user A's records? (BOLA)
+  fortis access init [--openapi|--postman|--har|--graphql <source>]  write ${ACCESS_CONFIG}, from your routes if given
   fortis baseline                                    accept today's findings so only new ones block
-  fortis ci init [--provider github|gitlab] [--history]  write a CI workflow (scan on PRs, test staging)
+  fortis ci init [--provider <name>] [--history]     write a CI pipeline: ${CI_PROVIDERS.join(', ')}
   fortis explain <RULE-ID>                           why a rule matters and how to fix it
   fortis update [version]                            update a binary install to the latest version, or this one
+  fortis doctor [--strict] [--json] [--offline]      find what isn't working here, and how to fix it
   fortis rules                                       list every rule
 
 ${c.bold('Scan options')}
@@ -51,33 +57,39 @@ ${c.bold('Scan options')}
   --offline        skip the network (no dependency check, no upload)
   --history        also search all git history for secrets (deleted keys still need rotating)
   --sarif <file>   write SARIF for GitHub code scanning, GitLab and IDEs
-  --sbom <file>    also check a CycloneDX JSON SBOM (full Maven coverage, including transitive)
+  --junit <file>   write JUnit XML for CI systems that show test reports
+  --pr-comment     in CI, post one comment on the pull request listing what it adds, updated in place
+  --sbom <file>    also check a CycloneDX JSON SBOM (full Maven and Gradle coverage, including transitive)
   --no-baseline    block on every finding, ignoring ${BASELINE_FILE}
   --submodules     also scan git submodules (skipped by default: they are separate repositories)
+  --paths-from <f> only scan the files listed in f, one per line (- for stdin); never closes findings
   --osv-db <dir>   check dependencies against OSV's downloaded exports (air-gapped networks)
   --no-cache       ask OSV again instead of using answers cached in the last 6 hours
 
-${c.bold('Test options')}  ${c.grey('(needs Docker; the target must be verified and authorised in the dashboard)')}
+${c.bold('Test options')}  ${c.grey('(needs Docker or a local ZAP; the target must be verified and authorised in the dashboard)')}
   --target <url>   staging URL to test (or set it once as "target" in .fortis.json)
   --mode <m>       baseline: passive checks, no attacks (default) · full: active scan (Fortis Plus)
   --openapi <url>  scan every operation in an OpenAPI spec (active, counts as full)
   --minutes <n>    how long to crawl (default 2)
   --local          test localhost on this machine; results stay local
-  --zap-report <f> import a ZAP JSON report you ran yourself instead of running Docker
+  --zap-report <f> import a ZAP JSON report you ran yourself instead of running ZAP
   --fail-on <sev>  fail at this severity or above (default: high)
   --wait <s>       wait up to s seconds for the target to come up (after a deploy)
   logged in        set FORTIS_ZAP_AUTH to a test user's token ("Bearer …" is added if missing);
                    FORTIS_ZAP_AUTH_HEADER changes the header (e.g. Cookie). Sent to the target host only.
 
-${c.bold('Access checks')}  ${c.grey('(Fortis Plus; GET requests only, nothing is changed)')}
+${c.bold('Access checks')}  ${c.grey('(Fortis Plus; read-only unless you pass --writes)')}
   Create two ordinary customers on staging, give user A a loan/wallet/transfer, then set
   FORTIS_USER_A_TOKEN and FORTIS_USER_B_TOKEN and run fortis access --target <url>.
+  --writes         also send updates and deletes as user B, only to throwaway records user A
+                   creates first using "writes" in ${ACCESS_CONFIG}
 
 ${c.bold('Environment')}
   FORTIS_KEY       CLI key (preferred in CI)
   FORTIS_API_URL   API address (default: ${apiUrl()})
   FORTIS_NO_UPDATE_CHECK=1  turn off the once-a-day notice about a newer version (always off in CI)
   FORTIS_ZAP_DOCKER_ARGS  extra docker flags for fortis test (e.g. --add-host for private staging)
+  FORTIS_ZAP_PATH  use the ZAP at this path (zap.sh or zap.bat) instead of Docker
   HTTPS_PROXY, HTTP_PROXY, NO_PROXY  company proxy (localhost is never proxied)
   NODE_EXTRA_CA_CERTS or --ca <file>  extra CA certificates, for proxies that inspect TLS
 `;
@@ -93,7 +105,7 @@ function parseArgs(argv: string[]): { cmd: string; args: string[]; flags: Flags 
     if (a.startsWith('--')) {
       const [k, v] = a.slice(2).split('=', 2) as [string, string | undefined];
       if (v !== undefined) flags[k] = v;
-      else if (['key', 'api', 'fail-on', 'target', 'mode', 'openapi', 'minutes', 'zap-report', 'sarif', 'since', 'provider', 'staging-branch', 'wait', 'config', 'sbom', 'ca', 'osv-db'].includes(k) && rest[i + 1] && !rest[i + 1]!.startsWith('--')) flags[k] = rest[++i]!;
+      else if (['key', 'api', 'fail-on', 'target', 'mode', 'openapi', 'minutes', 'zap-report', 'sarif', 'since', 'provider', 'staging-branch', 'wait', 'config', 'sbom', 'ca', 'osv-db', 'junit', 'postman', 'har', 'graphql', 'paths-from'].includes(k) && rest[i + 1] && !rest[i + 1]!.startsWith('--')) flags[k] = rest[++i]!;
       else flags[k] = true;
     } else args.push(a);
   }
@@ -101,6 +113,26 @@ function parseArgs(argv: string[]): { cmd: string; args: string[]; flags: Flags 
 }
 
 const str = (v: string | boolean | undefined) => (typeof v === 'string' ? v : undefined);
+
+/** Paths from a list, relative to the repository root. Anything outside the repository is dropped. */
+export function pathsInRepository(list: string, root: string, cwd: string): string[] {
+  const real = (p: string) => {
+    try {
+      return realpathSync.native(p);
+    } catch {
+      return p;
+    }
+  };
+  const top = real(root);
+  const out = new Set<string>();
+  for (const line of list.split(/\r?\n/)) {
+    const path = line.trim();
+    if (!path) continue;
+    const rel = relative(top, real(resolve(cwd, path)));
+    if (rel && !rel.startsWith('..') && !isAbsolute(rel)) out.add(rel.replace(/\\/g, '/'));
+  }
+  return [...out];
+}
 
 /** --osv-db and the OSV answer cache (on unless --no-cache). */
 const osvOptions = (flags: Flags) => ({ osvDb: str(flags['osv-db']), osvCacheDir: flags['no-cache'] ? undefined : osvCacheDir() });
@@ -112,6 +144,18 @@ async function cmdScan(flags: Flags): Promise<number> {
   const offline = Boolean(flags.offline);
   const key = offline ? undefined : resolveKey(api);
   const prePush = Boolean(flags['pre-push'] || flags.changed);
+  const pathsFrom = str(flags['paths-from']);
+  let only: string[] | undefined;
+  if (pathsFrom) {
+    try {
+      only = pathsInRepository(readFileSync(pathsFrom === '-' ? 0 : pathsFrom, 'utf8'), root, process.cwd());
+    } catch (e) {
+      err(c.red(`✖ Could not read --paths-from: ${(e as Error).message}`));
+      return 2;
+    }
+  }
+  // Scans of part of the repository can't say anything about the rest, so they never close findings.
+  const partialScope = prePush || Boolean(only);
   const ci = Boolean(flags.ci || process.env.CI);
   const json = Boolean(flags.json);
   const failOn = (str(flags['fail-on']) ?? config.failOn ?? 'critical') as Severity;
@@ -149,11 +193,11 @@ async function cmdScan(flags: Flags): Promise<number> {
       /* no stdin: fall back to comparing with the remote branch */
     }
   }
-  const result = await runScan({ root, scope: prePush ? 'changed' : 'full', packs, ignore: config.ignore, offline, pushed, sbom, submodules: Boolean(flags.submodules), ...osvOptions(flags) });
+  const result = await runScan({ root, scope: partialScope ? 'changed' : 'full', only, packs, ignore: config.ignore, offline, pushed, sbom, submodules: Boolean(flags.submodules), ...osvOptions(flags) });
   result.notes.unshift(...notes);
 
   // Git errors look like an empty repository. Passing here would also close every open finding.
-  if (!prePush && result.filesScanned === 0 && result.packagesChecked === 0) {
+  if (!partialScope && result.filesScanned === 0 && result.packagesChecked === 0) {
     // Only lockfiles, and the dependency check couldn't run: say why, not "no files".
     const depError = result.notes.find((n) => n.startsWith('Dependency check skipped:'));
     if (depError) {
@@ -179,6 +223,8 @@ async function cmdScan(flags: Flags): Promise<number> {
 
   const sarifPath = str(flags.sarif);
   if (sarifPath) writeFileSync(sarifPath, `${JSON.stringify(toSarif(result.detections), null, 2)}\n`);
+  const junitPath = str(flags.junit);
+  if (junitPath) writeFileSync(junitPath, toJunit(fresh, { failOn, durationMs: result.durationMs }));
   if (process.env.GITHUB_ACTIONS === 'true' && !json) {
     for (const line of githubAnnotations(fresh)) log(line);
   }
@@ -191,7 +237,7 @@ async function cmdScan(flags: Flags): Promise<number> {
         scanId: randomUUID(),
         trigger: prePush ? 'pre-push' : ci ? 'ci' : 'manual',
         // A full scan that couldn't read every file (sparse checkout, time budget) mustn't close findings.
-        scope: prePush || result.partial.length ? 'changed' : 'full',
+        scope: partialScope || result.partial.length ? 'changed' : 'full',
         incompleteChecks: result.incompleteChecks.length ? result.incompleteChecks : undefined,
         commit: currentCommit(root),
         branch: currentBranch(root),
@@ -220,11 +266,26 @@ async function cmdScan(flags: Flags): Promise<number> {
     result.notes.push(`${who.plan.name} keeps results on this machine. Upgrade to sync findings to the dashboard.`);
   }
 
+  let prComment: Awaited<ReturnType<typeof postPrComment>> | null = null;
+  if (flags['pr-comment']) {
+    const pr = prContext();
+    if (pr.reason) result.notes.push(pr.reason);
+    if (pr.context) {
+      // A comment that can't be posted never fails the build.
+      try {
+        prComment = await postPrComment(pr.context, fresh);
+      } catch (e) {
+        result.notes.push(`Pull-request comment failed: ${(e as Error).message.split(pr.context.token).join('••••')}`);
+      }
+    }
+  }
+
   const blocking = fresh.filter((d) => meetsThreshold(d.severity, failOn));
   if (json) {
     // Masked like every other output: --json usually lands in CI logs.
-    const detections = result.detections.map((d) => ({ ...d, snippet: maskSnippet(d.snippet).slice(0, 300) }));
-    log(JSON.stringify({ ...result, detections, packs, failOn, blocking: blocking.length, baselined: known.length, upload: uploaded }, null, 2));
+    const accepted = new Set(known);
+    const detections = result.detections.map((d) => ({ ...d, snippet: maskSnippet(d.snippet).slice(0, 300), ...(accepted.has(d) ? { baseline: true } : {}) }));
+    log(JSON.stringify({ root, ...result, detections, packs, failOn, blocking: blocking.length, baselined: known.length, upload: uploaded, prComment }, null, 2));
   } else {
     printReport({ ...result, detections: fresh }, { failOn, prePush, packs });
     if (uploaded) {
@@ -334,22 +395,22 @@ async function cmdTest(flags: Flags): Promise<number> {
       return 2;
     }
   } else {
-    const docker = dockerAvailable();
-    if (!docker.ok) {
-      err(c.red(`✖ ${docker.reason}`));
-      err(c.grey('fortis test runs OWASP ZAP in Docker. Install it from https://docs.docker.com/get-docker/'));
+    const engine = chooseZapEngine();
+    if (engine.kind === 'none') {
+      err(c.red(`✖ ${engine.reason}`));
+      err(c.grey('fortis test runs OWASP ZAP in Docker (https://docs.docker.com/get-docker/) or from a local install (https://www.zaproxy.org/download/).'));
       err(c.grey(`Or run ZAP yourself and import the result: fortis test --target ${origin} --zap-report report.json`));
       return 2;
     }
     const label = openapi ? 'API scan (active)' : mode === 'full' ? 'full scan (active)' : 'baseline (passive, no attacks)';
-    say(c.grey(`fortis ▸ OWASP ZAP ${label} · ${origin} · ${ZAP_IMAGE}`));
+    say(c.grey(`fortis ▸ OWASP ZAP ${label} · ${origin} · ${engine.kind === 'docker' ? ZAP_IMAGE : engine.path}`));
     say(c.grey(`Crawling for up to ${minutes} min${auth ? `, logged in via the ${auth.header} header` : ' as an anonymous visitor (set FORTIS_ZAP_AUTH to test behind login)'}. Pausing the target in the dashboard stops the run.`));
     try {
       const run = await runZap(
-        { target: origin, mode, openapi, minutes, local, auth },
+        { target: origin, mode, openapi, minutes, local, auth, engine },
         {
           onLine: (l) => {
-            if (!json && /^(PASS|WARN|FAIL|Total of|Stopping)/.test(l)) log(c.grey(`  ${l.slice(0, 160)}`));
+            if (!json && /^(PASS|WARN|FAIL|Total of|Stopping|Job \S+ (started|finished))/.test(l)) log(c.grey(`  ${l.slice(0, 160)}`));
           },
           shouldStop: api$
             ? async () => {
@@ -421,24 +482,69 @@ async function cmdAccess(args: string[], flags: Flags): Promise<number> {
   const json = Boolean(flags.json);
 
   if (args[0] === 'init') {
-    let checks: ReturnType<typeof checksFromOpenApi> = [];
+    const readSource = async (source: string) => (/^https?:/.test(source) ? await (await fetch(source, { signal: AbortSignal.timeout(20_000) })).text() : readFileSync(source, 'utf8').replace(/^﻿/, ''));
     const spec = str(flags.openapi);
-    if (spec) {
-      try {
-        const text = /^https?:/.test(spec) ? await (await fetch(spec, { signal: AbortSignal.timeout(20_000) })).text() : readFileSync(spec, 'utf8');
-        checks = checksFromOpenApi(JSON.parse(text));
-      } catch (e) {
-        err(c.red(`✖ Could not read the OpenAPI spec: ${(e as Error).message}`));
-        return 2;
+    const postman = str(flags.postman);
+    const har = str(flags.har);
+    const gql = str(flags.graphql);
+    let target = str(flags.target) ?? config.target;
+    const routes: Route[] = [];
+    let graphql: AccessConfig['graphql'];
+    const initNotes: string[] = [];
+    const sources: string[] = [];
+    let reading = '';
+    try {
+      if (spec) {
+        reading = 'the OpenAPI spec';
+        routes.push(...routesFromOpenApi(JSON.parse(await readSource(spec))));
+        sources.push('OpenAPI spec');
       }
+      if (postman) {
+        reading = 'the Postman collection';
+        routes.push(...routesFromPostman(JSON.parse(await readSource(postman))));
+        sources.push('Postman collection');
+      }
+      if (har) {
+        reading = 'the HAR file';
+        const origin = target ? new URL(target).origin : undefined;
+        routes.push(...routesFromHar(JSON.parse(await readSource(har)), origin));
+        sources.push('HAR file');
+      }
+      if (gql) {
+        reading = 'the GraphQL schema';
+        let path = '/graphql';
+        let json: unknown;
+        if (/^https?:/.test(gql)) {
+          const url = new URL(gql);
+          path = url.pathname;
+          target ??= url.origin;
+          const token = process.env.FORTIS_USER_A_TOKEN?.trim();
+          const authorization: Record<string, string> = token ? { authorization: /^(bearer|basic|token)\s/i.test(token) ? token : `Bearer ${token}` } : {};
+          const res = await fetch(gql, { method: 'POST', headers: { 'content-type': 'application/json', accept: 'application/json', ...authorization }, body: JSON.stringify({ query: INTROSPECTION_QUERY }), signal: AbortSignal.timeout(20_000) });
+          json = await res.json();
+        } else {
+          json = JSON.parse(readFileSync(gql, 'utf8').replace(/^﻿/, ''));
+        }
+        const built = checksFromGraphqlSchema(schemaFrom(json));
+        graphql = { path, checks: built.checks };
+        initNotes.push(...built.notes);
+        sources.push('GraphQL schema');
+      }
+    } catch (e) {
+      err(c.red(`✖ Could not read ${reading}: ${(e as Error).message}`));
+      return 2;
     }
     if (existsSync(join(root, ACCESS_CONFIG)) && !flags.force) {
       err(c.yellow(`! ${ACCESS_CONFIG} already exists. Use --force to overwrite it.`));
       return 2;
     }
-    writeAccessTemplate(root, str(flags.target) ?? config.target, checks);
-    log(c.green('✓'), `Wrote ${ACCESS_CONFIG}${spec ? ` with ${checks.length} resource(s) from your OpenAPI spec` : ' with example loan, wallet and transfer checks'}.`);
+    const checks = checksFromRoutes(routes);
+    writeAccessTemplate(root, target, checks, graphql);
+    const count = checks.length + (graphql?.checks.length ?? 0);
+    log(c.green('✓'), `Wrote ${ACCESS_CONFIG}${sources.length ? ` with ${count} resource(s) from your ${sources.join(' and ')}` : ' with example loan, wallet and transfer checks'}.`);
     log(c.grey('Edit the paths to match your API. It holds no secrets; tokens come from FORTIS_USER_A_TOKEN and FORTIS_USER_B_TOKEN.'));
+    for (const n of initNotes) log(c.yellow(`! ${n}`));
+    if (checks.some((check) => check.writes) || graphql?.checks.some((check) => check.writes)) log(c.grey('Fill in the values under "writes" before using --writes. They create and change throwaway records.'));
     return 0;
   }
 
@@ -506,11 +612,21 @@ async function cmdAccess(args: string[], flags: Flags): Promise<number> {
     }
   }
 
+  const writes = Boolean(flags.writes);
+  if (writes && !hasWriteChecks(cfg)) {
+    err(c.red(`✖ --writes needs a "writes" block on at least one check in ${ACCESS_CONFIG}.`), c.grey('It says how user A creates the throwaway record to test with.'));
+    return 2;
+  }
+
   const started = Date.now();
-  if (!json) log(c.grey(`fortis ▸ access checks · ${origin} · ${cfg.checks.length} resource(s) · GET only`));
+  const resourceCount = cfg.checks.length + (cfg.graphql?.checks.length ?? 0);
+  if (!json) {
+    log(c.grey(`fortis ▸ access checks · ${origin} · ${resourceCount} resource(s) · ${writes ? 'with writes' : 'read-only'}`));
+    if (writes) log(c.yellow('! User A creates throwaway records, and user B tries to update and delete them. Existing records are not written to.'));
+  }
   let res;
   try {
-    res = await runAccessChecks({ origin, config: cfg, tokenA, tokenB });
+    res = await runAccessChecks({ origin, config: cfg, tokenA, tokenB, writes });
   } catch (e) {
     err(c.red(`✖ ${(e as Error).message}`));
     return 2;
@@ -524,6 +640,8 @@ async function cmdAccess(args: string[], flags: Flags): Promise<number> {
     try {
       uploaded = await api$.upload({
         scanId: randomUUID(), trigger: process.env.CI ? 'ci' : 'manual', kind: 'access', targetId: target.id, scope: 'full',
+        // A run that didn't test writes can't say a write problem is fixed.
+        incompleteChecks: !writes || res.writesIncomplete ? ['access-writes'] : undefined,
         commit: currentCommit(root), branch: currentBranch(root), cliVersion: VERSION, durationMs: Date.now() - started,
         findings: findings.map(({ evidence: _e, ...f }) => f),
       });
@@ -534,17 +652,17 @@ async function cmdAccess(args: string[], flags: Flags): Promise<number> {
   const failOn = (str(flags['fail-on']) ?? 'high') as Severity;
   const blocking = findings.filter((f) => meetsThreshold(f.severity, failOn));
   if (json) {
-    log(JSON.stringify({ target: origin, checked: res.checked, requests: res.requests, findings, notes: res.notes, upload: uploaded }, null, 2));
+    log(JSON.stringify({ target: origin, writes, checked: res.checked, writesChecked: res.writesChecked, requests: res.requests, findings, notes: res.notes, upload: uploaded }, null, 2));
   } else {
     if (process.env.GITHUB_ACTIONS === 'true') for (const line of githubAnnotations(findings.map((f) => ({ ...f, file: undefined, title: `${f.title} (${f.file})`, message: f.detail })))) log(line);
     log('');
-    if (!findings.length) log(c.green(c.bold('✓ No access leaks found')), c.grey(`· ${res.checked} record(s) checked with ${res.requests} GET requests`));
+    if (!findings.length) log(c.green(c.bold('✓ No access leaks found')), c.grey(`· ${res.checked} record(s) checked${writes ? `, ${res.writesChecked} throwaway record(s) written to,` : ''} with ${res.requests} requests`));
     else {
       log(c.bold(c.red(`✖ ${findings.length} ACCESS LEAK${findings.length === 1 ? '' : 'S'}`)), c.grey(`· ${res.checked} record(s) checked`));
       log('');
       for (const f of findings) {
         log(`  ${c.bold(c.red('CRITICAL'))} ${c.white(c.bold(f.ruleId))}  ${f.title}`);
-        log(`  ${' '.repeat(8)} ${c.cyan(f.file)}  ${c.grey(`A ${f.evidence.status.a} · B ${f.evidence.status.b} · anonymous ${f.evidence.status.anonymous}`)}`);
+        log(`  ${' '.repeat(8)} ${c.cyan(f.file)}  ${c.grey(`A ${f.evidence.status.a} · B ${f.evidence.status.b}${f.evidence.status.anonymous === undefined ? '' : ` · anonymous ${f.evidence.status.anonymous}`}`)}`);
         log('');
       }
     }
@@ -587,6 +705,26 @@ async function showUpdateNotice() {
   if (notice) err(c.yellow(`! ${notice}`));
 }
 
+async function cmdDoctor(flags: Flags): Promise<number> {
+  const checks = await runDoctor({ cwd: process.cwd(), offline: Boolean(flags.offline), target: str(flags.target) });
+  const failed = checks.filter((check) => check.status === 'fail' || (flags.strict && check.status === 'note'));
+  if (flags.json) {
+    log(JSON.stringify({ problems: failed.length, checks }, null, 2));
+    return failed.length ? 1 : 0;
+  }
+  const mark: Record<Check['status'], string> = { ok: c.green('✓'), note: c.yellow('!'), fail: c.red('✖') };
+  log(c.bold('fortis doctor'));
+  log('');
+  for (const check of checks) {
+    log(`  ${mark[check.status]} ${check.message}`);
+    if (check.fix) log(c.grey(`    → ${check.fix}`));
+  }
+  log('');
+  if (failed.length) log(c.red(c.bold(`${failed.length} problem${failed.length === 1 ? '' : 's'} to fix.`)));
+  else log(c.green(c.bold('No problems found.')));
+  return failed.length ? 1 : 0;
+}
+
 async function resolvePacks(api: string, key: string | undefined): Promise<RulePack[]> {
   if (!key) return FREE_PACKS;
   try {
@@ -610,7 +748,7 @@ async function cmdBaseline(flags: Flags): Promise<number> {
 
 async function cmdCi(args: string[], flags: Flags): Promise<number> {
   if (args[0] !== 'init') {
-    err('Usage: fortis ci init [--provider github|gitlab] [--staging-branch staging] [--target URL] [--history] [--force]');
+    err(`Usage: fortis ci init [--provider ${CI_PROVIDERS.join('|')}] [--staging-branch staging] [--target URL] [--history] [--force]`);
     return 2;
   }
   const root = repoRoot(process.cwd());
@@ -619,8 +757,8 @@ async function cmdCi(args: string[], flags: Flags): Promise<number> {
     return 2;
   }
   const provider = (str(flags.provider) ?? detectProvider(root)) as CiProvider;
-  if (!['github', 'gitlab'].includes(provider)) {
-    err(c.red('--provider must be github or gitlab'));
+  if (!CI_PROVIDERS.includes(provider)) {
+    err(c.red(`--provider must be one of: ${CI_PROVIDERS.join(', ')}`));
     return 2;
   }
   const stagingBranch = str(flags['staging-branch']) ?? 'staging';
@@ -630,7 +768,13 @@ async function cmdCi(args: string[], flags: Flags): Promise<number> {
     return 2;
   }
   log(c.green('✓'), `Wrote ${res.path}`);
+  if (res.mergeInto) log(c.yellow('!'), `${res.mergeInto} is your own pipeline, so it wasn't changed. Copy what you need from ${res.path} into it.`);
   log('');
+  if (provider !== 'github' && provider !== 'gitlab') {
+    log(c.bold('Next:'));
+    for (const line of NEXT_STEPS[provider]) log(`  ${line}`);
+    return 0;
+  }
   if (provider === 'github') {
     log(c.bold('Next, in GitHub → Settings → Secrets and variables → Actions:'));
     log(`  secret   ${c.cyan('FORTIS_KEY')}           a CLI key from the Fortis dashboard`);
@@ -638,7 +782,8 @@ async function cmdCi(args: string[], flags: Flags): Promise<number> {
     log(`  secret   ${c.cyan('FORTIS_TEST_TOKEN')}    optional: a staging test user's token, to test behind login`);
   } else {
     log(c.bold('Next:'), `add ${c.cyan('include: [{ local: fortis.gitlab-ci.yml }]')} to .gitlab-ci.yml and set the CI/CD variables`);
-    log('  FORTIS_KEY (masked), FORTIS_STAGING_URL, FORTIS_TEST_TOKEN (optional, masked)');
+    log('  FORTIS_KEY (masked), FORTIS_STAGING_URL, FORTIS_TEST_TOKEN (optional, masked),');
+    log('  FORTIS_GITLAB_TOKEN (optional, masked: a token with the api scope, for merge-request comments)');
   }
   log(c.grey(`Pull requests get a code scan; pushes to "${stagingBranch}" also get a ZAP test once the deploy is up.`));
   return 0;
@@ -778,6 +923,8 @@ async function main(): Promise<number> {
     }
     case 'update':
       return cmdUpdate(args);
+    case 'doctor':
+      return cmdDoctor(flags);
     case 'explain':
       if (!args[0] || !explain(args[0])) {
         err(`Unknown rule. Run ${c.bold('fortis rules')} to list them.`);

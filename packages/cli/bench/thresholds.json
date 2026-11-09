@@ -1,5 +1,33 @@
 {
+  "FX-AMT-001": {
+    "precision": 1,
+    "recall": 1
+  },
+  "FX-AMT-001:py": {
+    "precision": 1,
+    "recall": 1
+  },
   "FX-HOOK-001": {
+    "precision": 1,
+    "recall": 1
+  },
+  "FX-HOOK-001:cs": {
+    "precision": 1,
+    "recall": 1
+  },
+  "FX-HOOK-001:go": {
+    "precision": 1,
+    "recall": 1
+  },
+  "FX-HOOK-001:java": {
+    "precision": 1,
+    "recall": 1
+  },
+  "FX-HOOK-001:kt": {
+    "precision": 1,
+    "recall": 1
+  },
+  "FX-HOOK-001:php": {
     "precision": 1,
     "recall": 1
   },
@@ -11,11 +39,59 @@
     "precision": 1,
     "recall": 1
   },
+  "FX-IDEM-001:cs": {
+    "precision": 1,
+    "recall": 1
+  },
+  "FX-IDEM-001:go": {
+    "precision": 1,
+    "recall": 1
+  },
+  "FX-IDEM-001:java": {
+    "precision": 1,
+    "recall": 1
+  },
+  "FX-IDEM-001:kt": {
+    "precision": 1,
+    "recall": 1
+  },
+  "FX-IDEM-001:php": {
+    "precision": 1,
+    "recall": 1
+  },
   "FX-IDEM-001:py": {
     "precision": 1,
     "recall": 1
   },
+  "FX-MONEY-001": {
+    "precision": 1,
+    "recall": 1
+  },
+  "FX-MONEY-001:py": {
+    "precision": 1,
+    "recall": 1
+  },
   "FX-OTP-001": {
+    "precision": 1,
+    "recall": 1
+  },
+  "FX-OTP-001:cs": {
+    "precision": 1,
+    "recall": 1
+  },
+  "FX-OTP-001:go": {
+    "precision": 1,
+    "recall": 1
+  },
+  "FX-OTP-001:java": {
+    "precision": 1,
+    "recall": 1
+  },
+  "FX-OTP-001:kt": {
+    "precision": 1,
+    "recall": 1
+  },
+  "FX-OTP-001:php": {
     "precision": 1,
     "recall": 1
   },
@@ -25,9 +101,37 @@
   },
   "FX-OWN-001": {
     "precision": 1,
-    "recall": 0.857
+    "recall": 1
+  },
+  "FX-OWN-001:cs": {
+    "precision": 1,
+    "recall": 1
+  },
+  "FX-OWN-001:go": {
+    "precision": 1,
+    "recall": 1
+  },
+  "FX-OWN-001:java": {
+    "precision": 1,
+    "recall": 1
+  },
+  "FX-OWN-001:kt": {
+    "precision": 1,
+    "recall": 1
+  },
+  "FX-OWN-001:php": {
+    "precision": 1,
+    "recall": 1
   },
   "FX-OWN-001:py": {
+    "precision": 1,
+    "recall": 1
+  },
+  "FX-PCI-001": {
+    "precision": 1,
+    "recall": 1
+  },
+  "FX-PCI-001:py": {
     "precision": 1,
     "recall": 1
   },
@@ -35,11 +139,47 @@
     "precision": 1,
     "recall": 1
   },
+  "FX-PII-002:cs": {
+    "precision": 1,
+    "recall": 1
+  },
+  "FX-PII-002:go": {
+    "precision": 1,
+    "recall": 1
+  },
+  "FX-PII-002:java": {
+    "precision": 1,
+    "recall": 1
+  },
+  "FX-PII-002:kt": {
+    "precision": 1,
+    "recall": 1
+  },
+  "FX-PII-002:php": {
+    "precision": 1,
+    "recall": 1
+  },
   "FX-PII-002:py": {
     "precision": 1,
     "recall": 1
   },
+  "FX-REF-001": {
+    "precision": 1,
+    "recall": 1
+  },
+  "FX-REF-001:py": {
+    "precision": 1,
+    "recall": 1
+  },
   "FX-SEC-001": {
+    "precision": 1,
+    "recall": 1
+  },
+  "FX-SEC-001:java": {
+    "precision": 1,
+    "recall": 1
+  },
+  "FX-SEC-001:php": {
     "precision": 1,
     "recall": 1
   },
@@ -51,6 +191,26 @@
     "precision": 1,
     "recall": 1
   },
+  "FX-TXN-001:cs": {
+    "precision": 1,
+    "recall": 1
+  },
+  "FX-TXN-001:go": {
+    "precision": 1,
+    "recall": 1
+  },
+  "FX-TXN-001:java": {
+    "precision": 1,
+    "recall": 1
+  },
+  "FX-TXN-001:kt": {
+    "precision": 1,
+    "recall": 1
+  },
+  "FX-TXN-001:php": {
+    "precision": 1,
+    "recall": 1
+  },
   "FX-TXN-001:py": {
     "precision": 1,
     "recall": 1
@@ -59,7 +219,39 @@
     "precision": 1,
     "recall": 1
   },
+  "SEC-GEN-001:go": {
+    "precision": 1,
+    "recall": 1
+  },
+  "SEC-GEN-001:java": {
+    "precision": 1,
+    "recall": 1
+  },
+  "SEC-GEN-001:php": {
+    "precision": 1,
+    "recall": 1
+  },
   "SEC-GEN-001:py": {
+    "precision": 1,
+    "recall": 1
+  },
+  "SUP-GHA-001": {
+    "precision": 1,
+    "recall": 1
+  },
+  "SUP-GHA-002": {
+    "precision": 1,
+    "recall": 1
+  },
+  "SUP-IMG-001": {
+    "precision": 1,
+    "recall": 1
+  },
+  "SUP-IMG-002": {
+    "precision": 1,
+    "recall": 1
+  },
+  "SUP-IMG-003": {
     "precision": 1,
     "recall": 1
   }

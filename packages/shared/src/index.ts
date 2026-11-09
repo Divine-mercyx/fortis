@@ -4,3 +4,4 @@ export * from './schemas';
 export * from './mask';
 export * from './compliance';
 export * from './keepalive';
+export * from './line-shape';

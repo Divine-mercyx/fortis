@@ -4,13 +4,17 @@ import { dirname, join } from 'node:path';
 import { DOCKER_IMAGE, RELEASE_REPO, VERSION } from './env';
 import { requirementsTxt } from './rules/python-lockfiles';
 
-export type CiProvider = 'github' | 'gitlab';
+export const CI_PROVIDERS = ['github', 'gitlab', 'bitbucket', 'azure', 'jenkins', 'circleci', 'buildkite'] as const;
+export type CiProvider = (typeof CI_PROVIDERS)[number];
 /** history: also search git history for secrets, which needs the full history (fetch-depth: 0). */
-type CiOptions = { stagingBranch: string; target?: string; maven?: boolean; pythonSbom?: boolean; history?: boolean };
+type CiOptions = { stagingBranch: string; target?: string; maven?: boolean; gradle?: boolean; pythonSbom?: boolean; history?: boolean };
 
 const pkg = `fortis-watchdog@${VERSION}`;
 const SBOM_PATH = 'target/bom.json';
 const PYTHON_SBOM_PATH = 'bom.json';
+const GRADLE_SBOM_PATH = 'build/reports/cyclonedx/bom.json';
+/** CycloneDX's Gradle plugin, applied from an init script so the project's build files stay as they are. */
+const GRADLE_PLUGIN = 'org.cyclonedx.bom:org.cyclonedx.bom.gradle.plugin:3.5.1';
 
 const installStep = `      - name: Install Fortis
         uses: ${RELEASE_REPO}@cli-v${VERSION}
@@ -18,7 +22,7 @@ const installStep = `      - name: Install Fortis
           version: ${VERSION}`;
 
 /** pom.xml alone can't show transitive dependencies, and Maven can list them all. */
-const sbomSteps = `      - uses: actions/setup-java@v4
+const sbomSteps = `      - uses: actions/setup-java@v6
         with:
           distribution: temurin
           java-version: '21' # match your build
@@ -27,8 +31,27 @@ const sbomSteps = `      - uses: actions/setup-java@v4
         run: mvn -B -q org.cyclonedx:cyclonedx-maven-plugin:makeAggregateBom -DoutputFormat=json -DoutputName=bom
 `;
 
+/** Gradle build files and version catalogs list direct dependencies only, and Gradle can list them all. */
+const gradleSbomSteps = `      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21' # match your build
+      - name: List every Gradle dependency (an SBOM for Fortis)
+        continue-on-error: true
+        run: |
+          cat > "$RUNNER_TEMP/fortis-sbom.gradle" <<'EOF'
+          import org.cyclonedx.gradle.CyclonedxPlugin
+          initscript {
+              repositories { gradlePluginPortal() }
+              dependencies { classpath '${GRADLE_PLUGIN}' }
+          }
+          rootProject { apply plugin: CyclonedxPlugin }
+          EOF
+          ./gradlew -q cyclonedxBom --init-script "$RUNNER_TEMP/fortis-sbom.gradle"
+`;
+
 /** A hand-written requirements file doesn't list what its packages need, but an installed environment does. */
-const pythonSbomSteps = `      - uses: actions/setup-python@v5
+const pythonSbomSteps = `      - uses: actions/setup-python@v7
         with:
           python-version: '3.12' # match your app
       - name: List every Python dependency (an SBOM for Fortis)
@@ -61,6 +84,7 @@ on:
 permissions:
   contents: read
   security-events: write
+  pull-requests: write # one summary comment per pull request
 
 concurrency:
   group: fortis-\${{ github.ref }}
@@ -71,19 +95,20 @@ jobs:
     name: Code scan
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4${opts.history ? `
+      - uses: actions/checkout@v7${opts.history ? `
         with:
           fetch-depth: 0 # --history reads every commit; a scan without it needs only the latest` : ''}
-${opts.maven ? sbomSteps : opts.pythonSbom ? pythonSbomSteps : ''}${installStep}
+${opts.maven ? sbomSteps : opts.gradle ? gradleSbomSteps : opts.pythonSbom ? pythonSbomSteps : ''}${installStep}
       - name: Fortis scan
-        run: fortis scan --ci --sarif fortis.sarif${opts.maven ? ` --sbom ${SBOM_PATH}` : opts.pythonSbom ? ` --sbom ${PYTHON_SBOM_PATH}` : ''}${opts.history ? ' --history' : ''}
+        run: fortis scan --ci --sarif fortis.sarif${opts.maven ? ` --sbom ${SBOM_PATH}` : opts.gradle ? ` --sbom ${GRADLE_SBOM_PATH}` : opts.pythonSbom ? ` --sbom ${PYTHON_SBOM_PATH}` : ''}${opts.history ? ' --history' : ''} --pr-comment
         env:
           FORTIS_KEY: \${{ secrets.FORTIS_KEY }}
+          GITHUB_TOKEN: \${{ github.token }}
       - name: Upload to GitHub code scanning
         if: always() && hashFiles('fortis.sarif') != ''
         # Code scanning is free on public repositories and needs GitHub Advanced Security on private ones.
         continue-on-error: true
-        uses: github/codeql-action/upload-sarif@v3
+        uses: github/codeql-action/upload-sarif@v4
         with:
           sarif_file: fortis.sarif
           category: fortis
@@ -94,7 +119,7 @@ ${opts.maven ? sbomSteps : opts.pythonSbom ? pythonSbomSteps : ''}${installStep}
     if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/${opts.stagingBranch}')
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 ${installStep}
       - name: Fortis test
         # --wait gives the new deploy time to come up before testing.
@@ -112,6 +137,12 @@ export function gitlabJobs(opts: CiOptions) {
 #   mvn -B org.cyclonedx:cyclonedx-maven-plugin:makeAggregateBom -DoutputFormat=json -DoutputName=bom
 # keep ${SBOM_PATH} as an artifact, and add --sbom ${SBOM_PATH} to the scan below.
 `
+    : opts.gradle
+      ? `# Gradle: build files and version catalogs list direct dependencies only. For the rest, add a job that runs
+#   ./gradlew cyclonedxBom --init-script fortis-sbom.gradle
+# with an init script applying ${GRADLE_PLUGIN} (see the Fortis README), keep
+# ${GRADLE_SBOM_PATH} as an artifact, and add --sbom ${GRADLE_SBOM_PATH} to the scan below.
+`
     : opts.pythonSbom
       ? `# Python: requirements.txt doesn't list what its packages need. For those, add a job that installs them
 # and runs cyclonedx-py environment --output-format JSON --output-file ${PYTHON_SBOM_PATH}, keep ${PYTHON_SBOM_PATH} as
@@ -122,6 +153,7 @@ export function gitlabJobs(opts: CiOptions) {
 #   include:
 #     - local: fortis.gitlab-ci.yml
 # CI/CD variables: FORTIS_KEY (masked), FORTIS_STAGING_URL, FORTIS_TEST_TOKEN (optional, masked)
+#                  FORTIS_GITLAB_TOKEN (optional, masked: a token with the api scope, for merge-request comments)
 ${mavenNote}
 fortis-scan:
   stage: test
@@ -129,10 +161,12 @@ fortis-scan:
   variables:
     GIT_DEPTH: 0 # --history reads every commit` : ''}
   script:
-    - fortis scan --ci --sarif fortis.sarif${opts.history ? ' --history' : ''}
+    - fortis scan --ci --sarif fortis.sarif --junit fortis-junit.xml${opts.history ? ' --history' : ''} --pr-comment
   artifacts:
     when: always
     paths: [fortis.sarif]
+    reports:
+      junit: fortis-junit.xml
   rules:
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
     - if: $CI_COMMIT_BRANCH
@@ -156,6 +190,238 @@ fortis-staging:
 `;
 }
 
+const GENERATED = 'Generated by `fortis ci init`';
+const INSTALL_SCRIPT = `https://github.com/${RELEASE_REPO}/releases/download/cli-v${VERSION}/install.sh`;
+/** The standalone binary, so no Node is needed. It goes in ~/.fortis/bin. */
+const installCommand = `curl -fsSL ${INSTALL_SCRIPT} | FORTIS_VERSION=${VERSION} sh`;
+
+/** The same SBOM advice for every other CI system, as a comment to act on. */
+function sbomNote(opts: CiOptions, comment = '#') {
+  if (opts.maven) return `${comment} Maven: pom.xml alone can't show transitive dependencies. To check those, run
+${comment}   mvn -B org.cyclonedx:cyclonedx-maven-plugin:makeAggregateBom -DoutputFormat=json -DoutputName=bom
+${comment} first, and add --sbom ${SBOM_PATH} to the scan below.
+`;
+  if (opts.pythonSbom) return `${comment} Python: requirements.txt doesn't list what its packages need. To check those, install them, run
+${comment}   cyclonedx-py environment --output-format JSON --output-file ${PYTHON_SBOM_PATH}
+${comment} first, and add --sbom ${PYTHON_SBOM_PATH} to the scan below.
+`;
+  return '';
+}
+
+/** Bitbucket Pipelines, in the Fortis image. ZAP isn't included: Bitbucket only lets Docker mount the clone folder. */
+export function bitbucketPipeline(opts: CiOptions) {
+  return `# ${GENERATED}. Edit freely.
+# Repository variables: FORTIS_KEY (secured)
+# This covers the code scan. Run fortis test from another machine: Bitbucket restricts the Docker
+# mounts ZAP needs.
+${sbomNote(opts)}
+pipelines:
+  default:
+    - step:
+        name: Fortis scan
+        image: ${DOCKER_IMAGE}:${VERSION}${opts.history ? `
+        clone:
+          depth: full # --history reads every commit` : ''}
+        script:
+          # Bitbucket shows reports found in test-results as test results.
+          - mkdir -p test-results
+          - fortis scan --ci --junit test-results/fortis.xml${opts.history ? ' --history' : ''}
+`;
+}
+
+/** Azure Pipelines, with the binary. Microsoft-hosted Ubuntu agents already have Docker for ZAP. */
+export function azurePipeline(opts: CiOptions) {
+  const install = `      - script: |
+          ${installCommand}
+          echo "##vso[task.prependpath]$HOME/.fortis/bin"
+        displayName: Install Fortis`;
+  return `# ${GENERATED}. Edit freely.
+# Create a pipeline from this file, and add these variables to it:
+#   FORTIS_KEY (secret), FORTIS_STAGING_URL
+${sbomNote(opts)}
+pool:
+  vmImage: ubuntu-latest
+
+jobs:
+  - job: fortis_scan
+    displayName: Fortis scan
+    steps:
+      - checkout: self${opts.history ? `
+        fetchDepth: '0' # --history reads every commit` : ''}
+${install}
+      - script: fortis scan --ci --junit fortis-junit.xml${opts.history ? ' --history' : ''}
+        displayName: Fortis scan
+        env:
+          FORTIS_KEY: $(FORTIS_KEY)
+      - task: PublishTestResults@2
+        condition: always()
+        inputs:
+          testResultsFormat: JUnit
+          testResultsFiles: fortis-junit.xml
+          testRunTitle: Fortis
+          failTaskOnFailedTests: false
+
+  - job: fortis_staging
+    displayName: Staging test (ZAP)
+    dependsOn: fortis_scan
+    condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/${opts.stagingBranch}'))
+    steps:
+      - checkout: self
+${install}
+      - script: fortis test --target ${opts.target ?? '$(FORTIS_STAGING_URL)'} --wait 600
+        displayName: Fortis test
+        env:
+          FORTIS_KEY: $(FORTIS_KEY)
+          # To test behind login, add a FORTIS_TEST_TOKEN secret and uncomment this:
+          # FORTIS_ZAP_AUTH: $(FORTIS_TEST_TOKEN)
+`;
+}
+
+/** A declarative Jenkinsfile, with the binary. The junit step comes from the JUnit plugin. */
+export function jenkinsfile(opts: CiOptions) {
+  const target = opts.target ?? '$FORTIS_STAGING_URL';
+  return `// ${GENERATED}. Edit freely.
+// Credentials: "fortis-key" (secret text). Environment: FORTIS_STAGING_URL. The agent needs curl and git,
+// and Docker for the staging test.
+// Already have a Jenkinsfile? Copy these stages into it.
+${sbomNote(opts, '//')}
+pipeline {
+  agent any
+  environment {
+    FORTIS_KEY = credentials('fortis-key')
+  }
+  stages {
+    stage('Fortis scan') {
+      steps {
+        sh '''
+          ${installCommand}
+          "$HOME/.fortis/bin/fortis" scan --ci --junit fortis-junit.xml${opts.history ? ' --history' : ''}
+        '''
+      }
+      post {
+        always {
+          junit allowEmptyResults: true, testResults: 'fortis-junit.xml'
+        }
+      }
+    }
+    stage('Fortis staging test') {
+      when {
+        branch '${opts.stagingBranch}'
+      }
+      steps {
+        sh '''
+          ${installCommand}
+          "$HOME/.fortis/bin/fortis" test --target ${target} --wait 600
+        '''
+      }
+    }
+  }
+}
+`;
+}
+
+/** CircleCI, with the binary on a machine executor, which also has Docker for ZAP. */
+export function circleciConfig(opts: CiOptions) {
+  const install = `      - run:
+          name: Install Fortis
+          command: |
+            ${installCommand}
+            echo 'export PATH="$HOME/.fortis/bin:$PATH"' >> "$BASH_ENV"`;
+  return `# ${GENERATED}. Edit freely.
+# Project environment variables: FORTIS_KEY, FORTIS_STAGING_URL, FORTIS_ZAP_AUTH (optional)
+${sbomNote(opts)}
+version: 2.1
+
+jobs:
+  fortis-scan:
+    machine:
+      image: ubuntu-2404:current
+    steps:
+      - checkout
+${install}
+      - run:
+          name: Fortis scan
+          command: |
+            mkdir -p test-results
+            fortis scan --ci --junit test-results/fortis.xml${opts.history ? ' --history' : ''}
+      - store_test_results:
+          path: test-results
+  fortis-staging:
+    machine:
+      image: ubuntu-2404:current
+    steps:
+      - checkout
+${install}
+      - run:
+          name: Fortis test
+          command: fortis test --target ${opts.target ?? '"$FORTIS_STAGING_URL"'} --wait 600
+
+workflows:
+  fortis:
+    jobs:
+      - fortis-scan
+      - fortis-staging:
+          requires: [fortis-scan]
+          filters:
+            branches:
+              only: [${opts.stagingBranch}]
+`;
+}
+
+/** Buildkite, with the binary. Agents are your own, so the staging step needs Docker on them. */
+export function buildkitePipeline(opts: CiOptions) {
+  // $$ because Buildkite fills in variables when it uploads the pipeline, before the agent runs it.
+  return `# ${GENERATED}. Edit freely.
+# Upload it with: buildkite-agent pipeline upload
+# Agent environment (a hook or secrets plugin): FORTIS_KEY, FORTIS_STAGING_URL, FORTIS_ZAP_AUTH (optional)
+# Agents need curl and git, and Docker for the staging step.
+${sbomNote(opts)}
+steps:
+  - label: "Fortis scan"
+    command: |
+      ${installCommand}
+      "$$HOME/.fortis/bin/fortis" scan --ci --junit fortis-junit.xml${opts.history ? ' --history' : ''}
+    artifact_paths: fortis-junit.xml
+
+  - wait
+
+  - label: "Fortis staging test"
+    branches: "${opts.stagingBranch}"
+    command: |
+      ${installCommand}
+      "$$HOME/.fortis/bin/fortis" test --target ${opts.target ?? '"$$FORTIS_STAGING_URL"'} --wait 600
+`;
+}
+
+type Template = {
+  path: string;
+  /**
+   * Written instead when `path` is the project's own pipeline: these systems read one fixed file, so
+   * overwriting it would lose the whole pipeline. The user merges this one in by hand.
+   */
+  beside?: string;
+  render: (opts: CiOptions) => string;
+};
+
+const TEMPLATES: Record<CiProvider, Template> = {
+  github: { path: '.github/workflows/fortis.yml', render: githubWorkflow },
+  gitlab: { path: 'fortis.gitlab-ci.yml', render: gitlabJobs },
+  bitbucket: { path: 'bitbucket-pipelines.yml', beside: 'fortis.bitbucket-pipelines.yml', render: bitbucketPipeline },
+  azure: { path: 'azure-pipelines-fortis.yml', render: azurePipeline },
+  jenkins: { path: 'Jenkinsfile', beside: 'Jenkinsfile.fortis', render: jenkinsfile },
+  circleci: { path: '.circleci/config.yml', beside: '.circleci/fortis.yml', render: circleciConfig },
+  buildkite: { path: '.buildkite/pipeline.yml', beside: '.buildkite/pipeline.fortis.yml', render: buildkitePipeline },
+};
+
+/** What the user does next, for fortis ci init to print. */
+export const NEXT_STEPS: Record<Exclude<CiProvider, 'github' | 'gitlab'>, string[]> = {
+  bitbucket: ['Enable Pipelines, and add the secured repository variable FORTIS_KEY.', 'This covers the code scan. Run fortis test from another machine: Bitbucket restricts the Docker mounts ZAP needs.'],
+  azure: ['Create a pipeline from this file, and add the variables FORTIS_KEY (secret) and FORTIS_STAGING_URL.'],
+  jenkins: ['Add the secret-text credential fortis-key, and set FORTIS_STAGING_URL. Jenkins needs the JUnit plugin.'],
+  circleci: ['Add the project environment variables FORTIS_KEY and FORTIS_STAGING_URL.'],
+  buildkite: ['Give your agents FORTIS_KEY and FORTIS_STAGING_URL, with a hook or a secrets plugin.'],
+};
+
 /** Only a hand-written requirements.txt needs this: a real lockfile already lists everything. */
 function needsPythonSbom(root: string): boolean {
   const requirements = join(root, 'requirements.txt');
@@ -164,17 +430,33 @@ function needsPythonSbom(root: string): boolean {
   return Boolean(requirementsTxt(readFileSync(requirements, 'utf8'), 'requirements.txt').directOnly);
 }
 
+/** A Gradle build with a wrapper and no dependency locking: its build files show direct dependencies only. */
+function usesGradleWithoutLock(root: string): boolean {
+  const gradle = ['settings.gradle', 'settings.gradle.kts', 'build.gradle', 'build.gradle.kts'].some((f) => existsSync(join(root, f)));
+  return gradle && existsSync(join(root, 'gradlew')) && !existsSync(join(root, 'gradle.lockfile'));
+}
+
 export function writeCi(root: string, provider: CiProvider, opts: { stagingBranch: string; target?: string; force?: boolean; history?: boolean }) {
-  const rel = provider === 'github' ? '.github/workflows/fortis.yml' : 'fortis.gitlab-ci.yml';
+  const template = TEMPLATES[provider];
+  // The project's own pipeline is never overwritten, even with --force. One we wrote can be.
+  const main = join(root, template.path);
+  const taken = Boolean(template.beside && existsSync(main) && !readFileSync(main, 'utf8').includes(GENERATED));
+  const rel = taken ? template.beside! : template.path;
   const abs = join(root, rel);
-  if (existsSync(abs) && !opts.force) return { path: rel, written: false };
+  if (existsSync(abs) && !opts.force) return { path: rel, written: false, mergeInto: taken ? template.path : undefined };
   mkdirSync(dirname(abs), { recursive: true });
-  const options = { ...opts, maven: existsSync(join(root, 'pom.xml')), pythonSbom: needsPythonSbom(root) };
-  writeFileSync(abs, provider === 'github' ? githubWorkflow(options) : gitlabJobs(options));
-  return { path: rel, written: true };
+  const options = { ...opts, maven: existsSync(join(root, 'pom.xml')), gradle: usesGradleWithoutLock(root), pythonSbom: needsPythonSbom(root) };
+  writeFileSync(abs, template.render(options));
+  return { path: rel, written: true, mergeInto: taken ? template.path : undefined };
 }
 
 export function detectProvider(root: string): CiProvider {
-  if (existsSync(join(root, '.gitlab-ci.yml'))) return 'gitlab';
+  const has = (p: string) => existsSync(join(root, p));
+  if (has('.gitlab-ci.yml')) return 'gitlab';
+  if (has('bitbucket-pipelines.yml')) return 'bitbucket';
+  if (has('azure-pipelines.yml')) return 'azure';
+  if (has('Jenkinsfile')) return 'jenkins';
+  if (has('.circleci/config.yml')) return 'circleci';
+  if (has('.buildkite')) return 'buildkite';
   return 'github';
 }

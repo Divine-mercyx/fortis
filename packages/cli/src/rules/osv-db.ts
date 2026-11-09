@@ -2,7 +2,7 @@ import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { inflateRawSync } from 'node:zlib';
 
-import { compareVersions, type OsvAffected } from './fix-version';
+import { compareVersions, versionOrder, type OsvAffected } from './fix-version';
 import type { Ecosystem, Locked } from './lockfiles';
 
 /*
@@ -87,14 +87,14 @@ export function readZip(buf: Buffer, onEntry: (name: string, data: Buffer) => vo
 const norm = (eco: string, name: string) => (eco === 'PyPI' ? name.toLowerCase().replace(/[-_.]+/g, '-') : eco === 'NuGet' ? name.toLowerCase() : name);
 
 /** Whether `version` is inside one OSV range. */
-export function inRange(version: string, events: { introduced?: string; fixed?: string; last_affected?: string }[]): boolean {
+export function inRange(version: string, events: { introduced?: string; fixed?: string; last_affected?: string }[], compare = compareVersions): boolean {
   const at = (e: (typeof events)[number]) => e.introduced ?? e.fixed ?? e.last_affected ?? '0';
-  const sorted = [...events].sort((a, b) => (at(a) === '0' ? -1 : at(b) === '0' ? 1 : compareVersions(at(a), at(b))));
+  const sorted = [...events].sort((a, b) => (at(a) === '0' ? -1 : at(b) === '0' ? 1 : compare(at(a), at(b))));
   let affected = false;
   for (const e of sorted) {
-    if (e.introduced !== undefined && (e.introduced === '0' || compareVersions(version, e.introduced) >= 0)) affected = true;
-    if (e.fixed !== undefined && compareVersions(version, e.fixed) >= 0) affected = false;
-    if (e.last_affected !== undefined && compareVersions(version, e.last_affected) > 0) affected = false;
+    if (e.introduced !== undefined && (e.introduced === '0' || compare(version, e.introduced) >= 0)) affected = true;
+    if (e.fixed !== undefined && compare(version, e.fixed) >= 0) affected = false;
+    if (e.last_affected !== undefined && compare(version, e.last_affected) > 0) affected = false;
   }
   return affected;
 }
@@ -105,7 +105,7 @@ export function affects(adv: DbAdvisory, eco: Ecosystem, name: string, version: 
     (a) =>
       a.package?.ecosystem?.split(':')[0] === eco &&
       norm(eco, a.package.name ?? '') === norm(eco, name) &&
-      ((a.versions ?? []).includes(version) || (a.ranges ?? []).some((r) => r.type !== 'GIT' && inRange(version, r.events ?? []))),
+      ((a.versions ?? []).includes(version) || (a.ranges ?? []).some((r) => r.type !== 'GIT' && inRange(version, r.events ?? [], versionOrder(eco)))),
   );
 }
 

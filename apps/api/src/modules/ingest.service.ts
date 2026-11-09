@@ -188,6 +188,8 @@ export async function ingestScan(auth: CliAuth, input: CliScanInput): Promise<In
       }
       // "Couldn't check" is not "fixed": a failed dependency check leaves its findings open.
       if (input.incompleteChecks?.includes('dependencies')) conditions.push(ne(findings.ruleId, 'DEP-OSV'));
+      // A read-only access run never tested writes, so it can't say a write problem is fixed.
+      if (input.incompleteChecks?.includes('access-writes')) conditions.push(ne(findings.ruleId, 'FX-BOLA-002'));
       if (fingerprints.length) conditions.push(notInArray(findings.fingerprint, fingerprints));
       const closed = await tx
         .update(findings)
