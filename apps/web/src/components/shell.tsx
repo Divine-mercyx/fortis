@@ -6,6 +6,7 @@ import { useEffect, useState, type ReactNode } from 'react';
 import useSWR from 'swr';
 
 import { api, fetcher } from '@/lib/api';
+import { DOCS_URL } from '@/lib/cli';
 import { initials } from '@/lib/format';
 
 import { Alert, Book, Chevron, File, Folder, Terminal, Home, LogoMark, Logout, Menu, Search, Settings } from './icons';
@@ -18,7 +19,6 @@ const NAV = [
   { href: '/projects', label: 'Projects', icon: Folder },
   { href: '/rules', label: 'Rules', icon: Book },
   { href: '/evidence', label: 'Evidence', icon: File },
-  { href: '/docs', label: 'Docs', icon: Terminal },
   { href: '/settings', label: 'Settings', icon: Settings },
 ];
 
@@ -93,6 +93,10 @@ export function Shell({ children }: { children: ReactNode }) {
               {badge && critical > 0 ? <span className="count">{critical}</span> : null}
             </Link>
           ))}
+          <a href={DOCS_URL} className="nav-link" target="_blank" rel="noreferrer noopener">
+            <Terminal />
+            Docs
+          </a>
         </nav>
 
         <div className="side-foot">
