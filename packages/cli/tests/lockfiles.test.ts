@@ -99,9 +99,12 @@ describe('lockfile formats', () => {
     expect(parsed.packages.map((p) => `${p.name}@${p.version}${p.dev ? ' dev' : ''}`)).toEqual([
       'org.apache.logging.log4j:log4j-core@2.14.1',
       'com.acme:managed@1.2.3',
+      // spring-boot-starter-parent sets the version of its own group's artifacts.
+      'org.springframework.boot:spring-boot-starter-web@3.0.0',
       'junit:junit@4.13 dev',
     ]);
-    expect(parsed.skipped).toBe(2);
+    // com.acme:sibling at ${project.version} is another module of this build, so it isn't counted at all.
+    expect(parsed.skipped).toBe(0);
   });
 
   it('go.mod: single and block requires, without the replace block', () => {
@@ -164,9 +167,9 @@ describe('finding lockfiles', () => {
   });
 
   it('says when a project has no lockfile for an ecosystem it uses', () => {
-    const notes = missingLockfiles(['build.gradle', 'composer.json', 'composer.lock', 'tests/package.json'], [], new Set(['Packagist']));
+    const notes = missingLockfiles(['Cargo.toml', 'composer.json', 'composer.lock', 'tests/package.json'], [], new Set(['Packagist']));
     expect(notes).toHaveLength(1);
-    expect(notes[0]).toContain('build.gradle');
+    expect(notes[0]).toContain('Cargo.toml');
   });
 });
 

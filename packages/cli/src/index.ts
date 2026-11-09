@@ -49,7 +49,7 @@ ${c.bold('Scan options')}
   --offline        skip the network (no dependency check, no upload)
   --history        also search all git history for secrets (deleted keys still need rotating)
   --sarif <file>   write SARIF for GitHub code scanning, GitLab and IDEs
-  --sbom <file>    also check a CycloneDX JSON SBOM (full Maven coverage, including transitive)
+  --sbom <file>    also check a CycloneDX JSON SBOM (full Maven and Gradle coverage, including transitive)
   --no-baseline    block on every finding, ignoring ${BASELINE_FILE}
   --submodules     also scan git submodules (skipped by default: they are separate repositories)
   --osv-db <dir>   check dependencies against OSV's downloaded exports (air-gapped networks)
