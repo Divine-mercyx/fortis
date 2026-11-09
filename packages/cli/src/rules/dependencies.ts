@@ -3,7 +3,7 @@ import { dirname, join, relative, resolve } from 'node:path';
 
 import type { Severity } from '@fortis/shared';
 
-import { cycloneDx, ecosystemOf, findLockfiles, isPomXml, isRequirements, manifestFor, missingLockfiles, parseLockfile, type Ecosystem, type Locked } from './lockfiles';
+import { cycloneDx, ecosystemOf, findLockfiles, goWorkModules, isDotnetProject, isPomXml, isRequirements, manifestFor, missingLockfiles, parseLockfile, type Ecosystem, type Locked } from './lockfiles';
 import { fixedVersion, fixMessage, type OsvAffected } from './fix-version';
 import { globMatch } from './js-lockfiles';
 import { OsvCache } from './osv-cache';
@@ -94,20 +94,22 @@ export function readPackages(root: string, files: string[], opts: { sbom?: strin
   let skippedElsewhere = 0;
   const skippedByFile: { file: string; names: string[]; count: number }[] = [];
   let directOnlyFiles = 0;
-  const lockfiles = chooseJsLockfiles(root, findLockfiles(files, opts.ignore), notes);
+  let dotnetProjects = 0;
+  const lockfiles = chooseJsLockfiles(root, withGoWorkspaces(root, findLockfiles(files, opts.ignore), opts.ignore), notes);
   for (const file of lockfiles) {
     if (sbomRead && (isPomXml(file) || isRequirements(file))) continue; // the SBOM already has this, and more
     const abs = join(root, file);
     if (!existsSync(abs)) continue;
     try {
       const manifestName = manifestFor(file);
-      const manifestPath = manifestName ? join(root, dirname(file), manifestName) : null;
+      const manifestPath = manifestName ? join(root, dirname(file), manifestName) : nearestManifest(root, file);
       const manifest = manifestPath && existsSync(manifestPath) ? readText(manifestPath) : undefined;
       const workspaces = /(^|\/)yarn\.lock$/.test(file) && manifest ? workspaceManifests(join(root, dirname(file)), manifest) : undefined;
       const parsed = parseLockfile(file, readText(abs), manifest, workspaces);
       packages.push(...parsed.packages.map((p) => ({ ...p, file })));
       seen.add(ecosystemOf(file));
-      if (parsed.directOnly) directOnlyFiles++;
+      if (parsed.directOnly && isDotnetProject(file)) dotnetProjects++;
+      else if (parsed.directOnly) directOnlyFiles++;
       if (isPomXml(file)) {
         pomFiles++;
         pomChecked += parsed.packages.length;
@@ -127,6 +129,7 @@ export function readPackages(root: string, files: string[], opts: { sbom?: strin
     const versions = pomSkipped ? `; the other ${pomSkipped} get their version from a parent POM or BOM` : '';
     notes.push(`pom.xml: checked ${pomChecked} of ${declared} declared dependencies${versions}. Transitive dependencies aren't covered: generate a CycloneDX SBOM and pass --sbom for those.`);
   }
+  if (dotnetProjects) notes.push(`.NET project files: only the packages they reference were checked (${dotnetProjects === 1 ? '1 project' : `${dotnetProjects} projects`}). Transitive packages need the lockfile: set <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile> and commit packages.lock.json, or pass --sbom.`);
   if (directOnlyFiles) notes.push(`requirements files: only the packages they list were checked. Unless they're a full pip freeze, transitive dependencies aren't covered: use uv, Poetry or pip-compile, or pass --sbom for those.`);
   if (skippedElsewhere) {
     notes.push(`${skippedElsewhere === 1 ? '1 dependency has' : `${skippedElsewhere} dependencies have`} no exact version (pinned by range, unpinned, or installed from a branch, git, a tarball or a local folder), so ${skippedElsewhere === 1 ? "it wasn't" : "they weren't"} checked.`);
@@ -139,6 +142,42 @@ export function readPackages(root: string, files: string[], opts: { sbom?: strin
     notes.push(...missing);
   }
   return { packages, notes, incomplete };
+}
+
+/**
+ * For formats whose manifest isn't beside them: the nearest Directory.Packages.props above a .NET
+ * project (as MSBuild finds it), or the go.work that uses a Go module.
+ */
+function nearestManifest(root: string, file: string): string | null {
+  const dotnet = isDotnetProject(file);
+  const go = /(^|\/)go\.mod$/.test(file);
+  if (!dotnet && !go) return null;
+  const moduleDir = dirname(file);
+  for (let dir = moduleDir; ; dir = dirname(dir)) {
+    const candidate = join(root, dir, dotnet ? 'Directory.Packages.props' : 'go.work');
+    if (existsSync(candidate)) {
+      if (dotnet) return candidate;
+      const uses = goWorkModules(readText(candidate)).map((u) => relative(root, resolve(root, dir, u)).replace(/\\/g, '/') || '.');
+      if (uses.includes(moduleDir === '.' ? '.' : moduleDir)) return candidate;
+    }
+    if (dir === '.' || dir === '' || dir === dirname(dir)) return null;
+  }
+}
+
+/** Every module a go.work uses gets its go.mod read, even if nothing else pointed at it. */
+function withGoWorkspaces(root: string, files: string[], ignore?: string[]): string[] {
+  const out = [...files];
+  const works = new Set(files.filter((f) => /(^|\/)go\.mod$/.test(f)).map((f) => dirname(f)));
+  for (const dir of ['.', ...works]) {
+    const work = join(root, dir, 'go.work');
+    if (!existsSync(work)) continue;
+    for (const use of goWorkModules(readText(work))) {
+      const mod = relative(root, resolve(root, dir, use, 'go.mod')).replace(/\\/g, '/');
+      if (mod.startsWith('..') || out.includes(mod) || !existsSync(join(root, mod))) continue;
+      if (findLockfiles([mod], ignore).length) out.push(mod);
+    }
+  }
+  return out;
 }
 
 /** "fastapi, pydantic, uvicorn and 17 more" */
@@ -156,6 +195,8 @@ export function pinAdvice(file: string): string {
   if (/^composer\.lock$/.test(base)) return 'Branch installs have no release to check: require a tagged version (composer require vendor/pkg:^x).';
   if (/\.(txt|in)$/.test(base)) return 'Lock exact versions to check them: uv lock or poetry lock, or pip-compile (uv pip compile requirements.in -o requirements.txt), or pip freeze > requirements.txt.';
   if (/^(package-lock\.json|npm-shrinkwrap\.json|pnpm-lock\.yaml|yarn\.lock)$/.test(base)) return 'Packages from git, a tarball or a local folder have no registry release to check: depend on a published version where you can.';
+  if (/\.(?:cs|fs|vb)proj$|^packages\.config$|^Directory\.Packages\.props$/i.test(base)) return 'Floating versions and ranges (8.*, [1.0,2.0)) have no one version to check: use an exact version, or turn on the lockfile.';
+  if (/^(go\.mod|modules\.txt)$/.test(base)) return 'A module replaced by a local folder has no release to check.';
   return 'Pin exact versions in the lockfile to check them.';
 }
 

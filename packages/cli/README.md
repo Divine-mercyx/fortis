@@ -62,8 +62,8 @@ Run `fortis rules` for the list and `fortis explain FX-OWN-001` for why a rule m
 | PHP | `composer.lock` |
 | Python | `uv.lock`, `poetry.lock`, `pdm.lock`, `pylock.toml`, `Pipfile.lock`, or pinned requirements files |
 | Java / Kotlin | `gradle.lockfile`, `pom.xml`, or an SBOM |
-| Go | `go.mod` |
-| .NET | `packages.lock.json` |
+| Go | `go.mod`, following `go.work` to each module, or `vendor/modules.txt` when the module is vendored |
+| .NET | `packages.lock.json`, or without one: `PackageReference` versions in `.csproj`/`.fsproj`/`.vbproj`, central versions in `Directory.Packages.props`, and `packages.config` |
 | Ruby | `Gemfile.lock` |
 | Rust | `Cargo.lock` |
 | Dart / Flutter | `pubspec.lock` |
@@ -83,6 +83,8 @@ fortis scan --sbom target/bom.json
 ```
 
 `--sbom` reads any CycloneDX JSON file, so it works for other languages too.
+
+**.NET without a lockfile:** project files list only direct references, so the scan says transitive packages weren't covered. Set `<RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>` and commit `packages.lock.json` to cover them. Floating versions (`8.*`) and ranges are named, not checked.
 
 ## Commands
 
