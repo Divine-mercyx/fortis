@@ -243,9 +243,9 @@ describe('runScan', () => {
   });
 
   it('says which languages the fintech rules skipped, on full scans only', async () => {
-    const { dir, g } = repo({ 'src/Wallet.java': 'class Wallet {}\n', 'src/Pay.java': 'class Pay {}\n', 'api/pay.rb': '# <?php\n', 'src/test/WalletTest.java': 'class T {}\n', 'web/app.ts': 'export {};\n' });
+    const { dir, g } = repo({ 'src/Wallet.scala': 'class Wallet {}\n', 'src/Pay.groovy': 'class Pay {}\n', 'api/pay.rb': '# ruby\n', 'src/test/WalletTest.java': 'class T {}\n', 'web/app.ts': 'export {};\n' });
     const full = await runScan({ root: dir, scope: 'full', packs: ['fintech'], offline: true });
-    expect(full.notes.join()).toContain('2 Java/Kotlin, 1 Ruby files had secrets and dependency checks only');
+    expect(full.notes.join()).toContain('2 Scala/Groovy, 1 Ruby files had secrets and dependency checks only');
     writeFileSync(join(dir, 'src/Pay.java'), 'class Pay { }\n');
     g('add', '-A');
     g('commit', '-q', '-m', 'edit');

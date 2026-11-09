@@ -64,7 +64,7 @@ describe('the note about languages not covered', () => {
       execFileSync('git', ['add', '-A'], { cwd: dir });
       const scan = await runScan({ root: dir, scope: 'full', packs: ['fintech'], offline: true });
       const note = scan.notes.find((n) => n.includes('Fintech code rules cover'))!;
-      expect(note).toContain('JavaScript, TypeScript, Python, Go, C# and PHP');
+      expect(note).toContain('JavaScript, TypeScript, Python, Go, C#, PHP, Java and Kotlin');
       expect(note).toContain('1 Ruby');
       expect(note).not.toMatch(/\d+ (Go|C#|PHP)/);
     } finally {

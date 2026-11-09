@@ -44,7 +44,7 @@ describe('accuracy benchmark', () => {
   }
 
   for (const rule of ['FX-OWN-001', 'FX-HOOK-001', 'FX-TXN-001', 'FX-PII-002', 'FX-OTP-001', 'FX-IDEM-001']) {
-    for (const language of ['go', 'cs', 'php']) {
+    for (const language of ['go', 'cs', 'php', 'java', 'kt']) {
       it(`${rule} on ${language} has 95% precision and 90% recall`, () => {
         const s = scores[`${rule}:${language}`];
         expect(s, `no ${language} cases for ${rule}`).toBeDefined();
