@@ -1,0 +1,18 @@
+Copyright (c) 2026 Fortis. All rights reserved, except as stated below.
+
+This repository is not under a single licence.
+
+MIT licence (full text in packages/cli/LICENSE):
+
+  packages/cli
+  packages/shared
+  packages/python
+  action.yml
+  .pre-commit-hooks.yaml
+
+Not open source:
+
+  Everything else, including apps/api and apps/web. You may view and fork this
+  code on GitHub as GitHub's terms of service allow. No other right to use,
+  copy, modify or distribute it is granted without written permission from
+  Fortis.
