@@ -223,6 +223,32 @@ jobs:
       - run: pnpm --filter fortis-watchdog build
       - run: bash packages/cli/scripts/hook-managers.sh
 
+  # fortis test with ZAP installed on the machine, not in Docker, on each system.
+  zap-local:
+    name: fortis test with a local ZAP · ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-15, windows-2025]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+          cache: pnpm
+      - uses: actions/setup-java@77dd5b2ce225ea11469928ac317850245a74ae78 # v6.2.0
+        with:
+          distribution: temurin
+          java-version: '21'
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter fortis-watchdog build
+      - name: Run fortis test against the sample API
+        shell: bash
+        run: bash packages/cli/scripts/zap-local-check.sh
+
   large-repo:
     runs-on: ubuntu-24.04
     name: 100,000-file scan under 30 s
