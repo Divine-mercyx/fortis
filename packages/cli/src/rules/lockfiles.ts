@@ -8,7 +8,7 @@ import { lineOf, TEST_PATH } from './types';
  * hand-written reader, so the CLI stays one dependency-free file. Ecosystem names are OSV's.
  */
 
-export type Ecosystem = 'npm' | 'Packagist' | 'PyPI' | 'Maven' | 'Go' | 'NuGet' | 'RubyGems' | 'crates.io' | 'Pub';
+export type Ecosystem = 'npm' | 'Packagist' | 'PyPI' | 'Maven' | 'Go' | 'NuGet' | 'RubyGems' | 'crates.io' | 'Pub' | 'GitHub Actions';
 /** `line`: where the package is in its lockfile (npm-family lockfiles), so findings point at it. */
 export type Locked = { name: string; version: string; ecosystem: Ecosystem; dev: boolean; line?: number; direct?: boolean; via?: string };
 /** `skipped` counts declared packages with no exact version to check. `directOnly`: the file doesn't list what those packages need. */
@@ -217,6 +217,24 @@ export function cycloneDx(text: string): Parsed {
 }
 
 /** `manifest`: the file beside the lockfile that lists what production needs (package.json for Yarn, pyproject.toml for Poetry). */
+/**
+ * The actions a workflow uses, at an exact version: `owner/action@v1.2.3`, or a commit pinned with
+ * its release as a comment (`@<sha> # v1.2.3`). Tags like @v4 name no single version, so OSV can't be
+ * asked about them; whether they should be pinned at all is SUP-GHA-001's job, so they aren't counted
+ * as skipped either.
+ */
+function workflowActions(text: string): Parsed {
+  const packages: Locked[] = [];
+  text.split(/\r?\n/).forEach((line, i) => {
+    const m = /^\s*(?:-\s*)?uses:\s*["']?([\w.-]+\/[\w.-]+)(?:\/[^@\s"']*)?@([^\s"'#]+)["']?\s*(?:#\s*(\S+))?/.exec(line);
+    if (!m) return;
+    const exact = (v: string | undefined) => (v && /^v?\d+\.\d+\.\d+$/.test(v) ? v.replace(/^v/, '') : null);
+    const version = exact(m[2]) ?? (/^[0-9a-f]{40}$/i.test(m[2]!) ? exact(m[3]) : null);
+    if (version) packages.push(pkg('GitHub Actions', m[1]!, version, false, i + 1));
+  });
+  return { packages, skipped: 0 };
+}
+
 type Format = { match: RegExp; ecosystem: Ecosystem; parse: (text: string, file: string, manifest?: string) => Parsed };
 
 const REQUIREMENTS = /(^|\/)[-_.\w]*requirements[-_.\w]*\.txt$|(^|\/)requirements\/[-_.\w]+\.txt$|(^|\/)constraints[-_.\w]*\.txt$/;
@@ -237,6 +255,7 @@ const FORMATS: Format[] = [
   { match: /(^|\/)Gemfile\.lock$/, ecosystem: 'RubyGems', parse: gemfileLock },
   { match: /(^|\/)Cargo\.lock$/, ecosystem: 'crates.io', parse: cargoLock },
   { match: /(^|\/)pubspec\.lock$/, ecosystem: 'Pub', parse: pubspecLock },
+  { match: /(^|\/)\.github\/workflows\/[^/]+\.ya?ml$/, ecosystem: 'GitHub Actions', parse: workflowActions },
 ];
 
 export const isPomXml = (path: string) => /(^|\/)pom\.xml$/.test(path);

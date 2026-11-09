@@ -68,6 +68,10 @@ jobs:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      - name: Refresh the end-of-life dates for the Dockerfile rules
+        working-directory: packages/cli
+        shell: bash
+        run: node scripts/refresh-eol.mjs || echo "::warning::Couldn't reach endoflife.date, so this build uses the dates in the repository."
       - run: pnpm --filter fortis-watchdog build:binary
       - name: Smoke test
         shell: bash
@@ -235,6 +239,10 @@ jobs:
       - name: Trusted publishing needs npm 11.5 or later
         run: npm install -g npm@11
       - run: pnpm install --frozen-lockfile
+      - name: Refresh the end-of-life dates for the Dockerfile rules
+        working-directory: packages/cli
+        shell: bash
+        run: node scripts/refresh-eol.mjs || echo "::warning::Couldn't reach endoflife.date, so this build uses the dates in the repository."
       - name: Build
         working-directory: packages/cli
         run: node build.mjs

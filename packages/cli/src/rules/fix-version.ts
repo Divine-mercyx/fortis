@@ -117,6 +117,8 @@ export function upgradeCommand(file: string, eco: Ecosystem, name: string, versi
       return `set ${name} to ${version} in ${base}`;
     case 'Pub':
       return `dart pub add ${name}:^${version}`;
+    case 'GitHub Actions':
+      return `point uses: ${name} in ${base} at v${version}, pinned by its commit SHA`;
   }
 }
 
