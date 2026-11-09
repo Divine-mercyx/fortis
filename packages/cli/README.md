@@ -92,6 +92,7 @@ fortis scan --sbom target/bom.json
 | `fortis scan --sbom bom.json` | Also check a CycloneDX JSON SBOM |
 | `fortis scan --junit report.xml` | Also write JUnit XML for CI test reports |
 | `fortis scan --ci --pr-comment` | Comment on the pull request with what it adds (GitHub and GitLab) |
+| `fortis scan --paths-from list.txt` | Only scan the files listed, one per line (`-` for stdin). Never closes findings. The VS Code extension uses this |
 | `fortis login <key>` / `fortis logout` | Save or remove the key for this machine |
 | `fortis whoami` | Project, workspace and plan for the key |
 | `fortis doctor` | Find what isn't working here, and how to fix it |
@@ -452,6 +453,7 @@ It exits 1 if something stops Fortis doing its job. Things that are only worth k
 - Access checks cover GraphQL. `fortis access init --graphql <url>` introspects the schema and tests the queries and mutations that take an ID.
 - `fortis access init` also reads Postman collections (`--postman`) and HAR files (`--har`).
 - `fortis test` uses a locally installed ZAP when Docker isn't available. `FORTIS_ZAP_PATH` chooses a specific one.
+- `fortis scan --paths-from` scans only the files you list, and `--json` now includes the repository `root` and marks findings accepted in the baseline. The new VS Code extension uses both.
 - Python is fully supported: `pip install fortis-watchdog`, the fintech rules for Django, Django REST, Flask and FastAPI, and dev packages told apart in uv and Poetry lockfiles.
 - `pip install` needs no Node, and the git hook finds the CLI in `.venv` or `venv` even when it isn't active, and through `uv run` and `poetry run`.
 - More secrets are caught in Python: real-looking defaults such as `os.getenv("KEY", "…")`, SQLAlchemy connection URLs, tokens in URLs, PyPI tokens and notebooks.
