@@ -41,8 +41,8 @@ export const RULE_CATALOG: readonly RuleMeta[] = [
     pack: 'secrets',
     title: 'Payment-provider secret key in code',
     severity: 'critical',
-    summary: 'A Paystack, Stripe, Flutterwave, Monnify, SeerBit, OPay or Squad secret key (or a Stripe restricted key or webhook secret) is committed to the repository or config.',
-    fix: 'Move the key to an environment variable or secret manager, then rotate it with the provider: Paystack (Settings → API Keys & Webhooks → generate a new secret key), Stripe (Developers → API keys → roll the key), Flutterwave (Settings → API Keys → generate new keys), Monnify (Developers → API Keys → regenerate), SeerBit (Account settings → API keys → regenerate), OPay (merchant dashboard → API keys → reset the private key), Squad (Merchant Settings → API & Webhook → regenerate).',
+    summary: 'A Paystack, Stripe, Korapay, BudPay, Flutterwave, Monnify, SeerBit, OPay or Squad secret key (or a Stripe restricted key or webhook secret) is committed to the repository or config.',
+    fix: 'Move the key to an environment variable or secret manager, then rotate it with the provider: Paystack (Settings → API Keys & Webhooks → generate a new secret key), Stripe (Developers → API keys → roll the key), Korapay or BudPay (regenerate the secret key in that dashboard\'s API keys settings), Flutterwave (Settings → API Keys → generate new keys), Monnify (Developers → API Keys → regenerate), SeerBit (Account settings → API keys → regenerate), OPay (merchant dashboard → API keys → reset the private key), Squad (Merchant Settings → API & Webhook → regenerate).',
   },
   {
     id: 'FX-OWN-001',
@@ -117,7 +117,7 @@ export const RULE_CATALOG: readonly RuleMeta[] = [
     pack: 'secrets',
     title: 'Generic secret in code',
     severity: 'high',
-    summary: 'An API key, token, private key or database password (in a connection URL or connection string) is committed to the repository.',
+    summary: 'An API key, token, private key or database password (in a connection URL or connection string) is committed to the repository. Named keys include Mono and Dojah secret keys and Africa\'s Talking API keys.',
     fix: 'Move it to an environment variable or secret manager and rotate it.',
   },
   {

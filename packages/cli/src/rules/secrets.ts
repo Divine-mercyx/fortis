@@ -4,10 +4,10 @@ import { isIgnored } from './types';
 const ANY_TEXT = /\.(c|m)?(j|t)sx?$|\.(json|ya?ml|env|toml|ini|properties|py|pyi|ipynb|rb|php|go|java|kt|kts|groovy|scala|swift|dart|rs|vue|svelte|jsp|cshtml|cs|sh|sql|tf|tfvars|txt|md|xml|gradle|cfg|conf|pem|key|plist)$|(^|\/)id_(rsa|ecdsa|ed25519)$|(^|\/)\.env(\.|$)|(^|\/)\.(npmrc|yarnrc|pypirc|netrc)$|(^|\/)Dockerfile$/i;
 
 /** `name` turns the matched key into a more specific title (e.g. which provider it belongs to). */
-type Pattern = { re: RegExp; ruleId: string; severity: Detection['severity']; title: string; name?: (key: string) => string };
+type Pattern = { re: RegExp; ruleId: string; severity: Detection['severity']; title: string; name?: (key: string) => string; fix?: string };
 
 const PAYMENT_KEYS: Pattern[] = [
-  // Paystack and Stripe share the sk_live_ / sk_test_ prefix; skProvider tells them apart by shape.
+  // Paystack, Stripe, Korapay and BudPay share the sk_live_ / sk_test_ prefix; skProvider names it when the shape tells.
   { re: /\bsk_live_[A-Za-z0-9]{20,}\b/g, ruleId: 'FX-SEC-001', severity: 'critical', title: 'Live payment secret key in code', name: (k) => `Live ${skProvider(k)} secret key in code` },
   { re: /\bsk_test_[A-Za-z0-9]{20,}\b/g, ruleId: 'FX-SEC-001', severity: 'high', title: 'Test payment secret key in code', name: (k) => `${skProvider(k)} test secret key in code` },
   { re: /\brk_live_[A-Za-z0-9]{20,}\b/g, ruleId: 'FX-SEC-001', severity: 'critical', title: 'Live Stripe restricted key in code' },
@@ -30,15 +30,24 @@ const PAYMENT_KEYS: Pattern[] = [
 
 /**
  * Paystack secret keys are sk_live_/sk_test_ + 40 lowercase hex characters. Stripe's mix upper and
- * lower case and are usually far longer (current keys ~99 characters, starting 51 or 4e). Anything
- * else is reported without guessing the provider.
+ * lower case and are usually far longer (current keys ~99 characters, starting 51 or 4e). Korapay and
+ * BudPay use the same sk_live_ / sk_test_ prefix but document no length or alphabet, so anything else
+ * is reported as one of the four rather than guessed.
+ *   Korapay: developers.korapay.com (Bearer sk_live_… / sk_test_…; pk_ public keys)
+ *   BudPay: BudPay-Org/budpay-woo-commerce-plugin, which accepts only sk_live_/sk_test_ secret and pk_live_/pk_test_ public keys
  */
-export function skProvider(key: string): 'Paystack' | 'Stripe' | 'Stripe or Paystack' {
+export const SK_UNKNOWN = 'Stripe, Paystack, Korapay or BudPay';
+export function skProvider(key: string): 'Paystack' | 'Stripe' | typeof SK_UNKNOWN {
   const body = key.replace(/^sk_(?:live|test)_/, '');
   if (/^[0-9a-f]{40}$/.test(body)) return 'Paystack';
   if (/[A-Z]/.test(body) && (body.length >= 90 || /^(?:51|4e)/i.test(body))) return 'Stripe';
-  return 'Stripe or Paystack';
+  return SK_UNKNOWN;
 }
+
+const MONO_FIX = 'Move the key to an environment variable or secret manager, then rotate it: in the Mono dashboard (app.mono.co), open the app and regenerate its secret key. A Mono secret key can read the bank data of the customers linked to the app.';
+const DOJAH_FIX = 'Move the key to an environment variable or secret manager, then rotate it: in the Dojah dashboard, go to Developers → Configuration and regenerate the secret key for that environment.';
+const AT_FIX = "Move the key to an environment variable or secret manager, then rotate it: in the Africa's Talking dashboard, open the app, go to Settings → API Key and generate a new key (the old one stops working).";
+const TEST_SK_FIX = 'Move the key to an environment variable or secret manager, then rotate it where it was issued: Mono (app.mono.co → the app → regenerate the secret key) or Dojah (Developers → Configuration → regenerate the sandbox secret key).';
 
 const GENERIC: Pattern[] = [
   { re: /-----BEGIN (?:RSA |EC |DSA |OPENSSH |PGP )?PRIVATE KEY-----/g, ruleId: 'SEC-GEN-001', severity: 'critical', title: 'Private key in code' },
@@ -47,7 +56,20 @@ const GENERIC: Pattern[] = [
   { re: /\bxox[abprs]-[A-Za-z0-9-]{10,}\b/g, ruleId: 'SEC-GEN-001', severity: 'high', title: 'Slack token in code' },
   { re: /\bAIza[0-9A-Za-z_-]{35}\b/g, ruleId: 'SEC-GEN-001', severity: 'high', title: 'Google API key in code' },
   { re: /\bfts_[A-Za-z0-9]{40}\b/g, ruleId: 'SEC-GEN-001', severity: 'high', title: 'Fortis CLI key in code' },
+  // Open banking and KYC. Public keys (Mono live_pk_/test_pk_, Dojah's widget key) are meant for the browser.
+  // Mono: live_sk_ / test_sk_ secret keys, sent as mono-sec-key. Source: Mono's own SDKs (withmono/mono-node,
+  // withmono/mono-ruby READMEs: secretKey "live_sk_…" / "test_sk_…"; connect-* SDKs: publicKey "test_pk_…").
+  { re: /\blive_sk_[A-Za-z0-9]{16,}\b/g, ruleId: 'SEC-GEN-001', severity: 'critical', title: 'Live Mono secret key in code', fix: MONO_FIX },
+  // Dojah: prod_sk_ (production) / test_sk_ (sandbox) secret keys, sent raw in Authorization with an AppId.
+  // Source: docs.dojah.io/api-reference/get-started/authentication
+  { re: /\bprod_sk_[A-Za-z0-9]{16,}\b/g, ruleId: 'SEC-GEN-001', severity: 'critical', title: 'Live Dojah secret key in code', fix: DOJAH_FIX },
+  // Mono and Dojah both use test_sk_ for test keys, and neither documents a length that tells them apart.
+  { re: /\btest_sk_[A-Za-z0-9]{16,}\b/g, ruleId: 'SEC-GEN-001', severity: 'high', title: 'Mono or Dojah test secret key in code', fix: TEST_SK_FIX },
   // Messaging and email
+  // Africa's Talking: API keys start atsk_. Source: the key shown in the Africa's Talking dashboard (Settings → API Key),
+  // as integration guides quote it; GitGuardian's Africa's Talking detector is also prefix-based. Africa's Talking's own
+  // docs don't print a key, so the length isn't pinned down.
+  { re: /\batsk_[A-Za-z0-9]{20,}\b/g, ruleId: 'SEC-GEN-001', severity: 'high', title: "Africa's Talking API key in code", fix: AT_FIX },
   { re: /\bSG\.[A-Za-z0-9_-]{22}\.[A-Za-z0-9_-]{43}\b/g, ruleId: 'SEC-GEN-001', severity: 'high', title: 'SendGrid API key in code' },
   { re: /\bkey-[0-9a-f]{32}\b/g, ruleId: 'SEC-GEN-001', severity: 'high', title: 'Mailgun API key in code' },
   { re: /\bre_[A-Za-z0-9]{8}_[A-Za-z0-9]{24,}\b/g, ruleId: 'SEC-GEN-001', severity: 'high', title: 'Resend API key in code' },
@@ -169,7 +191,7 @@ function scan(file: SourceFile, patterns: Pattern[]): Detection[] {
         }
         p.re.lastIndex = 0;
         const key = p.name ? p.re.exec(text)?.[0] : undefined;
-        out.push({ ruleId: p.ruleId, severity: p.severity, title: key ? p.name!(key) : p.title, file: file.path, line: i + 1, snippet: text.trim() });
+        out.push({ ruleId: p.ruleId, severity: p.severity, title: key ? p.name!(key) : p.title, file: file.path, line: i + 1, snippet: text.trim(), ...(p.fix && { fix: p.fix }) });
       }
     }
   });

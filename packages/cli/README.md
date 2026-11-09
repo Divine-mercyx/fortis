@@ -65,7 +65,7 @@ Once a day, Fortis checks GitHub for a newer release and prints a notice if ther
 
 | Pack | Rules | Languages | Plan |
 |---|---|---|---|
-| Secrets | Paystack / Flutterwave / Monnify secret keys; private keys, AWS, GitHub, Slack, Google and Fortis keys; database passwords, SaaS and registry tokens (SendGrid, Slack, OpenAI, Anthropic, npm, PyPI…) in connection URLs, JDBC URLs and .NET connection strings; random-looking hard-coded secrets, including unquoted values in `.env`, `.properties` and YAML files | Any | Free |
+| Secrets | Paystack / Flutterwave / Monnify / Korapay / BudPay / SeerBit / OPay / Squad secret keys; Mono and Dojah secret keys and Africa's Talking API keys; private keys, AWS, GitHub, Slack, Google and Fortis keys; database passwords, SaaS and registry tokens (SendGrid, Slack, OpenAI, Anthropic, npm, PyPI…) in connection URLs, JDBC URLs and .NET connection strings; random-looking hard-coded secrets, including unquoted values in `.env`, `.properties` and YAML files | Any | Free |
 | Dependencies | Known vulnerabilities, from [OSV](https://osv.dev) | See below | Free |
 | Dependencies (supply chain) | Docker base images with no tag or `latest`, not pinned by digest, or end-of-life; third-party GitHub Actions not pinned to a commit; `pull_request_target` workflows that run the pull request's code | Dockerfiles and GitHub Actions workflows | Free |
 | Fintech | Money records read without an ownership check; webhooks without a signature check; balance updates outside a transaction; BVN/NIN in logs; weak or leaked OTPs; transfers without an idempotency key; money as floating point; card data in logs, analytics or plain text; predictable transaction references; charge amounts taken from the request | JavaScript, TypeScript and Python (Django, Django REST, Flask, FastAPI); the first six checks also in Go (net/http, Gin, Echo, Fiber), C# (ASP.NET Core), PHP (Laravel), and Java and Kotlin (Spring Boot) | Core and above |
@@ -544,6 +544,8 @@ It exits 1 if something stops Fortis doing its job. Things that are only worth k
 - Stripe keys are named as Stripe (and Paystack as Paystack), with restricted keys and webhook secrets.
 - New token formats: SendGrid, Mailgun, Resend, Slack and Discord webhooks, Telegram, OpenAI, Anthropic, Azure Storage, DigitalOcean, Render, npm, PyPI, RubyGems, NuGet, Docker Hub, `.npmrc` tokens, Supabase `service_role` keys, Twilio auth tokens and Google service-account keys. `.npmrc`, `.pypirc`, `.netrc` and `.yarnrc` are now scanned.
 - SeerBit, OPay and Squad sandbox secret keys are named.
+- Mono and Dojah secret keys and Africa's Talking API keys are named, each with where to rotate it. Test keys are reported as high, live keys as critical, and public keys are left alone.
+- A secret key that starts `sk_live_` or `sk_test_` and matches no known shape is reported as Stripe, Paystack, Korapay or BudPay, since Korapay and BudPay use the same prefix.
 - A repository with only lockfiles now shows why the dependency check failed, instead of "Found no files to scan".
 - Windows: the hook finds the CLI from GitHub Desktop, VS Code and other apps, and CRLF files, BOMs and backslash paths are handled. A Windows baseline matches a Mac or Linux one.
 - Shallow CI clones, submodules (`--submodules`), worktrees, detached HEAD and sparse checkouts are handled. Large repositories are read one file at a time, with a time budget.
