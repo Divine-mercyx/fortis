@@ -99,17 +99,185 @@ function pomXml(text: string): Parsed {
   return { packages, skipped };
 }
 
-function goMod(text: string): Parsed {
+/** `replace` directives, from go.mod or go.work: what each module (at any version, or one) is swapped for. */
+type GoReplace = { from: string; fromVersion?: string; to: string; toVersion?: string };
+
+function goReplaces(text: string): GoReplace[] {
+  const out: GoReplace[] = [];
+  let inBlock = false;
+  for (const raw of text.split(/\r?\n/)) {
+    const line = raw.replace(/\/\/.*$/, '').trim();
+    if (/^replace\s*\($/.test(line)) { inBlock = true; continue; }
+    if (inBlock && line === ')') { inBlock = false; continue; }
+    const body = inBlock ? line : /^replace\s+(.*)$/.exec(line)?.[1];
+    const m = body && /^(\S+)(?:\s+(v\S+))?\s*=>\s*(\S+)(?:\s+(v\S+))?$/.exec(body);
+    if (m) out.push({ from: m[1]!, fromVersion: m[2], to: m[3]!, toVersion: m[4] });
+  }
+  return out;
+}
+
+const isGoPath = (target: string) => /^(?:\.{1,2}\/|\/|[A-Za-z]:[\\/])/.test(target);
+const goVersion = (v: string) => v.replace(/\+incompatible$/, '');
+
+/** A module after replacements: another module at a version, or a local folder (null), or itself. */
+function applyReplace(name: string, version: string, replaces: GoReplace[]): { name: string; version: string } | null {
+  const r = replaces.find((x) => x.from === name && (!x.fromVersion || x.fromVersion === version));
+  if (!r) return { name, version };
+  if (isGoPath(r.to)) return null;
+  return { name: r.to, version: r.toVersion ?? version };
+}
+
+/**
+ * go.mod: every `require`, with `replace` directives applied. `workspace` is the go.work that uses
+ * this module, whose replacements win over the module's own, as they do for the go command.
+ * Pseudo-versions (v0.0.0-20240101120000-abcdef123456) are passed on whole, which is what OSV expects.
+ */
+function goMod(text: string, _file?: string, workspace?: string): Parsed {
+  const replaces = [...(workspace ? goReplaces(workspace) : []), ...goReplaces(text)];
   const packages: Locked[] = [];
+  const skippedNames: string[] = [];
   let inRequire = false;
   for (const [i, raw] of text.split(/\r?\n/).entries()) {
     const line = raw.replace(/\/\/.*$/, '').trim();
     if (/^require\s*\($/.test(line)) { inRequire = true; continue; }
     if (line === ')') { inRequire = false; continue; }
     const m = (inRequire ? /^(\S+)\s+(v\S+)$/ : /^require\s+(\S+)\s+(v\S+)$/).exec(line);
-    if (m) packages.push(pkg('Go', m[1]!, m[2]!.replace(/\+incompatible$/, ''), false, i + 1));
+    if (!m) continue;
+    const swapped = applyReplace(m[1]!, m[2]!, replaces);
+    if (swapped) packages.push(pkg('Go', swapped.name, goVersion(swapped.version), false, i + 1));
+    else skippedNames.push(`${m[1]} (local folder)`);
   }
-  return { packages, skipped: 0 };
+  return { packages, skipped: skippedNames.length, skippedNames };
+}
+
+/**
+ * vendor/modules.txt: the modules `go mod vendor` copied in, which is exactly what gets built.
+ * `# module version` lines, with `=> replacement [version]` when go.mod replaced it.
+ */
+function vendorModules(text: string): Parsed {
+  const packages: Locked[] = [];
+  const skippedNames: string[] = [];
+  for (const [i, line] of text.split(/\r?\n/).entries()) {
+    const m = /^# (\S+) (v\S+)(?: => (\S+)(?: (v\S+))?)?\s*$/.exec(line);
+    if (!m) continue;
+    if (m[3] && isGoPath(m[3])) skippedNames.push(`${m[1]} (local folder)`);
+    else packages.push(pkg('Go', m[3] ?? m[1]!, goVersion(m[4] ?? m[2]!), false, i + 1));
+  }
+  return { packages, skipped: skippedNames.length, skippedNames };
+}
+
+/** The module folders a go.work file uses: `use ./api` or a `use ( ... )` block. */
+export function goWorkModules(text: string): string[] {
+  const out: string[] = [];
+  let inBlock = false;
+  for (const raw of text.split(/\r?\n/)) {
+    const line = raw.replace(/\/\/.*$/, '').trim();
+    if (/^use\s*\($/.test(line)) { inBlock = true; continue; }
+    if (inBlock && line === ')') { inBlock = false; continue; }
+    const dir = inBlock ? line : /^use\s+(\S+)$/.exec(line)?.[1];
+    if (dir) out.push(dir.replace(/^["`]|["`]$/g, ''));
+  }
+  return out;
+}
+
+/** An MSBuild attribute or child element of one item, whatever its case. */
+function msbuildValue(item: string, name: string): string | undefined {
+  const attr = new RegExp(`\\b${name}\\s*=\\s*"([^"]*)"`, 'i').exec(item)?.[1];
+  return attr ?? new RegExp(`<${name}>\\s*([^<]*?)\\s*</${name}>`, 'i').exec(item)?.[1];
+}
+
+/** `$(Name)` properties from <PropertyGroup> elements. */
+function msbuildProperties(...xmls: string[]): Map<string, string> {
+  const props = new Map<string, string>();
+  for (const xml of xmls) {
+    for (const group of xml.match(/<PropertyGroup\b[^>]*>[\s\S]*?<\/PropertyGroup>/gi) ?? []) {
+      for (const m of group.matchAll(/<([\w.-]+)(?:\s[^>]*)?>\s*([^<]*?)\s*<\/\1>/g)) props.set(m[1]!.toLowerCase(), m[2]!);
+    }
+  }
+  return props;
+}
+
+/**
+ * NuGet's version for a reference: `1.2.3`, or `[1.2.3]` pinned. Floating (`1.2.*`) and ranges
+ * (`[1.0,2.0)`) are left to restore, so there's no one version to check.
+ */
+function nugetExact(v: string | undefined): string | null {
+  const t = v?.trim().replace(/^\[([^,\]]+)\]$/, '$1');
+  return t && /^\d+(?:\.\d+){1,3}(?:-[0-9A-Za-z.-]+)?$/.test(t) ? t : null;
+}
+
+/** Each <Tag .../> or <Tag ...>...</Tag> item, with where it starts. */
+function msbuildItems(xml: string, tag: string): { text: string; index: number }[] {
+  return [...xml.matchAll(new RegExp(`<${tag}\\b[^>]*?(?:/>|>[\\s\\S]*?</${tag}>)`, 'gi'))].map((m) => ({ text: m[0], index: m.index! }));
+}
+
+/**
+ * .csproj, .fsproj and .vbproj: <PackageReference Include="X" Version="1.2.3" />, with versions from
+ * Directory.Packages.props (`central`) for projects that manage them centrally. Only direct
+ * references: transitive packages are in packages.lock.json alone.
+ */
+function dotnetProject(text: string, _file?: string, central?: string): Parsed {
+  const blank = (x: string) => x.replace(/<!--[\s\S]*?-->/g, (c) => c.replace(/[^\n]/g, ' '));
+  const xml = blank(text);
+  const props = msbuildProperties(central ? blank(central) : '', xml);
+  const expand = (v: string | undefined) => v?.replace(/\$\(([\w.-]+)\)/g, (all, k: string) => props.get(k.toLowerCase()) ?? all);
+  const centrally = new Map<string, string>();
+  const packages: Locked[] = [];
+  const skippedNames: string[] = [];
+  if (central) {
+    const c = blank(central);
+    for (const item of msbuildItems(c, 'PackageVersion')) {
+      const name = msbuildValue(item.text, 'Include') ?? msbuildValue(item.text, 'Update');
+      const version = expand(msbuildValue(item.text, 'Version'));
+      if (name && version) centrally.set(name.toLowerCase(), version);
+    }
+  }
+  for (const item of msbuildItems(xml, 'PackageReference')) {
+    const name = msbuildValue(item.text, 'Include');
+    if (!name) continue; // `Update=` items change a reference made elsewhere
+    const declared = expand(msbuildValue(item.text, 'VersionOverride') ?? msbuildValue(item.text, 'Version')) ?? centrally.get(name.toLowerCase());
+    const version = nugetExact(declared);
+    // PrivateAssets="all": analyzers and build tools, which don't ship with the app.
+    const dev = /\ball\b/i.test(msbuildValue(item.text, 'PrivateAssets') ?? '');
+    if (version) packages.push(pkg('NuGet', name, version, dev, lineOf(text, item.index)));
+    else skippedNames.push(name);
+  }
+  return { packages, skipped: skippedNames.length, skippedNames, directOnly: true };
+}
+
+/**
+ * Directory.Packages.props: its versions are used through the projects, but a GlobalPackageReference
+ * applies to every project under it, so those are reported here, once. They're build tools such
+ * as analyzers, so they count as dev-only.
+ */
+function directoryPackagesProps(text: string): Parsed {
+  const xml = text.replace(/<!--[\s\S]*?-->/g, (c) => c.replace(/[^\n]/g, ' '));
+  const props = msbuildProperties(xml);
+  const packages: Locked[] = [];
+  const skippedNames: string[] = [];
+  for (const item of msbuildItems(xml, 'GlobalPackageReference')) {
+    const name = msbuildValue(item.text, 'Include');
+    const version = nugetExact(msbuildValue(item.text, 'Version')?.replace(/\$\(([\w.-]+)\)/g, (all, k: string) => props.get(k.toLowerCase()) ?? all));
+    if (!name) continue;
+    if (version) packages.push(pkg('NuGet', name, version, true, lineOf(text, item.index)));
+    else skippedNames.push(name);
+  }
+  return { packages, skipped: skippedNames.length, skippedNames };
+}
+
+/** packages.config, from before PackageReference: every package, transitive ones included. */
+function packagesConfig(text: string): Parsed {
+  const xml = text.replace(/<!--[\s\S]*?-->/g, (c) => c.replace(/[^\n]/g, ' '));
+  const packages: Locked[] = [];
+  const skippedNames: string[] = [];
+  for (const item of msbuildItems(xml, 'package')) {
+    const name = msbuildValue(item.text, 'id');
+    const version = nugetExact(msbuildValue(item.text, 'version'));
+    if (!name) continue;
+    if (version) packages.push(pkg('NuGet', name, version, msbuildValue(item.text, 'developmentDependency') === 'true', lineOf(text, item.index)));
+    else skippedNames.push(name);
+  }
+  return { packages, skipped: skippedNames.length, skippedNames };
 }
 
 function nugetLock(text: string): Parsed {
@@ -217,6 +385,11 @@ export function cycloneDx(text: string): Parsed {
 }
 
 /** `manifest`: the file beside the lockfile that lists what production needs (package.json for Yarn, pyproject.toml for Poetry). */
+/** `manifest`: a file beside the lockfile that it needs, such as package.json, Directory.Packages.props or go.work. */
+const VENDOR_MODULES = /(^|\/)vendor\/modules\.txt$/;
+export const DOTNET_PROJECT = /\.(?:cs|fs|vb)proj$/i;
+export const isDotnetProject = (path: string) => DOTNET_PROJECT.test(path);
+
 type Format = { match: RegExp; ecosystem: Ecosystem; parse: (text: string, file: string, manifest?: string) => Parsed };
 
 const REQUIREMENTS = /(^|\/)[-_.\w]*requirements[-_.\w]*\.txt$|(^|\/)requirements\/[-_.\w]+\.txt$|(^|\/)constraints[-_.\w]*\.txt$/;
@@ -233,7 +406,11 @@ const FORMATS: Format[] = [
   { match: /(^|\/)([\w-]+-)?gradle\.lockfile$/, ecosystem: 'Maven', parse: gradleLock },
   { match: /(^|\/)pom\.xml$/, ecosystem: 'Maven', parse: pomXml },
   { match: /(^|\/)go\.mod$/, ecosystem: 'Go', parse: goMod },
+  { match: VENDOR_MODULES, ecosystem: 'Go', parse: vendorModules },
   { match: /(^|\/)packages\.lock\.json$/, ecosystem: 'NuGet', parse: nugetLock },
+  { match: DOTNET_PROJECT, ecosystem: 'NuGet', parse: dotnetProject },
+  { match: /(^|\/)packages\.config$/i, ecosystem: 'NuGet', parse: packagesConfig },
+  { match: /(^|\/)Directory\.Packages\.props$/i, ecosystem: 'NuGet', parse: directoryPackagesProps },
   { match: /(^|\/)Gemfile\.lock$/, ecosystem: 'RubyGems', parse: gemfileLock },
   { match: /(^|\/)Cargo\.lock$/, ecosystem: 'crates.io', parse: cargoLock },
   { match: /(^|\/)pubspec\.lock$/, ecosystem: 'Pub', parse: pubspecLock },
@@ -255,7 +432,7 @@ const MANIFESTS: { match: RegExp; ecosystem: Ecosystem; label: string; hint: str
   { match: /(^|\/)composer\.json$/, ecosystem: 'Packagist', label: 'composer.json', hint: 'commit composer.lock' },
   { match: /(^|\/)(pyproject\.toml|Pipfile|setup\.py|setup\.cfg)$/, ecosystem: 'PyPI', label: 'Python project files', hint: 'run uv lock, poetry lock or pip-compile and commit the result, or pass --sbom' },
   { match: /(^|\/)build\.gradle(\.kts)?$/, ecosystem: 'Maven', label: 'build.gradle', hint: 'turn on Gradle dependency locking, or pass --sbom' },
-  { match: /\.csproj$/, ecosystem: 'NuGet', label: '.csproj files', hint: 'set RestorePackagesWithLockFile, or pass --sbom' },
+  { match: /\.(?:cs|fs|vb)proj$/, ecosystem: 'NuGet', label: '.NET project files', hint: 'set RestorePackagesWithLockFile, or pass --sbom' },
   { match: /(^|\/)Gemfile$/, ecosystem: 'RubyGems', label: 'Gemfile', hint: 'commit Gemfile.lock' },
   { match: /(^|\/)Cargo\.toml$/, ecosystem: 'crates.io', label: 'Cargo.toml', hint: 'commit Cargo.lock' },
   { match: /(^|\/)pubspec\.yaml$/, ecosystem: 'Pub', label: 'pubspec.yaml', hint: 'commit pubspec.lock' },
@@ -270,11 +447,24 @@ const relevant = (paths: string[], ignore: string[]) => {
 };
 
 export function findLockfiles(paths: string[], ignore: string[] = []): string[] {
-  const files = relevant(paths, ignore).filter((p) => FORMATS.some((f) => f.match.test(p)));
+  // A Go module's own vendor/modules.txt is the one vendored file that describes this project.
+  const vendored = paths.filter((p) => VENDOR_MODULES.test(p) && !/(^|\/)vendor\/.*\/vendor\//.test(p) && !/(^|\/)vendor\/.+\/vendor\/modules\.txt$/.test(p));
+  const files = [...relevant(paths, ignore), ...relevant(vendored.map((p) => p.replace(/vendor\/modules\.txt$/, 'modules.txt')), ignore).map((p) => p.replace(/modules\.txt$/, 'vendor/modules.txt'))].filter((p) =>
+    FORMATS.some((f) => f.match.test(p)),
+  );
   // A real lock describes the same project more completely than a requirements file beside it.
   const projectDir = (p: string) => p.replace(/requirements\/[^/]+$|[^/]+$/, '');
   const pythonLocks = new Set(files.filter((p) => /(^|\/)(poetry\.lock|uv\.lock|pdm\.lock|pylock(\.[-_\w]+)?\.toml|Pipfile\.lock)$/.test(p)).map(projectDir));
-  return files.filter((p) => !REQUIREMENTS.test(p) || !pythonLocks.has(projectDir(p)));
+  // packages.lock.json has transitive packages too; vendor/modules.txt is what's actually built.
+  const dirOf = (p: string) => p.replace(/[^/]+$/, '');
+  const nugetLocks = new Set(files.filter((p) => /(^|\/)packages\.lock\.json$/.test(p)).map(dirOf));
+  const goVendored = new Set(files.filter((p) => VENDOR_MODULES.test(p)).map((p) => p.replace(/vendor\/modules\.txt$/, '')));
+  return files.filter(
+    (p) =>
+      !(REQUIREMENTS.test(p) && pythonLocks.has(projectDir(p))) &&
+      !((DOTNET_PROJECT.test(p) || /(^|\/)packages\.config$/i.test(p)) && nugetLocks.has(dirOf(p))) &&
+      !(/(^|\/)go\.mod$/.test(p) && goVendored.has(dirOf(p))),
+  );
 }
 
 const formatOf = (file: string) => {
