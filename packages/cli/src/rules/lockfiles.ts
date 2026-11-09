@@ -1,5 +1,5 @@
 import { globToRegExp } from '../files';
-import { parseNpmLock, parsePnpmLock, parseYarnLock, type LockedPackage } from './js-lockfiles';
+import { parseBunLock, parseNpmLock, parsePnpmLock, parseYarnLock, type LockedPackage } from './js-lockfiles';
 import { pipfileLock, pylockToml, pypiName, requirementsTxt, tomlPythonLock } from './python-lockfiles';
 import { lineOf, TEST_PATH } from './types';
 
@@ -17,10 +17,10 @@ export type Parsed = { packages: Locked[]; skipped: number; directOnly?: boolean
 const pkg = (ecosystem: Ecosystem, name: string, version: string, dev = false, line = 0): Locked => ({ name, version, ecosystem, dev, line });
 
 /*
- * npm, pnpm and Yarn: the readers in js-lockfiles.ts. They are tested against real lockfiles from
- * npm 10, pnpm 8 and 10 (lockfile v5, v6, v9) and Yarn 1 and 4, record the line each package is on,
- * and work out dev-only packages, from the lockfile's own flag or, for pnpm v9 and Yarn, by walking
- * the dependency graph from package.json's production dependencies.
+ * npm, pnpm, Yarn and Bun: the readers in js-lockfiles.ts. They are tested against real lockfiles from
+ * npm 10, pnpm 8 and 10 (lockfile v5, v6, v9), Yarn 1 and 4 and Bun, record the line each package is on,
+ * and work out dev-only packages, from the lockfile's own flag or, for pnpm v9, Yarn and Bun, by walking
+ * the dependency graph from the production dependencies.
  */
 const SOURCE_LABEL = { git: 'git', tarball: 'tarball', local: 'local folder' } as const;
 /** Packages from git, a tarball or a local folder have no registry release for OSV, so they're named instead of checked. */
@@ -34,6 +34,7 @@ const fromJs = (list: LockedPackage[]): Parsed => {
 };
 const npmLock = (text: string): Parsed => fromJs(parseNpmLock(text));
 const pnpmLock = (text: string): Parsed => fromJs(parsePnpmLock(text));
+const bunLock = (text: string): Parsed => fromJs(parseBunLock(text));
 const yarnLock = (text: string, _file: string, manifest?: string, workspaces: string[] = []): Parsed => {
   const json = (t: string | undefined) => {
     try {
@@ -699,6 +700,7 @@ const FORMATS: Format[] = [
   { match: /(^|\/)(package-lock|npm-shrinkwrap)\.json$/, ecosystem: 'npm', parse: npmLock },
   { match: /(^|\/)yarn\.lock$/, ecosystem: 'npm', parse: yarnLock },
   { match: /(^|\/)pnpm-lock\.yaml$/, ecosystem: 'npm', parse: pnpmLock },
+  { match: /(^|\/)bun\.lock$/, ecosystem: 'npm', parse: bunLock },
   { match: /(^|\/)composer\.lock$/, ecosystem: 'Packagist', parse: composerLock },
   { match: /(^|\/)(poetry|uv|pdm)\.lock$/, ecosystem: 'PyPI', parse: tomlPythonLock },
   { match: /(^|\/)pylock(\.[-_\w]+)?\.toml$/, ecosystem: 'PyPI', parse: pylockToml },
@@ -740,7 +742,7 @@ export function manifestFor(file: string): string | null {
 
 /** Project files that mean an ecosystem is in use, and how to get a lockfile Fortis can read. */
 const MANIFESTS: { match: RegExp; ecosystem: Ecosystem; label: string; hint: string }[] = [
-  { match: /(^|\/)package\.json$/, ecosystem: 'npm', label: 'package.json', hint: 'commit package-lock.json, yarn.lock or pnpm-lock.yaml (Bun lockfiles are not read yet)' },
+  { match: /(^|\/)package\.json$/, ecosystem: 'npm', label: 'package.json', hint: 'commit package-lock.json, yarn.lock, pnpm-lock.yaml or bun.lock' },
   { match: /(^|\/)composer\.json$/, ecosystem: 'Packagist', label: 'composer.json', hint: 'commit composer.lock' },
   { match: /(^|\/)(pyproject\.toml|Pipfile|setup\.py|setup\.cfg)$/, ecosystem: 'PyPI', label: 'Python project files', hint: 'run uv lock, poetry lock or pip-compile and commit the result, or pass --sbom' },
   { match: /\.(?:cs|fs|vb)proj$/, ecosystem: 'NuGet', label: '.NET project files', hint: 'set RestorePackagesWithLockFile, or pass --sbom' },
@@ -806,9 +808,15 @@ const UNSUPPORTED: { match: RegExp; label: string; why?: string }[] = [
   { match: /(^|\/)vcpkg\.json$/, label: 'C and C++ packages from vcpkg' },
 ];
 
+/** Bun's binary lockfile, the default before Bun 1.2. It has no published format to read. */
+const BUN_BINARY = /(^|\/)bun\.lockb$/;
+const BUN_BINARY_NOTE = "bun.lockb is Bun's old binary lockfile, which Fortis can't read, so those dependencies weren't checked: run bun install --save-text-lockfile and commit the bun.lock it writes (Bun 1.2 and later write bun.lock by default).";
+
 export function missingLockfiles(paths: string[], ignore: string[], found: ReadonlySet<Ecosystem>): string[] {
   const files = relevant(paths, ignore);
-  const missing = MANIFESTS.filter((m) => !found.has(m.ecosystem) && files.some((p) => m.match.test(p))).map((m) => `${m.label} found but no lockfile, so those dependencies weren't checked: ${m.hint}.`);
+  const missing = MANIFESTS.filter((m) => !found.has(m.ecosystem) && files.some((p) => m.match.test(p))).map((m) =>
+    m.ecosystem === 'npm' && files.some((p) => BUN_BINARY.test(p)) ? BUN_BINARY_NOTE : `${m.label} found but no lockfile, so those dependencies weren't checked: ${m.hint}.`,
+  );
   const unsupported = UNSUPPORTED.filter((u) => files.some((p) => u.match.test(p))).map((u) => `${u.label} aren't checked for vulnerabilities yet${u.why ? `: ${u.why}` : ''}.`);
   return [...missing, ...unsupported];
 }

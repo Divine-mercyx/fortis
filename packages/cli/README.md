@@ -78,7 +78,7 @@ Run `fortis rules` for the list and `fortis explain FX-OWN-001` for why a rule m
 
 | Language | Files |
 |---|---|
-| JavaScript | `package-lock.json`, `npm-shrinkwrap.json`, `yarn.lock`, `pnpm-lock.yaml` |
+| JavaScript | `package-lock.json`, `npm-shrinkwrap.json`, `yarn.lock`, `pnpm-lock.yaml`, `bun.lock` |
 | PHP | `composer.lock` |
 | Python | `uv.lock`, `poetry.lock`, `pdm.lock`, `pylock.toml`, `Pipfile.lock`, or pinned requirements files |
 | Java / Kotlin | `gradle.lockfile`, or without one: `gradle/libs.versions.toml` and dependencies written out in `build.gradle(.kts)`; `pom.xml`; or an SBOM |
@@ -96,7 +96,7 @@ Run `fortis rules` for the list and `fortis explain FX-OWN-001` for why a rule m
 
 Files are found in any folder of the repository. Dev and test dependencies are left out wherever they can be told apart; for Yarn workspaces, that's worked out from each workspace's own `package.json`. Findings point at the package's line in the file. If a project has no lockfile, the scan says so.
 
-**JavaScript packages from git, a tarball or a local folder** have no registry release for OSV to look up, so the scan names them in its notes instead of checking them. pnpm catalogs, npm `overrides` and Yarn or pnpm `resolutions` need nothing extra: the lockfile has the version that's installed. **If a folder has two lockfiles** (say `package-lock.json` beside `pnpm-lock.yaml`), the scan checks the one `packageManager` in `package.json` names, or else the pnpm or Yarn one, and says which.
+**JavaScript packages from git, a tarball or a local folder** have no registry release for OSV to look up, so the scan names them in its notes instead of checking them. pnpm catalogs, npm `overrides` and Yarn or pnpm `resolutions` need nothing extra: the lockfile has the version that's installed. **If a folder has two lockfiles** (say `package-lock.json` beside `pnpm-lock.yaml`), the scan checks the one `packageManager` in `package.json` names, or else the pnpm, Yarn or Bun one, and says which. **Bun's old binary `bun.lockb`** can't be read: the scan says so, and `bun install --save-text-lockfile` writes a `bun.lock` it can (Bun 1.2 and later write one by default).
 
 **Not checked yet:** CocoaPods, and C and C++ packages from Conan or vcpkg, because OSV has no advisories for them. The scan says so, and names the pods in `Podfile.lock`, rather than passing them as clean.
 
@@ -510,6 +510,9 @@ This checks each of these, and prints the fix for anything wrong:
 It exits 1 if something stops Fortis doing its job. Things that are only worth knowing, such as a newer version, no key on the free plan, or no Docker, are shown without failing. `--strict` fails on those too, `--json` prints the results as data, and `--offline` skips the network checks.
 
 ## Changelog
+
+**0.1.0-beta.13** (unreleased)
+- The dependency check reads Bun's `bun.lock`, workspaces and aliases included, and works out which packages are dev-only from it. A project with only the old binary `bun.lockb` is told how to get a `bun.lock`.
 
 **0.1.0-beta.12** (2026-11-09)
 - `fortis update` updates a binary install, and a notice once a day says when a newer version exists. It's off in CI and with `FORTIS_NO_UPDATE_CHECK=1`.

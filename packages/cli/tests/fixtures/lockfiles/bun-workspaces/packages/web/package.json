@@ -1,0 +1,1 @@
+{"name":"@acme/web","version":"1.0.0","dependencies":{"react":"17.0.2","ms":"2.1.3","local-lib":"file:../../lib","isarray":"github:juliangruber/isarray#v2.0.5","tar-pkg":"https://registry.npmjs.org/is-number/-/is-number-7.0.0.tgz"},"devDependencies":{"debug":"2.6.8"}}

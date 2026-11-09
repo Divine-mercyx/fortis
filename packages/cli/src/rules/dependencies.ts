@@ -258,7 +258,7 @@ export function pinAdvice(file: string): string {
   if (/^Pipfile\.lock$/.test(base)) return 'Run pipenv lock so every package has an exact version.';
   if (/^composer\.lock$/.test(base)) return 'Branch installs have no release to check: require a tagged version (composer require vendor/pkg:^x).';
   if (/\.(txt|in)$/.test(base)) return 'Lock exact versions to check them: uv lock or poetry lock, or pip-compile (uv pip compile requirements.in -o requirements.txt), or pip freeze > requirements.txt.';
-  if (/^(package-lock\.json|npm-shrinkwrap\.json|pnpm-lock\.yaml|yarn\.lock)$/.test(base)) return 'Packages from git, a tarball or a local folder have no registry release to check: depend on a published version where you can.';
+  if (/^(package-lock\.json|npm-shrinkwrap\.json|pnpm-lock\.yaml|yarn\.lock|bun\.lock)$/.test(base)) return 'Packages from git, a tarball or a local folder have no registry release to check: depend on a published version where you can.';
   if (/\.(?:cs|fs|vb)proj$|^packages\.config$|^Directory\.Packages\.props$/i.test(base)) return 'Floating versions and ranges (8.*, [1.0,2.0)) have no one version to check: use an exact version, or turn on the lockfile.';
   if (/^(go\.mod|modules\.txt)$/.test(base)) return 'A module replaced by a local folder has no release to check.';
   if (/\.versions\.toml$|^build\.gradle(\.kts)?$|^build\.sbt$|\.scala$/.test(base)) return 'A version from a BOM or a variable, or a dynamic one (1.+), has no one version to check here: a CycloneDX SBOM, Gradle dependency locking or build.sbt.lock covers them.';
@@ -268,9 +268,9 @@ export function pinAdvice(file: string): string {
   return 'Pin exact versions in the lockfile to check them.';
 }
 
-const JS_LOCKFILE = /(?:^|\/)(npm-shrinkwrap\.json|package-lock\.json|pnpm-lock\.yaml|yarn\.lock)$/;
-/** With no packageManager to go by. An npm lockfile beside a pnpm or Yarn one is usually left over from an `npm install`. */
-const JS_PREFERENCE = ['npm-shrinkwrap.json', 'pnpm-lock.yaml', 'yarn.lock', 'package-lock.json'];
+const JS_LOCKFILE = /(?:^|\/)(npm-shrinkwrap\.json|package-lock\.json|pnpm-lock\.yaml|yarn\.lock|bun\.lock)$/;
+/** With no packageManager to go by. An npm lockfile beside a pnpm, Yarn or Bun one is usually left over from an `npm install`. */
+const JS_PREFERENCE = ['npm-shrinkwrap.json', 'pnpm-lock.yaml', 'yarn.lock', 'bun.lock', 'package-lock.json'];
 
 /**
  * One JavaScript lockfile per folder. Two (an accidental mix) describe the same project differently,
@@ -293,8 +293,8 @@ export function chooseJsLockfiles(root: string, files: string[], notes: string[]
     } catch {
       /* no package.json: go by the usual order */
     }
-    const tool = /^(npm|pnpm|yarn)@/.exec(manager)?.[1];
-    const wanted = { npm: ['npm-shrinkwrap.json', 'package-lock.json'], pnpm: ['pnpm-lock.yaml'], yarn: ['yarn.lock'] }[tool ?? ''] ?? [];
+    const tool = /^(npm|pnpm|yarn|bun)@/.exec(manager)?.[1];
+    const wanted = { npm: ['npm-shrinkwrap.json', 'package-lock.json'], pnpm: ['pnpm-lock.yaml'], yarn: ['yarn.lock'], bun: ['bun.lock'] }[tool ?? ''] ?? [];
     const chosen = list.find((f) => wanted.includes(name(f))) ?? [...list].sort((a, b) => JS_PREFERENCE.indexOf(name(a)) - JS_PREFERENCE.indexOf(name(b)))[0]!;
     for (const f of list) if (f !== chosen) dropped.add(f);
     const others = list.filter((f) => f !== chosen).map(name).join(' and ');
