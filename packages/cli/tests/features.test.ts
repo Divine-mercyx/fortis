@@ -102,7 +102,8 @@ describe('fortis ci init', () => {
     const yml = githubWorkflow({ stagingBranch: 'staging' });
     expect(yml).not.toContain('setup-node');
     expect(yml).not.toContain('npx');
-    expect(yml).toContain('uses: Divine-mercyx/fortis@cli-v');
+    expect(yml).toContain('releases/download/cli-v');
+    expect(yml).not.toMatch(/uses: Divine-mercyx\/fortis@/);
     expect(yml).not.toContain('--sbom');
   });
 

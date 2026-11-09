@@ -123,3 +123,12 @@ describe('actions checked against OSV', () => {
     expect(r.detections.map((d) => [d.ruleId, d.severity, d.line, d.fixedVersion])).toEqual([['DEP-OSV', 'high', 1, '46.0.1']]);
   });
 });
+
+describe('the workflows fortis ci init writes', () => {
+  it("aren't flagged by Fortis's own supply-chain rules", async () => {
+    const { githubWorkflow } = await import('../src/ci');
+    for (const opts of [{ stagingBranch: 'staging' }, { stagingBranch: 'staging', maven: true }, { stagingBranch: 'staging', pythonSbom: true }, { stagingBranch: 'staging', history: true }]) {
+      expect(flagged('.github/workflows/fortis.yml', githubWorkflow(opts))).toEqual([]);
+    }
+  });
+});

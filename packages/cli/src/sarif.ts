@@ -20,7 +20,7 @@ export function toSarif(detections: Detection[]) {
       shortDescription: { text: r?.title ?? sample.title },
       fullDescription: { text: r?.summary ?? sample.title },
       help: { text: r ? `${r.summary}\n\nFix: ${r.fix}` : sample.title, markdown: r ? `${r.summary}\n\n**Fix:** ${r.fix}` : sample.title },
-      helpUri: `https://fortis.dev/rules/${id}`,
+      helpUri: 'https://fortis.dev/docs.html#rules',
       properties: { tags: ['security', r?.pack ?? 'fortis'], 'security-severity': SECURITY_SEVERITY[r?.severity ?? sample.severity] },
       defaultConfiguration: { level: LEVEL[r?.severity ?? sample.severity] },
     };

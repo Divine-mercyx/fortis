@@ -16,10 +16,15 @@ const GRADLE_SBOM_PATH = 'build/reports/cyclonedx/bom.json';
 /** CycloneDX's Gradle plugin, applied from an init script so the project's build files stay as they are. */
 const GRADLE_PLUGIN = 'org.cyclonedx.bom:org.cyclonedx.bom.gradle.plugin:3.5.1';
 
+/**
+ * The standalone binary from the release's install script, at this exact version and checked
+ * against the release's SHA256SUMS. A script rather than the Fortis Action, so the workflow uses
+ * no third-party action by tag, which SUP-GHA-001 would report in the user's own scan.
+ */
 const installStep = `      - name: Install Fortis
-        uses: ${RELEASE_REPO}@cli-v${VERSION}
-        with:
-          version: ${VERSION}`;
+        run: |
+          curl -fsSL https://github.com/${RELEASE_REPO}/releases/download/cli-v${VERSION}/install.sh | FORTIS_VERSION=${VERSION} sh
+          echo "$HOME/.fortis/bin" >> "$GITHUB_PATH"`;
 
 /** pom.xml alone can't show transitive dependencies, and Maven can list them all. */
 const sbomSteps = `      - uses: actions/setup-java@v6

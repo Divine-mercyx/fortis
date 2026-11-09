@@ -1,6 +1,6 @@
 # fortis-watchdog
 
-Fintech security checks on every push, from [Fortis](https://fortis.dev).
+Fintech security checks on every push, from [Fortis](https://fortis.dev). Docs: [fortis.dev/docs](https://fortis.dev/docs.html).
 
 ## Install
 
@@ -88,19 +88,17 @@ Run `fortis rules` for the list and `fortis explain FX-OWN-001` for why a rule m
 | Ruby | `Gemfile.lock` |
 | Rust | `Cargo.lock` |
 | Dart / Flutter | `pubspec.lock` |
+| Swift (iOS, macOS) | `Package.resolved` from Swift Package Manager or Xcode, versions 1 to 3 |
+| Elixir / Erlang | `mix.lock`, `rebar.lock` |
+| Haskell | `cabal.project.freeze`, or `stack.yaml.lock` (which leaves out the snapshot's packages) |
+| R | `renv.lock` (CRAN packages; GitHub and Bioconductor ones are named, not checked) |
 | GitHub Actions | `.github/workflows/*.yml`: actions at an exact version (`@v1.2.3`, or a commit pinned with `# v1.2.3` after it) |
 
 Files are found in any folder of the repository. Dev and test dependencies are left out wherever they can be told apart; for Yarn workspaces, that's worked out from each workspace's own `package.json`. Findings point at the package's line in the file. If a project has no lockfile, the scan says so.
 
 **JavaScript packages from git, a tarball or a local folder** have no registry release for OSV to look up, so the scan names them in its notes instead of checking them. pnpm catalogs, npm `overrides` and Yarn or pnpm `resolutions` need nothing extra: the lockfile has the version that's installed. **If a folder has two lockfiles** (say `package-lock.json` beside `pnpm-lock.yaml`), the scan checks the one `packageManager` in `package.json` names, or else the pnpm or Yarn one, and says which.
-| Elixir / Erlang | `mix.lock`, `rebar.lock` |
-| Haskell | `cabal.project.freeze`, or `stack.yaml.lock` (which leaves out the snapshot's packages) |
-| R | `renv.lock` (CRAN packages; GitHub and Bioconductor ones are named, not checked) |
 
-C and C++ packages (Conan, vcpkg) aren't checked yet, because OSV has no advisories for them; the scan says so rather than passing them. Files are found in any folder of the repository. Dev and test dependencies are left out wherever they can be told apart (yarn workspaces can't, so those are all checked). Findings point at the package's line in the file. If a project has no lockfile, the scan says so.
-| Swift (iOS, macOS) | `Package.resolved` from Swift Package Manager or Xcode, versions 1 to 3 |
-
-CocoaPods aren't checked yet, because OSV has no CocoaPods advisories; the scan says so and names the pods in `Podfile.lock` rather than passing them. Files are found in any folder of the repository. Dev and test dependencies are left out wherever they can be told apart (yarn workspaces can't, so those are all checked). Findings point at the package's line in the file. If a project has no lockfile, the scan says so.
+**Not checked yet:** CocoaPods, and C and C++ packages from Conan or vcpkg, because OSV has no advisories for them. The scan says so, and names the pods in `Podfile.lock`, rather than passing them as clean.
 
 **A hand-written `requirements.txt` lists only direct dependencies,** so the scan says what it couldn't cover. Use a lockfile, compile it with `pip-compile` or `uv pip compile`, or pass an SBOM from [`cyclonedx-py`](https://github.com/CycloneDX/cyclonedx-python). `fortis ci init` adds that step for you on GitHub Actions.
 
@@ -155,13 +153,16 @@ If the dependency check can't finish (OSV is down, or a lockfile can't be read),
 ## In CI
 
 ```yaml
-- uses: Divine-mercyx/fortis@cli-v0.1.0-beta.11
-  with:
-    version: 0.1.0-beta.11
+- name: Install Fortis
+  run: |
+    curl -fsSL https://github.com/Divine-mercyx/fortis/releases/download/cli-v0.1.0-beta.12/install.sh | FORTIS_VERSION=0.1.0-beta.12 sh
+    echo "$HOME/.fortis/bin" >> "$GITHUB_PATH"
 - run: fortis scan --ci
   env:
-    FORTIS_KEY: ${{ secrets.FORTIS_KEY }}
+    FORTIS_KEY: ${{ secrets.FORTIS_KEY }}   # optional: without it the free checks run
 ```
+
+The `Divine-mercyx/fortis` Action installs it too, but pin it to a commit SHA if you use it, or Fortis's own SUP-GHA-001 rule reports it.
 
 `fortis ci init` writes this for you. On other CI systems, use the install script or the Docker image.
 
