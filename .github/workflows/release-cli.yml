@@ -28,7 +28,7 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v5
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4.3.0
       - uses: actions/setup-node@v6
         with:
           node-version: 22
@@ -62,12 +62,16 @@ jobs:
     runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v5
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4.3.0
       - uses: actions/setup-node@v6
         with:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      - name: Refresh the end-of-life dates for the Dockerfile rules
+        working-directory: packages/cli
+        shell: bash
+        run: node scripts/refresh-eol.mjs || echo "::warning::Couldn't reach endoflife.date, so this build uses the dates in the repository."
       - run: pnpm --filter fortis-watchdog build:binary
       - name: Smoke test
         shell: bash
@@ -91,7 +95,7 @@ jobs:
           name: ${{ matrix.name }}
           path: packages/cli/out/*
           if-no-files-found: error
-      - uses: astral-sh/setup-uv@v6
+      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6.8.0
       - name: Build and test the wheel
         shell: bash
         run: |
@@ -171,9 +175,9 @@ jobs:
           mkdir -p bin/amd64 bin/arm64
           tar -xzf "$GITHUB_WORKSPACE/artifacts/linux-x64/fortis-linux-x64.tar.gz" -C bin/amd64
           tar -xzf "$GITHUB_WORKSPACE/artifacts/linux-arm64/fortis-linux-arm64.tar.gz" -C bin/arm64
-      - uses: docker/setup-qemu-action@v3
-      - uses: docker/setup-buildx-action@v3
-      - uses: docker/login-action@v3
+      - uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3.7.0
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
+      - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -212,7 +216,7 @@ jobs:
           path: dist
           merge-multiple: true
           pattern: wheel-*
-      - uses: pypa/gh-action-pypi-publish@release/v1
+      - uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086 # v1.14.3
         with:
           packages-dir: dist
           repository-url: ${{ github.repository == 'Divine-mercyx/fortis' && 'https://upload.pypi.org/legacy/' || 'https://test.pypi.org/legacy/' }}
@@ -226,7 +230,7 @@ jobs:
       id-token: write
     steps:
       - uses: actions/checkout@v5
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4.3.0
       - uses: actions/setup-node@v6
         with:
           node-version: 22
@@ -235,6 +239,10 @@ jobs:
       - name: Trusted publishing needs npm 11.5 or later
         run: npm install -g npm@latest
       - run: pnpm install --frozen-lockfile
+      - name: Refresh the end-of-life dates for the Dockerfile rules
+        working-directory: packages/cli
+        shell: bash
+        run: node scripts/refresh-eol.mjs || echo "::warning::Couldn't reach endoflife.date, so this build uses the dates in the repository."
       - name: Build
         working-directory: packages/cli
         run: node build.mjs

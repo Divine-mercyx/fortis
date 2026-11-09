@@ -1,0 +1,6 @@
+FROM node:latest AS build  # @hit
+WORKDIR /app
+RUN npm ci
+FROM --platform=$BUILDPLATFORM python:latest AS tools  # @hit
+FROM build
+COPY --from=tools /usr/local/bin/python /usr/bin/python

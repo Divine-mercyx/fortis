@@ -47,6 +47,7 @@ To verify where a binary came from, run `gh attestation verify fortis-linux-x64.
 |---|---|---|---|
 | Secrets | Paystack / Flutterwave / Monnify secret keys; private keys, AWS, GitHub, Slack, Google and Fortis keys; database passwords, SaaS and registry tokens (SendGrid, Slack, OpenAI, Anthropic, npm, PyPI…) in connection URLs, JDBC URLs and .NET connection strings; random-looking hard-coded secrets, including unquoted values in `.env`, `.properties` and YAML files | Any | Free |
 | Dependencies | Known vulnerabilities, from [OSV](https://osv.dev) | See below | Free |
+| Dependencies (supply chain) | Docker base images with no tag or `latest`, not pinned by digest, or end-of-life; third-party GitHub Actions not pinned to a commit; `pull_request_target` workflows that run the pull request's code | Dockerfiles and GitHub Actions workflows | Free |
 | Fintech | Money records read without an ownership check; webhooks without a signature check; balance updates outside a transaction; BVN/NIN in logs; weak or leaked OTPs; transfers without an idempotency key | JavaScript, TypeScript and Python (Django, Django REST, Flask, FastAPI) | Core and above |
 
 `fortis test` and `fortis access` test a running app over HTTP, so they work whatever the backend is written in.
@@ -66,6 +67,7 @@ Run `fortis rules` for the list and `fortis explain FX-OWN-001` for why a rule m
 | Ruby | `Gemfile.lock` |
 | Rust | `Cargo.lock` |
 | Dart / Flutter | `pubspec.lock` |
+| GitHub Actions | `.github/workflows/*.yml`: actions at an exact version (`@v1.2.3`, or a commit pinned with `# v1.2.3` after it) |
 
 Files are found in any folder of the repository. Dev and test dependencies are left out wherever they can be told apart (yarn workspaces can't, so those are all checked). Findings point at the package's line in the file. If a project has no lockfile, the scan says so.
 
@@ -240,7 +242,7 @@ const testKey = 'sk_test_…'; // fortis-ignore
 const t = await Transfer.findById(req.params.id);
 ```
 
-Any comment style works, for example `# fortis-ignore` in Python or YAML.
+Any comment style works, for example `# fortis-ignore` in Python or YAML. Dockerfiles only allow comments on their own line, so use `# fortis-ignore-next-line` above the `FROM`, with your reason on the lines before it.
 
 Or exclude paths in `.fortis.json`: `{ "ignore": ["fixtures/**"] }`.
 
@@ -260,6 +262,7 @@ Then on npmjs.com: package → Settings → Trusted publishing → GitHub Action
 `packages/cli/package.json` and push a matching tag (for example `cli-v0.1.0`). GitHub Actions then:
 
 - tests, and builds and smoke-tests a binary on each platform;
+- refreshes the end-of-life dates the Dockerfile rules use, from [endoflife.date](https://endoflife.date), before building. If the site can't be reached, the build uses the dates in the repository. Commit a fresh copy now and then with `node scripts/refresh-eol.mjs`;
 - runs the install-and-push check (`scripts/e2e.sh`) for npm, pnpm, Yarn 1, Yarn 4 Plug'n'Play, Bun, a global install, the binary, the install script and the Docker image, on Linux, macOS (arm64 and x64) and Windows. Nothing is published unless all of them pass. Run one locally with `bash scripts/e2e.sh npm fortis-watchdog-<version>.tgz`;
 - publishes a GitHub Release with the binaries, install scripts, checksums and build attestations;
 - pushes the Docker image to `ghcr.io`;

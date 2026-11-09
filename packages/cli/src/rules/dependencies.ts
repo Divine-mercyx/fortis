@@ -6,7 +6,7 @@ import type { Severity } from '@fortis/shared';
 import { cycloneDx, ecosystemOf, findLockfiles, isPomXml, isRequirements, manifestFor, missingLockfiles, parseLockfile, type Ecosystem, type Locked } from './lockfiles';
 import { fixedVersion, fixMessage, type OsvAffected } from './fix-version';
 import { OsvCache } from './osv-cache';
-import { lookupLocal } from './osv-db';
+import { affects, lookupLocal, type DbAdvisory } from './osv-db';
 import type { Detection } from './types';
 
 /*
@@ -217,7 +217,8 @@ export async function scanDependencies(
         const res = await fetchImpl(`${base}/v1/querybatch`, {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ queries: chunk.map((p) => ({ package: { name: p.name, ecosystem: p.ecosystem }, version: p.version })) }),
+          // OSV's API doesn't match versions for GitHub Actions, so those are asked for every advisory and matched below.
+          body: JSON.stringify({ queries: chunk.map((p) => ({ package: { name: p.name, ecosystem: p.ecosystem }, ...(p.ecosystem === 'GitHub Actions' ? {} : { version: p.version }) })) }),
           signal: AbortSignal.timeout(15_000),
         });
         if (!res.ok) throw new Error(`OSV responded ${res.status}`);
@@ -263,7 +264,15 @@ export async function scanDependencies(
       cache?.save();
     }
 
-    const byKey = new Map(hits.map((h) => [keyOf(h.pkg), h]));
+    // An action's advisories came back for every version: keep those whose ranges include this one.
+    for (const h of hits) {
+      if (h.pkg.ecosystem !== 'GitHub Actions') continue;
+      h.ids = h.ids.filter((id) => {
+        const v = details.get(id);
+        return v ? affects(v as DbAdvisory, h.pkg.ecosystem, h.pkg.name, h.pkg.version) : false;
+      });
+    }
+    const byKey = new Map(hits.filter((h) => h.ids.length).map((h) => [keyOf(h.pkg), h]));
     const detections: Detection[] = [];
     for (const where of new Map(located.map((p) => [`${p.file}|${keyOf(p)}`, p])).values()) {
       const hit = byKey.get(keyOf(where));

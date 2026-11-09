@@ -227,7 +227,9 @@ const ACCESS_JSON = `{
 
 const PACK_LABEL: Record<RulePack, string> = { fintech: 'Fintech', secrets: 'Secrets', dependencies: 'Dependencies' };
 const RULE_LANG: Record<string, string> = {
-  'FX-SEC-001': 'Any file', 'SEC-GEN-001': 'Any file', 'DEP-OSV': 'Lockfiles for JavaScript, PHP, Python, Java, Go, .NET, Ruby, Rust and Dart/Flutter',
+  'FX-SEC-001': 'Any file', 'SEC-GEN-001': 'Any file', 'DEP-OSV': 'Lockfiles for JavaScript, PHP, Python, Java, Go, .NET, Ruby, Rust and Dart/Flutter, and GitHub Actions workflows',
+  'SUP-IMG-001': 'Dockerfiles', 'SUP-IMG-002': 'Production Dockerfiles', 'SUP-IMG-003': 'Dockerfiles',
+  'SUP-GHA-001': 'GitHub Actions workflows', 'SUP-GHA-002': 'GitHub Actions workflows',
   'FX-BOLA-001': 'Any language (running app)', 'FX-AUTH-001': 'Any language (running app)',
 };
 

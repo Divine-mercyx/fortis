@@ -59,6 +59,11 @@ const BY_RULE: Record<string, Control[]> = {
   'FX-OTP-001': [pci('6.2.4'), cbn('access'), cbn('crypto')],
   'FX-PII-002': [cbn('data'), cbn('logging'), ndpa('s.24'), ndpa('s.39')],
   'DEP-OSV': [pci('6.3.1'), pci('6.3.3'), cbn('vuln')],
+  'SUP-IMG-001': [pci('6.3.3'), cbn('vuln')],
+  'SUP-IMG-002': [pci('6.3.3'), cbn('vuln')],
+  'SUP-IMG-003': [pci('6.3.1'), pci('6.3.3'), cbn('vuln')],
+  'SUP-GHA-001': [pci('6.2.3'), cbn('appsec'), cbn('crypto')],
+  'SUP-GHA-002': [pci('6.2.4'), cbn('appsec'), cbn('access')],
 };
 
 /** ZAP alerts whose fix protects payment-page scripts (CSP, Subresource Integrity). */

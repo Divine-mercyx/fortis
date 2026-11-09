@@ -62,5 +62,25 @@
   "SEC-GEN-001:py": {
     "precision": 1,
     "recall": 1
+  },
+  "SUP-GHA-001": {
+    "precision": 1,
+    "recall": 1
+  },
+  "SUP-GHA-002": {
+    "precision": 1,
+    "recall": 1
+  },
+  "SUP-IMG-001": {
+    "precision": 1,
+    "recall": 1
+  },
+  "SUP-IMG-002": {
+    "precision": 1,
+    "recall": 1
+  },
+  "SUP-IMG-003": {
+    "precision": 1,
+    "recall": 1
   }
 }

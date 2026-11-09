@@ -1,0 +1,15 @@
+name: label
+on:
+  pull_request_target:
+jobs:
+  label:
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/labeler@v5
+      - run: echo "PR ${{ github.event.pull_request.number }} labelled"
+      # git checkout ${{ github.event.pull_request.head.sha }} would be unsafe here
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}  # fortis-ignore: only reads files, runs nothing
