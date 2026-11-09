@@ -435,7 +435,9 @@ To release, bump `version` in `packages/cli/package.json` and push a matching ta
 
 Workflow actions are pinned to commit SHAs, and runners to image versions, so a release can't change because an action moved its tag. Dependabot proposes updates to the pins.
 
-To build a binary for your own machine, run `pnpm --filter fortis-watchdog build:binary`. The result goes in `dist-sea/`. A tag on a fork runs everything except npm, which makes a safe dry run; set `FORTIS_REPO` to install from it.
+Release binaries for macOS and Linux are made from a small Node, built by `scripts/build-node-runtime.sh` without the parts the CLI never uses. CI caches it, and fails if a binary goes over 60 MB or its download over 25 MB.
+
+To build a binary for your own machine, run `pnpm --filter fortis-watchdog build:binary`. It uses the Node you're running, so it's about twice the size of a release. Set `FORTIS_NODE_RUNTIME` to use another. The result goes in `dist-sea/`. A tag on a fork runs everything except npm, which makes a safe dry run; set `FORTIS_REPO` to install from it.
 
 Publishing a tarball by hand: `npm pack` rebuilds `dist/` first, so the packed CLI always reports
 the version in `package.json`. Publish it with `npm publish fortis-watchdog-<version>.tgz --tag beta`.
@@ -496,6 +498,7 @@ It exits 1 if something stops Fortis doing its job. Things that are only worth k
 - The six fintech rules now read Go (net/http, Gin, Echo and Fiber, with GORM and sqlx) and C# (ASP.NET Core controllers and minimal APIs, with Entity Framework).
 - The six fintech rules now read PHP: Laravel controllers, routes and API resources, on Eloquent and the query builder.
 - The six fintech rules now read Java and Kotlin: Spring Boot controllers and services, on Spring Data and JdbcTemplate.
+- The macOS and Linux binaries are much smaller, because they use a Node without the parts the CLI never uses. Only English locale data is included.
 - Python is fully supported: `pip install fortis-watchdog`, the fintech rules for Django, Django REST, Flask and FastAPI, and dev packages told apart in uv and Poetry lockfiles.
 - `pip install` needs no Node, and the git hook finds the CLI in `.venv` or `venv` even when it isn't active, and through `uv run` and `poetry run`.
 - More secrets are caught in Python: real-looking defaults such as `os.getenv("KEY", "…")`, SQLAlchemy connection URLs, tokens in URLs, PyPI tokens and notebooks.
