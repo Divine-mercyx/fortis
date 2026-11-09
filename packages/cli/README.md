@@ -94,6 +94,7 @@ fortis scan --sbom target/bom.json
 | `fortis scan --ci --pr-comment` | Comment on the pull request with what it adds (GitHub and GitLab) |
 | `fortis login <key>` / `fortis logout` | Save or remove the key for this machine |
 | `fortis whoami` | Project, workspace and plan for the key |
+| `fortis doctor` | Find what isn't working here, and how to fix it |
 
 Exit codes: `0` passed, `1` findings at or above the threshold, `2` usage or configuration error, including a full scan that found no files.
 
@@ -347,6 +348,32 @@ the version in `package.json`. Publish it with `npm publish fortis-watchdog-<ver
 
 Keys are read from `FORTIS_KEY`, then from `~/.config/fortis/credentials.json` (written by `fortis login`, mode 0600).
 
+Fortis warns about unknown settings and wrong types, and suggests what you may have meant, such as `failOn` for `failon`. For autocomplete in your editor, add this line. `fortis init` adds it for you:
+
+```json
+{ "$schema": "https://cdn.jsdelivr.net/npm/fortis-watchdog/fortis.schema.json" }
+```
+
+## When something isn't working
+
+```bash
+fortis doctor
+```
+
+This checks each of these, and prints the fix for anything wrong:
+
+- the version, and whether a newer one exists;
+- how Fortis is installed, and whether the git hook can find it;
+- whether the hook is installed and current, and is the one git will run (`core.hooksPath`, Husky, lefthook, pre-commit);
+- `.fortis.json`;
+- your key and plan;
+- whether OSV and the Fortis API can be reached, through your proxy if you have one;
+- your git version, shallow clones, and lockfiles;
+- Docker, for `fortis test`;
+- your staging target, with `--target` or `target` in `.fortis.json`.
+
+It exits 1 if something stops Fortis doing its job. Things that are only worth knowing, such as a newer version, no key on the free plan, or no Docker, are shown without failing. `--strict` fails on those too, `--json` prints the results as data, and `--offline` skips the network checks.
+
 ## Changelog
 
 **0.1.0-beta.12** (unreleased)
@@ -355,6 +382,8 @@ Keys are read from `FORTIS_KEY`, then from `~/.config/fortis/credentials.json` (
 - `fortis scan --pr-comment` posts one comment per pull request on GitHub and GitLab, listing only what it adds, and updates it in place.
 - `fortis scan --junit` writes JUnit XML for CI test reports.
 - Setups for pre-commit, lefthook and Husky are documented under "Other git hook managers".
+- `fortis doctor` finds what isn't working and prints the fix: the install, the hook, your key, network access, git, lockfiles and Docker.
+- A typo in `.fortis.json` is no longer silently ignored: Fortis warns and suggests the right name. A JSON Schema gives editors autocomplete.
 - Python is fully supported: `pip install fortis-watchdog`, the fintech rules for Django, Django REST, Flask and FastAPI, and dev packages told apart in uv and Poetry lockfiles.
 - `pip install` needs no Node, and the git hook finds the CLI in `.venv` or `venv` even when it isn't active, and through `uv run` and `poetry run`.
 - More secrets are caught in Python: real-looking defaults such as `os.getenv("KEY", "…")`, SQLAlchemy connection URLs, tokens in URLs, PyPI tokens and notebooks.

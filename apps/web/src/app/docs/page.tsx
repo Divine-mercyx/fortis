@@ -59,6 +59,7 @@ const NAV: { id: string; title: string; group: string }[] = [
   { id: 'cmd-access', title: 'fortis access', group: 'Commands' },
   { id: 'cmd-baseline', title: 'fortis baseline', group: 'Commands' },
   { id: 'cmd-ci', title: 'fortis ci init', group: 'Commands' },
+  { id: 'cmd-doctor', title: 'fortis doctor', group: 'Commands' },
   { id: 'cmd-account', title: 'login, logout, whoami', group: 'Commands' },
   { id: 'cmd-rules', title: 'explain and rules', group: 'Commands' },
   { id: 'pre-push', title: 'Pre-push hook', group: 'Guides' },
@@ -726,7 +727,20 @@ export default function DocsPage() {
           </ul>
         </Section>
 
+        <Section id="cmd-doctor" title="fortis doctor">
+          <p>Finds what isn&apos;t working here, and prints the fix for each thing: the install, the git hook, <C>.fortis.json</C>, your key and plan, access to OSV and the Fortis API, git, lockfiles, Docker and your staging target.</p>
+          <CodeLine cmd={run('doctor')} />
+          <Options rows={[
+            ['--strict', 'Also fail on things that are only worth knowing, such as no key on the free plan.'],
+            ['--json', 'Print the results as data.'],
+            ['--offline', 'Skip the network checks.'],
+            ['--target <url>', 'Also check that this staging URL is ready to test.'],
+          ]} />
+          <p>It exits 1 if something stops Fortis doing its job.</p>
+        </Section>
+
         <Section id="troubleshooting" title="Troubleshooting">
+          <p>Start with <C>{run('doctor')}</C>. It detects each of these, except a wrong finding, and prints the fix.</p>
           <dl className="doc-faq">
             <dt>“No Fortis key found, so only the free checks ran”</dt>
             <dd>Run <C>{run('login fts_…')}</C>, or set <C>FORTIS_KEY</C>. Check with <C>{run('whoami')}</C>.</dd>
