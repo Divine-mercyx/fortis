@@ -121,5 +121,6 @@ Once both services have slept overnight, nothing inside them is running to wake 
 ## Contributing, security and licence
 
 - To work on Fortis, see [CONTRIBUTING.md](CONTRIBUTING.md).
+- For what's built, and the setup that's still left and who owns it, see [ROADMAP.md](ROADMAP.md).
 - To report a vulnerability, follow [SECURITY.md](SECURITY.md). Please do not open a public issue.
 - `packages/cli`, `packages/shared` and `packages/python` are MIT licensed. The rest of this repository, including `apps/api` and `apps/web`, is not open source. See [LICENSE](LICENSE).
