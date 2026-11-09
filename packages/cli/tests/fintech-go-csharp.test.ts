@@ -52,7 +52,7 @@ describe('the fix shown for a finding', () => {
 });
 
 describe('the note about languages not covered', () => {
-  it('no longer lists Go or C#', async () => {
+  it('no longer lists Go, C# or PHP', async () => {
     const { execFileSync } = await import('node:child_process');
     const { mkdtempSync, writeFileSync, rmSync } = await import('node:fs');
     const { tmpdir } = await import('node:os');
@@ -60,13 +60,13 @@ describe('the note about languages not covered', () => {
     const dir = mkdtempSync(join(tmpdir(), 'fortis-lang-'));
     try {
       execFileSync('git', ['init', '-q', dir]);
-      for (const name of ['a.go', 'b.cs', 'c.php']) writeFileSync(join(dir, name), '// nothing\n');
+      for (const name of ['a.go', 'b.cs', 'c.php', 'd.rb']) writeFileSync(join(dir, name), '// nothing\n');
       execFileSync('git', ['add', '-A'], { cwd: dir });
       const scan = await runScan({ root: dir, scope: 'full', packs: ['fintech'], offline: true });
       const note = scan.notes.find((n) => n.includes('Fintech code rules cover'))!;
-      expect(note).toContain('JavaScript, TypeScript, Python, Go and C#');
-      expect(note).toContain('1 PHP');
-      expect(note).not.toMatch(/\d+ (Go|C#)/);
+      expect(note).toContain('JavaScript, TypeScript, Python, Go, C# and PHP');
+      expect(note).toContain('1 Ruby');
+      expect(note).not.toMatch(/\d+ (Go|C#|PHP)/);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

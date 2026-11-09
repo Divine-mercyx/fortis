@@ -48,7 +48,7 @@ To verify where a binary came from, run `gh attestation verify fortis-linux-x64.
 | Secrets | Paystack / Flutterwave / Monnify secret keys; private keys, AWS, GitHub, Slack, Google and Fortis keys; database passwords, SaaS and registry tokens (SendGrid, Slack, OpenAI, Anthropic, npm, PyPI…) in connection URLs, JDBC URLs and .NET connection strings; random-looking hard-coded secrets, including unquoted values in `.env`, `.properties` and YAML files | Any | Free |
 | Dependencies | Known vulnerabilities, from [OSV](https://osv.dev) | See below | Free |
 | Dependencies (supply chain) | Docker base images with no tag or `latest`, not pinned by digest, or end-of-life; third-party GitHub Actions not pinned to a commit; `pull_request_target` workflows that run the pull request's code | Dockerfiles and GitHub Actions workflows | Free |
-| Fintech | Money records read without an ownership check; webhooks without a signature check; balance updates outside a transaction; BVN/NIN in logs; weak or leaked OTPs; transfers without an idempotency key; money as floating point; card data in logs, analytics or plain text; predictable transaction references; charge amounts taken from the request | JavaScript, TypeScript and Python (Django, Django REST, Flask, FastAPI); the first six checks also in Go (net/http, Gin, Echo, Fiber) and C# (ASP.NET Core) | Core and above |
+| Fintech | Money records read without an ownership check; webhooks without a signature check; balance updates outside a transaction; BVN/NIN in logs; weak or leaked OTPs; transfers without an idempotency key; money as floating point; card data in logs, analytics or plain text; predictable transaction references; charge amounts taken from the request | JavaScript, TypeScript and Python (Django, Django REST, Flask, FastAPI); the first six checks also in Go (net/http, Gin, Echo, Fiber), C# (ASP.NET Core) and PHP (Laravel) | Core and above |
 
 `fortis test` and `fortis access` test a running app over HTTP, so they work whatever the backend is written in.
 
@@ -494,6 +494,7 @@ It exits 1 if something stops Fortis doing its job. Things that are only worth k
 - FX-OTP-001 also catches a code made with `Math.random` in a variable such as `verificationCode` or `resetToken`.
 - Four new fintech rules for JavaScript, TypeScript and Python: **FX-MONEY-001** (money as floating point), **FX-PCI-001** (card data in logs, analytics or plain text), **FX-REF-001** (predictable transaction references) and **FX-AMT-001** (charge amounts taken from the request).
 - The six fintech rules now read Go (net/http, Gin, Echo and Fiber, with GORM and sqlx) and C# (ASP.NET Core controllers and minimal APIs, with Entity Framework).
+- The six fintech rules now read PHP: Laravel controllers, routes and API resources, on Eloquent and the query builder.
 - Python is fully supported: `pip install fortis-watchdog`, the fintech rules for Django, Django REST, Flask and FastAPI, and dev packages told apart in uv and Poetry lockfiles.
 - `pip install` needs no Node, and the git hook finds the CLI in `.venv` or `venv` even when it isn't active, and through `uv run` and `poetry run`.
 - More secrets are caught in Python: real-looking defaults such as `os.getenv("KEY", "…")`, SQLAlchemy connection URLs, tokens in URLs, PyPI tokens and notebooks.

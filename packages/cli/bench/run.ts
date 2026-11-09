@@ -73,7 +73,7 @@ const FAKES: Record<string, string> = {
 type Score = { tp: number; fp: number; fn: number; misses: string[]; falsePositives: string[] };
 
 /** Scored per language, so a strong JavaScript score can't hide a weak Python one. */
-const scoreKey = (ruleId: string, path: string) => (/\.py$/.test(path) ? `${ruleId}:py` : /\.go$/.test(path) ? `${ruleId}:go` : /\.cs$/.test(path) ? `${ruleId}:cs` : ruleId);
+const scoreKey = (ruleId: string, path: string) => (/\.py$/.test(path) ? `${ruleId}:py` : /\.go$/.test(path) ? `${ruleId}:go` : /\.cs$/.test(path) ? `${ruleId}:cs` : /\.php$/.test(path) ? `${ruleId}:php` : ruleId);
 
 export async function runBench(): Promise<Record<string, Score>> {
   await loadGrammars(ALL_LANGUAGES);
