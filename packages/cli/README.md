@@ -65,12 +65,19 @@ Once a day, Fortis checks GitHub for a newer release and prints a notice if ther
 
 | Pack | Rules | Languages | Plan |
 |---|---|---|---|
-| Secrets | Paystack / Flutterwave / Monnify / Korapay / BudPay / SeerBit / OPay / Squad secret keys; Mono and Dojah secret keys and Africa's Talking API keys; private keys, AWS, GitHub, Slack, Google and Fortis keys; database passwords, SaaS and registry tokens (SendGrid, Slack, OpenAI, Anthropic, npm, PyPI…) in connection URLs, JDBC URLs and .NET connection strings; random-looking hard-coded secrets, including unquoted values in `.env`, `.properties` and YAML files | Any | Free |
+| Secrets | Paystack / Flutterwave / Monnify / Korapay / BudPay / SeerBit / OPay / Squad secret keys; Mono and Dojah secret keys and Africa's Talking API keys; private keys, AWS, GitHub, Slack, Google and Fortis keys; database passwords, SaaS and registry tokens (SendGrid, Slack, OpenAI, Anthropic, npm, PyPI…) in connection URLs, JDBC URLs and .NET connection strings; random-looking hard-coded secrets, including unquoted values in `.env`, `.properties` and YAML files. Also read: Jupyter notebook cells and their outputs, PEM keys on one line inside JSON, base64-encoded keys, and the values of Kubernetes `Secret` manifests | Any | Free |
 | Dependencies | Known vulnerabilities, from [OSV](https://osv.dev) | See below | Free |
 | Dependencies (supply chain) | Docker base images with no tag or `latest`, not pinned by digest, or end-of-life; third-party GitHub Actions not pinned to a commit; `pull_request_target` workflows that run the pull request's code | Dockerfiles and GitHub Actions workflows | Free |
 | Fintech | Money records read without an ownership check; webhooks without a signature check; balance updates outside a transaction; BVN/NIN in logs; weak or leaked OTPs; transfers without an idempotency key; money as floating point; card data in logs, analytics or plain text; predictable transaction references; charge amounts taken from the request | JavaScript, TypeScript and Python (Django, Django REST, Flask, FastAPI); the first six checks also in Go (net/http, Gin, Echo, Fiber), C# (ASP.NET Core), PHP (Laravel), and Java and Kotlin (Spring Boot) | Core and above |
 
 `fortis test` and `fortis access` test a running app over HTTP, so they work whatever the backend is written in.
+
+**Secrets that line-by-line matching can't read.**
+
+- **Jupyter notebooks:** read as the code and text output you see in Jupyter (cell sources, printed output, tracebacks; not images), with each finding on the notebook's own line.
+- **PEM keys inside JSON:** a PEM key stored on one line in JSON (`"private_key": "-----BEGIN PRIVATE KEY-----\nMII…"`) is reported when it has key material. Documentation placeholders such as `...` or `<your key>` aren't.
+- **Base64 values:** values 32 to 4,096 characters long that decode to readable text are decoded and checked for the keys named above, up to 200 values per file.
+- **Kubernetes `Secret` manifests:** `data:` values are decoded and `stringData:` values read as they are. Credentials are reported, while usernames, hosts, empty values and Helm templates aren't.
 
 Run `fortis rules` for the list and `fortis explain FX-OWN-001` for why a rule matters and how to fix it.
 
@@ -515,6 +522,7 @@ It exits 1 if something stops Fortis doing its job. Things that are only worth k
 - The dependency check reads Bun's `bun.lock`, workspaces and aliases included, and works out which packages are dev-only from it. A project with only the old binary `bun.lockb` is told how to get a `bun.lock`.
 - Mono and Dojah secret keys and Africa's Talking API keys are named, each with where to rotate it. Test keys are reported as high, live keys as critical, and public keys are left alone.
 - A secret key that starts `sk_live_` or `sk_test_` and matches no known shape is reported as Stripe, Paystack, Korapay or BudPay, since Korapay and BudPay use the same prefix.
+- The secret checks read Jupyter notebooks as their cells and outputs, decode base64 values and the `data:` of Kubernetes `Secret` manifests, and report encrypted PEM keys. A PEM placeholder in JSON (`-----BEGIN PRIVATE KEY-----\n...`) is no longer reported as a key.
 
 **0.1.0-beta.12** (2026-11-09)
 - `fortis update` updates a binary install, and a notice once a day says when a newer version exists. It's off in CI and with `FORTIS_NO_UPDATE_CHECK=1`.
