@@ -94,15 +94,15 @@ export default function EvidencePage() {
 
   return (
     <div className="stack">
-      <div className="page-head no-print">
-        <div>
-          <span className="eyebrow reveal">For auditors and compliance</span>
+      <section className="band band-row reveal no-print">
+        <div className="band-txt">
+          <span className="eyebrow">For auditors and compliance</span>
           <h1 className="display"><Words>Evidence, <span className="it accent">ready to hand over.</span></Words></h1>
-          <p className="lead reveal" style={{ ['--d' as string]: '150ms' }}>
+          <p className="lead">
             What was checked, found, fixed and decided, mapped to PCI DSS, the CBN cybersecurity framework and the NDPA.
           </p>
         </div>
-        <div className="ev-controls reveal" style={{ ['--d' as string]: '200ms' }}>
+        <div className="ev-controls band-actions">
           <select className="select" value={days} onChange={(e) => setDays(Number(e.target.value))} aria-label="Period">
             {PERIODS.map((p) => <option key={p.days} value={p.days}>{p.label}</option>)}
           </select>
@@ -112,7 +112,7 @@ export default function EvidencePage() {
           </select>
           <button className="btn btn-primary" disabled={!data} onClick={() => window.print()}><File /> Download PDF</button>
         </div>
-      </div>
+      </section>
 
       {!data ? (
         <section className="card card-pad"><Skeleton h={40} w="60%" /><div style={{ height: 16 }} /><Skeleton h={180} /></section>

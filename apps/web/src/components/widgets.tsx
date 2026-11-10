@@ -120,3 +120,48 @@ export function ReleaseLoop({ items }: { items: { k: string; title: string; valu
     </div>
   );
 }
+
+/** Title row of a card, with an optional explainer beside the title and an action or legend on the right. */
+export function SectionHead({ title, tip, children }: { title: ReactNode; tip?: string; children?: ReactNode }) {
+  return (
+    <div className="card-head">
+      <h3>
+        {title}
+        {tip ? <> <InfoTip text={tip} /></> : null}
+      </h3>
+      {children}
+    </div>
+  );
+}
+
+/** One headline number with its label. Use inside a `.tiles stagger` row, which rises the tiles in one after another. */
+export function StatTile({
+  label,
+  tip,
+  value,
+  tone,
+  accent,
+  sub,
+  small = false,
+}: {
+  label: string;
+  tip?: string;
+  value: ReactNode;
+  tone?: 'red' | 'green';
+  /** Colour of the bar down the left edge. */
+  accent?: string;
+  sub?: string;
+  /** For values that are words, not a number. */
+  small?: boolean;
+}) {
+  return (
+    <div className="tile" style={{ ['--c' as string]: accent }}>
+      <div className="lbl">
+        {label}
+        {tip ? <> <InfoTip text={tip} /></> : null}
+      </div>
+      <div className={`v${tone ? ` ${tone}` : ''}${small ? ' sm' : ''}`}>{value}</div>
+      {sub ? <div className="sub">{sub}</div> : null}
+    </div>
+  );
+}
