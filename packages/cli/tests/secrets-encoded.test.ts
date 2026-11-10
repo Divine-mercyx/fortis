@@ -135,3 +135,32 @@ describe('Kubernetes Secret manifests', () => {
     expect(findings('chart/templates/all.yaml', text)).toEqual([]);
   });
 });
+
+describe('notebooks that escape non-ASCII text', () => {
+  // Some tools write "é" as é. A finding's notebook line must still be found, and found quickly.
+  const escapeNonAscii = (json: string) => json.replace(/[\u0080-￿]/g, (c) => `\\u${c.charCodeAt(0).toString(16).padStart(4, '0')}`);
+  const nb = (cells: unknown[]) => escapeNonAscii(JSON.stringify({ cells, metadata: {}, nbformat: 4, nbformat_minor: 5 }, null, 1));
+
+  it('points at the right notebook line', () => {
+    const text = nb([
+      { cell_type: 'code', outputs: [], source: ["print('héllo wörld ✓')\n"] },
+      { cell_type: 'code', outputs: [{ output_type: 'stream', name: 'stdout', text: [`clé: ${GITHUB} ✓\n`] }], source: ["print('ça va')\n"] },
+    ]);
+    expect(text).toContain('\\u00e9'); // it really is escaped
+    const at = text.split('\n').findIndex((l) => l.includes(GITHUB)) + 1;
+    expect(summary(findings('analysis.ipynb', text))).toEqual([`SEC-GEN-001@${at} GitHub token in code`]);
+  });
+
+  it('stays fast on a notebook with thousands of cells', () => {
+    const cells = Array.from({ length: 3500 }, (_, i) => ({
+      cell_type: 'code',
+      outputs: [{ output_type: 'stream', name: 'stdout', text: [`héllo wörld ✓ ${i}\n`] }],
+      source: [`print('héllo wörld ✓ ${i}')\n`],
+    }));
+    const text = nb(cells);
+    const start = performance.now();
+    findings('big.ipynb', text);
+    // Looking each piece of text up by rescanning the whole file took about 5 s here; it should take about 0.2 s.
+    expect(performance.now() - start).toBeLessThan(3000);
+  }, 30_000);
+});

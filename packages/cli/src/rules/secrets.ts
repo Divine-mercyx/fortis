@@ -219,6 +219,8 @@ function scan(file: SourceFile, patterns: Pattern[]): Detection[] {
 /* ---------------------------------------------------------------- notebooks */
 
 const NOTEBOOK = /\.ipynb$/i;
+/** How many notebook lines past the start of a cell to look for a piece of its text. */
+const NOTEBOOK_SEARCH_LINES = 2000;
 /** Output types that are text. Images and widgets are base64 or JSON blobs, never typed secrets. */
 const TEXT_OUTPUTS = ['text/plain', 'text/markdown', 'application/json'];
 
@@ -242,9 +244,15 @@ export function notebookView(file: SourceFile): { file: SourceFile; lineOf: numb
   let cellStart = 0;
   let cellEnd = 0;
   const locate = (text: string) => {
-    const needle = JSON.stringify(text.split('\n')[0]!.slice(0, 120)).slice(1, -1);
-    for (let i = cellStart; i < file.lines.length; i++) {
-      if (file.lines[i]!.includes(needle)) {
+    const raw = JSON.stringify(text.split('\n')[0]!.slice(0, 120)).slice(1, -1);
+    // Some tools write non-ASCII text as \uXXXX escapes, so look for that spelling too.
+    const escaped = raw.replace(/[\u0080-\uffff]/g, (c) => `\\u${c.charCodeAt(0).toString(16).padStart(4, '0')}`);
+    // A bounded search: text that can't be found (an unusual escape) must not make every lookup rescan the
+    // rest of the file, which made a large notebook quadratic. A cell longer than this falls back to its first line.
+    const end = Math.min(file.lines.length, cellStart + NOTEBOOK_SEARCH_LINES);
+    for (let i = cellStart; i < end; i++) {
+      const line = file.lines[i]!;
+      if (line.includes(raw) || (escaped !== raw && line.includes(escaped))) {
         cellEnd = Math.max(cellEnd, i);
         return i + 1;
       }
