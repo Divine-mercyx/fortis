@@ -16,6 +16,19 @@ export const LogoMark = (p: P) => (
   </svg>
 );
 
+/** The three-walls mark: the "o" of the wordmark. Walls take the current colour; the core stays green. */
+export const WallsMark = (p: P) => (
+  <svg viewBox="0 0 56 56" aria-hidden="true" {...p}>
+    <g fill="none" stroke="currentColor">
+      <circle cx="28" cy="28" r="23" strokeWidth="8" strokeDasharray="132.5 12" transform="rotate(105 28 28)" />
+      <circle cx="28" cy="28" r="11.5" strokeWidth="7" strokeDasharray="63.3 9" transform="rotate(-22.6 28 28)" />
+    </g>
+    <circle cx="28" cy="28" r="4.5" fill="#13955F" />
+  </svg>
+);
+
+export const Contrast = (p: P) => <svg {...base} {...p}><circle cx="12" cy="12" r="9" /><path d="M12 3v18" /><path d="M12 3a9 9 0 0 1 0 18z" fill="currentColor" stroke="none" /></svg>;
+export const Help = (p: P) => <svg {...base} {...p}><circle cx="12" cy="12" r="9" /><path d="M9.5 9.5a2.5 2.5 0 1 1 3.6 2.2c-.7.4-1.1 1-1.1 1.8M12 17h.01" /></svg>;
 export const Arrow = (p: P) => <svg {...base} strokeWidth={2} {...p}><path d="M5 12h14M13 6l6 6-6 6" /></svg>;
 export const Chevron = (p: P) => <svg {...base} strokeWidth={2} {...p}><path d="m6 9 6 6 6-6" /></svg>;
 export const Check = (p: P) => <svg {...base} strokeWidth={3} {...p}><path d="M5 12.5 10 17 19 7" /></svg>;

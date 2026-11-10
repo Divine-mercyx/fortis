@@ -9,7 +9,7 @@ import { Alert, Arrow, Check, Clock, Folder, Git, Key, Pulse, Shield, Users } fr
 import { CountUp, Words } from '@/components/motion';
 import { useSession } from '@/components/session';
 import { Empty, SeverityPill, Skeleton } from '@/components/ui';
-import { Checklist, computePosture, InfoTip, ReleaseLoop, ScoreRing } from '@/components/widgets';
+import { Checklist, computePosture, InfoTip, ReleaseLoop, ScoreRing, SectionHead, StatTile } from '@/components/widgets';
 import { fetcher } from '@/lib/api';
 import { timeAgo } from '@/lib/format';
 import type { ScanRow } from '@/lib/types';
@@ -93,71 +93,101 @@ function OverviewInner() {
         ? ['Welcome to Fortis. ', "Let's get you set up."]
         : ['Every release, ', 'checked.'];
 
+  // The last seven days of the trend, for the "This week" strip.
+  const week = (data?.trend ?? []).slice(-7).map((d) => {
+    const date = new Date(`${d.day}T00:00:00Z`);
+    return {
+      ...d,
+      dow: date.toLocaleDateString('en-GB', { weekday: 'short', timeZone: 'UTC' }),
+      num: date.getUTCDate(),
+      month: date.toLocaleDateString('en-GB', { month: 'long', year: 'numeric', timeZone: 'UTC' }),
+    };
+  });
+
   return (
-    <div className="stack">
-      <div className="page-head">
-        <div>
-          <span className="eyebrow reveal">{greeting()}, {firstName}</span>
-          <h1 className="display">
-            <Words>{headline[0]}<span className="it accent">{headline[1]}</span></Words>
-          </h1>
-          <p className="lead reveal" style={{ ['--d' as string]: '150ms' }}>
-            {data && data.open.critical > 0
-              ? `${data.open.critical} critical issue${data.open.critical === 1 ? ' is' : 's are'} open. Pushes with criticals are blocked until they're fixed.`
-              : 'Here is what Fortis has checked across your projects, and what needs you next.'}
-          </p>
-        </div>
-        <Link href="/findings?status=open" className="btn btn-dark reveal" style={{ ['--d' as string]: '200ms' }}>
-          Review open findings <Arrow className="arr" />
-        </Link>
-      </div>
-
-      {org.plan === 'free' ? (
-        <div className="banner reveal">
-          <Shield />
+    <div className="ov">
+      <div className="ov-main stack">
+        <section className="band ov-hero reveal">
           <div>
-            <strong>You're on Fortis Free.</strong> Scans run on your machine and the results stay there, so this dashboard fills up once
-            you move to Fortis Core, which also adds the fintech rule pack.
+            <span className="eyebrow">{greeting()}, {firstName}</span>
+            <h1 className="display">
+              <Words>{headline[0]}<span className="it accent">{headline[1]}</span></Words>
+            </h1>
+            <p className="lead">
+              {data && data.open.critical > 0
+                ? `${data.open.critical} critical issue${data.open.critical === 1 ? ' is' : 's are'} open. Pushes with criticals are blocked until they're fixed.`
+                : 'Here is what Fortis has checked across your projects, and what needs you next.'}
+            </p>
+            <Link href="/findings?status=open" className="btn btn-primary">
+              Review open findings <Arrow className="arr" />
+            </Link>
           </div>
-          <Link href="/settings" className="link-arrow">Compare plans <Arrow /></Link>
-        </div>
-      ) : null}
 
-      {showChecklist ? <section className="card card-pad reveal" style={{ ['--d' as string]: '80ms' }}><Checklist steps={steps} /></section> : null}
-
-      <div className="hero-row">
-        <section className="card posture reveal" style={{ ['--d' as string]: '120ms' }}>
-          <div className="card-head">
-            <h3>Security posture <InfoTip text="A 0–100 guide to how risky your open findings are right now. Criticals weigh most. It helps you prioritise; it is not a certification." /></h3>
-          </div>
-          <div className="posture-body">
-            {posture ? (
-              <ScoreRing score={posture.score} colour={posture.colour} grade={posture.grade} />
-            ) : data ? (
-              <ScoreRing score={0} colour="var(--line-2)" grade="–" />
-            ) : (
-              <Skeleton h={130} w={130} />
-            )}
-            <div>
-              <strong className="posture-label" style={{ color: posture?.colour ?? 'var(--ink)' }}>
-                {posture ? posture.label : data ? 'Not scored yet' : '…'}
-              </strong>
-              <ul className="reasons">
-                {posture
-                  ? posture.reasons.map((r) => <li key={r}>{r}</li>)
-                  : data
-                    ? [<li key="n">Your score appears after the first scan uploads to Fortis.</li>]
-                    : null}
-              </ul>
+          <div className="ov-score">
+            <div className="ov-score-head">
+              Security posture <InfoTip text="A 0–100 guide to how risky your open findings are right now. Criticals weigh most. It helps you prioritise; it is not a certification." />
+            </div>
+            <div className="posture-body">
+              {posture ? (
+                <ScoreRing score={posture.score} colour={posture.colour} grade={posture.grade} />
+              ) : data ? (
+                <ScoreRing score={0} colour="var(--line-2)" grade="–" />
+              ) : (
+                <Skeleton h={130} w={130} />
+              )}
+              <div>
+                <strong className="posture-label" style={{ color: posture?.colour ?? 'var(--ink)' }}>
+                  {posture ? posture.label : data ? 'Not scored yet' : '…'}
+                </strong>
+                <ul className="reasons">
+                  {posture
+                    ? posture.reasons.map((r) => <li key={r}>{r}</li>)
+                    : data
+                      ? [<li key="n">Your score appears after the first scan uploads to Fortis.</li>]
+                      : null}
+                </ul>
+              </div>
             </div>
           </div>
         </section>
 
-        <section className="card attention reveal" style={{ ['--d' as string]: '180ms' }}>
-          <div className="card-head">
-            <h3>Needs your attention</h3>
-            <Link href="/findings" className="link-arrow">All findings <Arrow /></Link>
+        {org.plan === 'free' ? (
+          <div className="banner reveal">
+            <Shield />
+            <div>
+              <strong>You're on Fortis Free.</strong> Scans run on your machine and the results stay there, so this dashboard fills up once
+              you move to Fortis Core, which also adds the fintech rule pack.
+            </div>
+            <Link href="/settings" className="link-arrow">Compare plans <Arrow /></Link>
           </div>
+        ) : null}
+
+        {showChecklist ? <section className="card card-pad reveal" style={{ ['--d' as string]: '80ms' }}><Checklist steps={steps} /></section> : null}
+
+        <div className="tiles stagger" style={{ ['--d' as string]: '120ms' }}>
+          {[
+            { lbl: 'Open critical', v: data?.open.critical, cls: 'red' as const, c: 'var(--red)', sub: 'These block the push', tip: 'Critical findings, like a live payment key or a transfer anyone can read, are blocked before they leave the laptop.' },
+            { lbl: 'Open findings', v: data?.openTotal, cls: undefined, c: 'var(--amber)', sub: 'All severities, all projects', tip: 'Everything not yet fixed, accepted as a risk, or marked a false positive.' },
+            { lbl: 'Fixed · 30 days', v: t?.fixed30d, cls: 'green' as const, c: 'var(--green)', sub: 'Closed by a re-scan or a person', tip: 'A finding closes itself when a full scan stops seeing it, or when someone marks it fixed.' },
+            { lbl: 'Median fix time', v: undefined, text: formatFixTime(data?.medianCriticalFixHours ?? null), cls: undefined, c: 'var(--blue)', sub: 'For critical findings', tip: 'Half of your critical findings were fixed faster than this. Partner banks and auditors often ask for it.' },
+          ].map((tile) => (
+            <StatTile
+              key={tile.lbl}
+              label={tile.lbl}
+              tip={tile.tip}
+              tone={tile.cls}
+              accent={tile.c}
+              sub={tile.sub}
+              small={Boolean(tile.text)}
+              value={tile.text ? (data ? tile.text : <Skeleton h={30} w={90} />) : tile.v === undefined ? <Skeleton h={34} w={70} /> : <CountUp value={tile.v} />}
+            />
+          ))}
+        </div>
+
+        <section className="card attention reveal" style={{ ['--d' as string]: '180ms' }}>
+          <SectionHead title="Needs your attention">
+            <Link href="/findings" className="link-arrow">All findings <Arrow /></Link>
+          </SectionHead>
           {data && data.openByProject.length === 0 ? (
             <Empty icon={<Check />} title="Nothing needs you right now" text="No open findings in any project. New issues from pushes and CI show up here first." />
           ) : (
@@ -188,57 +218,35 @@ function OverviewInner() {
             <p className="small warn-line"><Clock /> A critical has been open for {t.oldestOpenCriticalDays} days. Reviewers usually expect criticals fixed within a week.</p>
           ) : null}
         </section>
-      </div>
 
-      <div className="tiles">
-        {[
-          { lbl: 'Open critical', v: data?.open.critical, cls: 'red', c: 'var(--red)', sub: 'These block the push', tip: 'Critical findings, like a live payment key or a transfer anyone can read, are blocked before they leave the laptop.' },
-          { lbl: 'Open findings', v: data?.openTotal, cls: '', c: 'var(--amber)', sub: 'All severities, all projects', tip: 'Everything not yet fixed, accepted as a risk, or marked a false positive.' },
-          { lbl: 'Fixed · 30 days', v: t?.fixed30d, cls: 'green', c: 'var(--green)', sub: 'Closed by a re-scan or a person', tip: 'A finding closes itself when a full scan stops seeing it, or when someone marks it fixed.' },
-          { lbl: 'Median fix time', v: undefined, text: formatFixTime(data?.medianCriticalFixHours ?? null), cls: '', c: 'var(--blue)', sub: 'For critical findings', tip: 'Half of your critical findings were fixed faster than this. Partner banks and auditors often ask for it.' },
-        ].map((tile, i) => (
-          <div className="tile reveal" key={tile.lbl} style={{ ['--d' as string]: `${200 + i * 60}ms`, ['--c' as string]: tile.c }}>
-            <div className="lbl">{tile.lbl} <InfoTip text={tile.tip} /></div>
-            <div className={`v ${tile.cls}`} style={tile.text ? { fontSize: 24, paddingTop: 6 } : undefined}>
-              {tile.text ? (data ? tile.text : <Skeleton h={30} w={90} />) : tile.v === undefined ? <Skeleton h={34} w={70} /> : <CountUp value={tile.v} />}
-            </div>
-            <div className="sub">{tile.sub}</div>
+        <section className="card reveal" style={{ ['--d' as string]: '240ms' }}>
+          <SectionHead title="Your release loop · last 30 days" tip="Fortis checks code at each step of a release, so problems are caught early and the proof builds up as you go." />
+          <div className="card-pad">
+            <ReleaseLoop
+              items={[
+                { k: 'Write', title: 'Pre-push checks', value: t ? <CountUp value={t.prePush30d} /> : '–', hint: `${t?.blockedPrePush30d ?? 0} new issues caught on laptops` },
+                { k: 'Push', title: 'CI scans', value: t ? <CountUp value={t.ci30d} /> : '–', hint: 'Full scans that also close fixed findings' },
+                {
+                  k: 'Deploy',
+                  title: 'Staging tests',
+                  value: t ? <CountUp value={t.dast30d ?? 0} /> : '–',
+                  hint: t?.targets
+                    ? `OWASP ZAP runs · ${t.targetsReady ?? 0} of ${t.targets} target${t.targets === 1 ? '' : 's'} ready · ${t.dastOpen ?? 0} open`
+                    : 'Add a staging URL on a project to test the running app',
+                },
+                { k: 'Prove', title: 'Evidence records', value: t ? <CountUp value={t.evidenceEvents} /> : '–', hint: 'Every detection, fix and decision, timestamped' },
+              ]}
+            />
           </div>
-        ))}
-      </div>
+        </section>
 
-      <section className="card reveal" style={{ ['--d' as string]: '260ms' }}>
-        <div className="card-head">
-          <h3>Your release loop · last 30 days <InfoTip text="Fortis checks code at each step of a release, so problems are caught early and the proof builds up as you go." /></h3>
-        </div>
-        <div className="card-pad">
-          <ReleaseLoop
-            items={[
-              { k: 'Write', title: 'Pre-push checks', value: t ? <CountUp value={t.prePush30d} /> : '–', hint: `${t?.blockedPrePush30d ?? 0} new issues caught on laptops` },
-              { k: 'Push', title: 'CI scans', value: t ? <CountUp value={t.ci30d} /> : '–', hint: 'Full scans that also close fixed findings' },
-              {
-                k: 'Deploy',
-                title: 'Staging tests',
-                value: t ? <CountUp value={t.dast30d ?? 0} /> : '–',
-                hint: t?.targets
-                  ? `OWASP ZAP runs · ${t.targetsReady ?? 0} of ${t.targets} target${t.targets === 1 ? '' : 's'} ready · ${t.dastOpen ?? 0} open`
-                  : 'Add a staging URL on a project to test the running app',
-              },
-              { k: 'Prove', title: 'Evidence records', value: t ? <CountUp value={t.evidenceEvents} /> : '–', hint: 'Every detection, fix and decision, timestamped' },
-            ]}
-          />
-        </div>
-      </section>
-
-      <div className="grid-2">
         <section className="card reveal" style={{ ['--d' as string]: '300ms' }}>
-          <div className="card-head">
-            <h3>Detected vs fixed · last 30 days</h3>
+          <SectionHead title="Detected vs fixed · last 30 days">
             <div className="legend">
               <span><i style={{ background: '#F6C3BE' }} />Detected</span>
               <span><i style={{ background: 'var(--green)' }} />Fixed</span>
             </div>
-          </div>
+          </SectionHead>
           <div className="card-pad">
             {data ? (
               <>
@@ -262,11 +270,43 @@ function OverviewInner() {
             )}
           </div>
         </section>
+      </div>
 
-        <section className="card reveal" style={{ ['--d' as string]: '340ms' }}>
-          <div className="card-head">
-            <h3>Open by severity <InfoTip text="Critical: exploitable now, blocks the push. High: serious, fix this sprint. Medium and low: plan a fix." /></h3>
+      <aside className="ov-side stack" aria-label="This week and recent activity">
+        <section className="card reveal" style={{ ['--d' as string]: '160ms' }}>
+          <SectionHead title="This week" tip="New findings and fixes on each of the last seven days.">
+            <span className="small">{week.length ? week[week.length - 1]!.month : ''}</span>
+          </SectionHead>
+          <div className="card-pad">
+            {data ? (
+              week.length ? (
+                <>
+                  <ol className="week">
+                    {week.map((d, i) => (
+                      <li key={d.day} className={i === week.length - 1 ? 'today' : undefined} title={`${d.detected} new, ${d.fixed} fixed`}>
+                        <span className="dow">{d.dow}</span>
+                        <b>{d.num}</b>
+                        <span className="n det" aria-label={`${d.detected} new`}>{d.detected}</span>
+                        <span className="n fix" aria-label={`${d.fixed} fixed`}>{d.fixed}</span>
+                      </li>
+                    ))}
+                  </ol>
+                  <div className="legend" style={{ marginTop: 14 }}>
+                    <span><i style={{ background: 'var(--red)' }} />New</span>
+                    <span><i style={{ background: 'var(--green)' }} />Fixed</span>
+                  </div>
+                </>
+              ) : (
+                <p className="small" style={{ margin: 0 }}>Nothing recorded yet.</p>
+              )
+            ) : (
+              <Skeleton h={96} />
+            )}
           </div>
+        </section>
+
+        <section className="card reveal" style={{ ['--d' as string]: '220ms' }}>
+          <SectionHead title="Open by severity" tip="Critical: exploitable now, blocks the push. High: serious, fix this sprint. Medium and low: plan a fix." />
           <div className="card-pad">
             <div className="sev-bars">
               {(['critical', 'high', 'medium', 'low'] as const).map((s) => (
@@ -285,14 +325,11 @@ function OverviewInner() {
             </div>
           </div>
         </section>
-      </div>
 
-      <div className="grid-2">
-        <section className="card reveal" style={{ ['--d' as string]: '380ms' }}>
-          <div className="card-head">
-            <h3>Recent scans</h3>
+        <section className="card reveal" style={{ ['--d' as string]: '280ms' }}>
+          <SectionHead title="Recent scans">
             <Link href="/projects" className="link-arrow">Projects <Arrow /></Link>
-          </div>
+          </SectionHead>
           {scans && scans.scans.length === 0 ? (
             <Empty
               icon={<Git />}
@@ -323,8 +360,8 @@ function OverviewInner() {
           )}
         </section>
 
-        <section className="card reveal" style={{ ['--d' as string]: '420ms' }}>
-          <div className="card-head"><h3>Activity</h3>{isAdmin ? <Link href="/settings#audit" className="link-arrow">Audit log <Arrow /></Link> : null}</div>
+        <section className="card reveal" style={{ ['--d' as string]: '340ms' }}>
+          <SectionHead title="Activity">{isAdmin ? <Link href="/settings#audit" className="link-arrow">Audit log <Arrow /></Link> : null}</SectionHead>
           <ul className="list">
             {(data?.recentActivity ?? []).map((a, i) => {
               const meta = ACTIVITY[a.action] ?? { label: a.action, icon: Shield };
@@ -343,7 +380,7 @@ function OverviewInner() {
             {data && data.recentActivity.length === 0 ? <li className="small">Nothing yet.</li> : null}
           </ul>
         </section>
-      </div>
+      </aside>
     </div>
   );
 }
