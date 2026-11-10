@@ -5,6 +5,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import useSWR from 'swr';
 
 import { fetcher } from '@/lib/api';
+import { DOCS_URL } from '@/lib/cli';
 import type { FindingRow, ProjectRow } from '@/lib/types';
 
 import { Alert, Book, File, Folder, Home, Search, Settings } from './icons';
@@ -18,7 +19,7 @@ const PAGES: Item[] = [
   { id: 'p-critical', label: 'Critical findings', hint: 'What blocks the push', href: '/findings?severity=critical', icon: Alert, group: 'Pages' },
   { id: 'p-projects', label: 'Projects', hint: 'Repos, keys and scans', href: '/projects', icon: Folder, group: 'Pages' },
   { id: 'p-evidence', label: 'Evidence pack', hint: 'PCI DSS, CBN and NDPA evidence as a PDF', href: '/evidence', icon: File, group: 'Pages' },
-  { id: 'p-docs', label: 'CLI docs', hint: 'Install, commands, CI and the HTTP API', href: '/docs', icon: Book, group: 'Pages' },
+  { id: 'p-docs', label: 'CLI docs', hint: 'Install, commands and CI, on the website', href: DOCS_URL, icon: Book, group: 'Pages' },
   { id: 'p-rules', label: 'Rules', hint: 'What Fortis checks and how to fix it', href: '/rules', icon: Book, group: 'Pages' },
   { id: 'p-settings', label: 'Settings', hint: 'Workspace, plan, team, audit log', href: '/settings', icon: Settings, group: 'Pages' },
 ];
@@ -80,7 +81,8 @@ export function CommandPalette() {
   const go = (item: Item | undefined) => {
     if (!item) return;
     setOpen(false);
-    router.push(item.href);
+    if (/^https?:\/\//.test(item.href)) window.open(item.href, '_blank', 'noopener,noreferrer');
+    else router.push(item.href);
   };
 
   let lastGroup = '';

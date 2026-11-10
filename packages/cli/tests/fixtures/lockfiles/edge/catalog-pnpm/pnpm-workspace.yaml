@@ -1,0 +1,5 @@
+catalog:
+  lodash: 4.17.15
+catalogs:
+  tools:
+    minimist: 1.2.5

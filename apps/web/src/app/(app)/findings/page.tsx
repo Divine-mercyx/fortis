@@ -9,13 +9,13 @@ import { controlsFor, fixFor, FRAMEWORKS } from '@fortis/shared';
 import { Alert, Check, Search, Shield } from '@/components/icons';
 import { Words } from '@/components/motion';
 import { useSession } from '@/components/session';
-import { CloseButton, Drawer, Empty, FormError, SeverityPill, Skeleton, StatusTag, useToast } from '@/components/ui';
+import { CloseButton, Drawer, Empty, FormError, SecretTag, SeverityPill, Skeleton, StatusTag, useToast } from '@/components/ui';
 import { api, fetcher } from '@/lib/api';
 import { dateTime, STATUS_LABEL, timeAgo } from '@/lib/format';
 import type { FindingRow, ProjectRow } from '@/lib/types';
 
 type FindingDetail = {
-  finding: FindingRow & { snippet: string | null; detail: string | null; statusReason: string | null; projectName: string };
+  finding: FindingRow & { snippet: string | null; detail: string | null; statusReason: string | null; projectName: string; secretCheckedAt?: string | null };
   rule: { id: string; title: string; summary: string; fix: string } | null;
   events: { id: number; type: string; fromStatus: string | null; toStatus: string | null; reason: string | null; actor: string | null; createdAt: string }[];
 };
@@ -64,6 +64,7 @@ function FindingDrawer({ id, onClose, onChanged }: { id: string; onClose: () => 
               <SeverityPill severity={f.severity} />
               <span className="mono muted">{f.ruleId}</span>
               <StatusTag status={f.status} />
+              <SecretTag status={f.secretStatus} />
             </div>
           ) : null}
           <h3>{f ? f.title : <Skeleton h={22} w={280} />}</h3>
@@ -82,6 +83,7 @@ function FindingDrawer({ id, onClose, onChanged }: { id: string; onClose: () => 
               <dt>First seen</dt><dd>{dateTime(f.firstSeenAt)}</dd>
               <dt>Last seen</dt><dd>{timeAgo(f.lastSeenAt)}</dd>
               {f.statusReason ? (<><dt>Reason</dt><dd>{f.statusReason}</dd></>) : null}
+              {f.secretStatus ? (<><dt>Key</dt><dd><SecretTag status={f.secretStatus} />{f.secretCheckedAt ? <span className="muted"> · checked {timeAgo(f.secretCheckedAt)} with fortis scan --verify</span> : null}</dd></>) : null}
             </dl>
             <div className="ctl-chips" aria-label="Compliance controls">
               {controlsFor(f.ruleId).map((ctl) => <span key={`${ctl.framework}-${ctl.ref}`} title={ctl.title}>{FRAMEWORKS[ctl.framework].short} {ctl.framework === 'cbn' ? `· ${ctl.ref}` : ctl.ref}</span>)}
@@ -263,7 +265,7 @@ function FindingsInner() {
                     <tr key={f.id} className={`click row-in${selected === f.id ? ' sel' : ''}`} style={{ ['--i' as string]: i }} onClick={() => setSelected(f.id)}>
                       <td><SeverityPill severity={f.severity} /></td>
                       <td>
-                        <span className="t-title">{f.title}</span>
+                        <span className="t-title">{f.title}{f.secretStatus ? <> <SecretTag status={f.secretStatus} /></> : null}</span>
                         <span className="t-file">{f.file}{f.line ? `:${f.line}` : ''} · {f.ruleId}</span>
                       </td>
                       <td><StatusTag status={f.status} /></td>

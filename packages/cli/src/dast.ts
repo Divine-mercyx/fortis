@@ -1,12 +1,13 @@
 import { spawn, spawnSync } from 'node:child_process';
-import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { homedir, tmpdir } from 'node:os';
+import { dirname, join, posix, resolve, win32 } from 'node:path';
 
 import { maskSnippet, maskText, type CliFinding, type Severity } from '@fortis/shared';
 
 /*
- * Running-app tests with OWASP ZAP, run from the official Docker image.
+ * Running-app tests with OWASP ZAP, run from the official Docker image, or from a ZAP installed on
+ * this machine when Docker isn't available.
  *  baseline: spider plus passive checks only. Safe for staging; sends no attacks.
  *  full:     spider plus active scan (attack simulation). Never against production.
  *  api:      OpenAPI-driven active scan of each operation (counts as full).
@@ -141,6 +142,74 @@ export function dockerAvailable(): { ok: true } | { ok: false; reason: string } 
   return { ok: true };
 }
 
+/** Where a ZAP installed on this machine lives: FORTIS_ZAP_PATH, then PATH, then the usual install folders. */
+export function findLocalZap(env: NodeJS.ProcessEnv = process.env, platform: string = process.platform, exists: (p: string) => boolean = existsSync, home = homedir()): string | null {
+  const override = env.FORTIS_ZAP_PATH?.trim();
+  if (override) return exists(override) ? override : null;
+  const windows = platform === 'win32';
+  const path = windows ? win32 : posix;
+  const names = windows ? ['zap.bat'] : ['zap.sh', 'zaproxy', 'zap'];
+  const dirs = (env.PATH ?? env.Path ?? '').split(windows ? ';' : ':').filter(Boolean);
+  const onPath = dirs.flatMap((d) => names.map((n) => path.join(d, n)));
+  const known = windows
+    ? [env.ProgramFiles, env['ProgramFiles(x86)'], env.LOCALAPPDATA && path.join(env.LOCALAPPDATA, 'Programs')].filter((d): d is string => Boolean(d)).map((d) => path.join(d, 'ZAP', 'Zed Attack Proxy', 'zap.bat'))
+    : platform === 'darwin'
+      ? ['/Applications/ZAP.app/Contents/Java/zap.sh', path.join(home, 'Applications/ZAP.app/Contents/Java/zap.sh')]
+      : ['/usr/share/zaproxy/zap.sh', '/opt/zaproxy/zap.sh', '/snap/bin/zaproxy'];
+  return [...onPath, ...known].find((p) => exists(p)) ?? null;
+}
+
+export type ZapEngine = { kind: 'docker' } | { kind: 'local'; path: string };
+
+/** Docker stays the default, because it needs no Java and pins the ZAP version. FORTIS_ZAP_PATH always wins. */
+export function chooseZapEngine(
+  env: NodeJS.ProcessEnv = process.env,
+  docker: () => { ok: true } | { ok: false; reason: string } = dockerAvailable,
+  find: (env: NodeJS.ProcessEnv) => string | null = findLocalZap,
+): ZapEngine | { kind: 'none'; reason: string } {
+  const local = find(env);
+  if (env.FORTIS_ZAP_PATH?.trim()) return local ? { kind: 'local', path: local } : { kind: 'none', reason: `FORTIS_ZAP_PATH points at ${env.FORTIS_ZAP_PATH.trim()}, which doesn't exist.` };
+  const d = docker();
+  if (d.ok) return { kind: 'docker' };
+  return local ? { kind: 'local', path: local } : { kind: 'none', reason: d.reason };
+}
+
+const escapeRegex = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+/**
+ * A ZAP Automation Framework plan with the same steps as the Docker scripts. Written as JSON, which
+ * is valid YAML, so paths and URLs never need escaping by hand.
+ */
+export function zapPlan(opts: { target: string; mode: DastMode; openapi?: string; minutes: number; reportDir: string }) {
+  const passive = { type: 'passiveScan-wait', parameters: { maxDuration: Math.max(opts.minutes, 5) } };
+  const scan = opts.openapi
+    ? [{ type: 'openapi', parameters: { ...(/^https?:/i.test(opts.openapi) ? { apiUrl: opts.openapi } : { apiFile: resolve(opts.openapi) }), targetUrl: opts.target } }]
+    : [{ type: 'spider', parameters: { maxDuration: opts.minutes } }];
+  const active = opts.openapi || opts.mode === 'full' ? [{ type: 'activeScan', parameters: {} }, passive] : [];
+  return {
+    env: {
+      contexts: [{ name: 'fortis', urls: [opts.target], includePaths: [`${escapeRegex(new URL(opts.target).origin)}.*`] }],
+      parameters: { failOnError: true, failOnWarning: false, progressToStdout: true },
+    },
+    jobs: [
+      ...scan,
+      passive,
+      ...active,
+      { type: 'report', parameters: { template: 'traditional-json', reportDir: opts.reportDir, reportFile: 'report.json', reportTitle: 'Fortis' } },
+    ],
+  };
+}
+
+/** The command line for a local ZAP. Node can't start a .bat directly, so Windows goes through cmd.exe. */
+export function localZapCommand(zapPath: string, planFile: string, homeDir: string, platform: string = process.platform) {
+  const zapArgs = ['-cmd', '-autorun', planFile, '-dir', homeDir, '-silent'];
+  if (platform === 'win32') {
+    const line = `"${zapPath}" ${zapArgs.map((a) => (a.startsWith('-') ? a : `"${a}"`)).join(' ')}`;
+    return { command: 'cmd.exe', args: ['/d', '/s', '/c', `"${line}"`], windowsVerbatimArguments: true };
+  }
+  return { command: zapPath, args: zapArgs, windowsVerbatimArguments: false };
+}
+
 /** The docker command line for a run. Exported for tests. */
 /** A test user's credential, sent as one header on requests to the target host only. */
 export type ZapAuth = { header: string; value: string };
@@ -180,35 +249,80 @@ export type ZapRun = { report: ZapReport; exitCode: number; stopped: boolean };
 
 /**
  * Runs ZAP and returns its report. `shouldStop` is polled every 20 seconds; when it returns a
- * reason (for example the target was paused in the dashboard) the container is stopped.
+ * reason (for example the target was paused in the dashboard) ZAP is stopped.
  */
 export async function runZap(
-  opts: { target: string; mode: DastMode; openapi?: string; minutes: number; local: boolean; auth?: ZapAuth },
+  opts: { target: string; mode: DastMode; openapi?: string; minutes: number; local: boolean; auth?: ZapAuth; engine?: ZapEngine },
   hooks: { onLine?: (line: string) => void; shouldStop?: () => Promise<string | null> } = {},
 ): Promise<ZapRun> {
+  const engine = opts.engine ?? { kind: 'docker' };
   const work = mkdtempSync(join(tmpdir(), 'fortis-zap-'));
   chmodSync(work, 0o777); // the image runs as the unprivileged "zap" user
   const name = `fortis-zap-${process.pid}-${Date.now()}`;
-  const args = zapCommand({ ...opts, name }).map((a) => (a === 'WORKDIR:/zap/wrk/:rw' ? `${work}:/zap/wrk/:rw` : a));
   let stopped = false;
   let timer: NodeJS.Timeout | undefined;
+  let stopOnSignal: (() => void) | undefined;
+  const tail: string[] = [];
   try {
-    const exitCode = await new Promise<number>((resolve, reject) => {
-      const env = opts.auth ? { ...process.env, ZAP_AUTH_HEADER_VALUE: opts.auth.value } : process.env;
-      const child = spawn('docker', args, { stdio: ['ignore', 'pipe', 'pipe'], env });
+    const exitCode = await new Promise<number>((done, reject) => {
       const scrub = (l: string) => (opts.auth ? l.split(opts.auth.value).join('••••') : l);
-      const onData = (buf: Buffer) => buf.toString().split('\n').filter(Boolean).forEach((l) => hooks.onLine?.(scrub(l)));
-      child.stdout.on('data', onData);
-      child.stderr.on('data', onData);
+      const onData = (buf: Buffer) =>
+        buf.toString().split('\n').filter(Boolean).forEach((l) => {
+          const line = scrub(l);
+          tail.push(line);
+          if (tail.length > 5) tail.shift();
+          hooks.onLine?.(line);
+        });
+      let stop: () => void;
+      let child: ReturnType<typeof spawn>;
+      if (engine.kind === 'docker') {
+        const args = zapCommand({ ...opts, name }).map((a) => (a === 'WORKDIR:/zap/wrk/:rw' ? `${work}:/zap/wrk/:rw` : a));
+        const env = opts.auth ? { ...process.env, ZAP_AUTH_HEADER_VALUE: opts.auth.value } : process.env;
+        child = spawn('docker', args, { stdio: ['ignore', 'pipe', 'pipe'], env });
+        stop = () => spawnSync('docker', ['stop', '-t', '5', name]);
+      } else {
+        const planFile = join(work, 'plan.yaml');
+        const homeDir = join(work, 'home'); // its own settings folder, so a ZAP desktop session keeps running
+        mkdirSync(homeDir);
+        writeFileSync(planFile, JSON.stringify(zapPlan({ ...opts, reportDir: work }), null, 2));
+        const { command, args, windowsVerbatimArguments } = localZapCommand(engine.path, planFile, homeDir);
+        // ZAP reads these itself. The value goes through the environment, so it never appears in the process list.
+        const env = opts.auth
+          ? { ...process.env, ZAP_AUTH_HEADER: opts.auth.header, ZAP_AUTH_HEADER_VALUE: opts.auth.value, ZAP_AUTH_HEADER_SITE: new URL(opts.target).hostname }
+          : process.env;
+        // zap.sh and zap.bat start Java as a child, so stopping has to reach the whole process group.
+        const windows = process.platform === 'win32';
+        child = spawn(command, args, { stdio: ['ignore', 'pipe', 'pipe'], env, cwd: dirname(realpathSync(engine.path)), detached: !windows, windowsVerbatimArguments });
+        const pid = child.pid;
+        stop = () => {
+          if (!pid) return;
+          if (windows) spawnSync('taskkill', ['/pid', String(pid), '/t', '/f']);
+          else {
+            try {
+              process.kill(-pid, 'SIGTERM');
+            } catch {
+              /* already gone */
+            }
+          }
+        };
+        // A detached process doesn't get the terminal's Ctrl-C.
+        stopOnSignal = () => {
+          stop();
+          process.exit(130);
+        };
+        process.once('SIGINT', stopOnSignal);
+      }
+      child.stdout!.on('data', onData);
+      child.stderr!.on('data', onData);
       child.on('error', reject);
-      child.on('close', (code) => resolve(code ?? 3));
+      child.on('close', (code) => done(code ?? 3));
       if (hooks.shouldStop) {
         timer = setInterval(async () => {
           const reason = await hooks.shouldStop!().catch(() => null);
           if (reason && !stopped) {
             stopped = true;
             hooks.onLine?.(`Stopping: ${reason}`);
-            spawnSync('docker', ['stop', '-t', '5', name]);
+            stop();
           }
         }, 20_000);
       }
@@ -216,6 +330,7 @@ export async function runZap(
     const file = join(work, 'report.json');
     if (!existsSync(file)) {
       if (stopped) return { report: {}, exitCode, stopped };
+      if (engine.kind === 'local') throw new Error(`ZAP at ${engine.path} exited with code ${exitCode} and wrote no report. ZAP needs Java 17 or newer, and the target must be reachable from this machine.${tail.length ? `\nLast output:\n${tail.join('\n')}` : ''}`);
       throw new Error(`ZAP exited with code ${exitCode} and wrote no report. Check that the target is reachable from this machine.`);
     }
     let raw = readFileSync(file, 'utf8');
@@ -224,6 +339,7 @@ export async function runZap(
     return { report: JSON.parse(raw) as ZapReport, exitCode, stopped };
   } finally {
     if (timer) clearInterval(timer);
+    if (stopOnSignal) process.removeListener('SIGINT', stopOnSignal);
     rmSync(work, { recursive: true, force: true });
   }
 }

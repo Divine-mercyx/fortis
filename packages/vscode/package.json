@@ -1,0 +1,86 @@
+{
+  "name": "fortis-security",
+  "displayName": "Fortis Security",
+  "description": "Fintech security findings in your editor: leaked keys, missing ownership checks, vulnerable dependencies.",
+  "version": "0.1.0",
+  "publisher": "fortis",
+  "license": "MIT",
+  "icon": "icon.png",
+  "homepage": "https://fortis.dev",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Divine-mercyx/fortis.git",
+    "directory": "packages/vscode"
+  },
+  "bugs": {
+    "url": "https://github.com/Divine-mercyx/fortis/issues"
+  },
+  "categories": ["Linters", "Other"],
+  "keywords": ["security", "fintech", "secrets", "paystack", "flutterwave"],
+  "engines": {
+    "vscode": "^1.90.0"
+  },
+  "main": "./dist/extension.js",
+  "activationEvents": ["onStartupFinished"],
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": false,
+      "description": "Fortis can run a CLI installed inside the workspace, so it only runs in folders you trust."
+    },
+    "virtualWorkspaces": {
+      "supported": false,
+      "description": "Fortis scans files on disk."
+    }
+  },
+  "contributes": {
+    "commands": [
+      { "command": "fortis.scanWorkspace", "title": "Fortis: Scan Workspace" },
+      { "command": "fortis.showOutput", "title": "Fortis: Show Output" }
+    ],
+    "configuration": {
+      "title": "Fortis",
+      "properties": {
+        "fortis.scanOnSave": {
+          "type": "boolean",
+          "default": true,
+          "description": "Scan a file each time you save it."
+        },
+        "fortis.scanOnOpen": {
+          "type": "boolean",
+          "default": true,
+          "description": "Scan the whole workspace when it opens, including dependencies."
+        },
+        "fortis.offline": {
+          "type": "boolean",
+          "default": false,
+          "description": "Make no network requests. Only the secrets checks run: no fintech rules and no dependency check."
+        },
+        "fortis.cliPath": {
+          "type": "string",
+          "default": "",
+          "scope": "machine",
+          "description": "Path to the Fortis CLI. Leave empty to use the one installed in the project or on your PATH, or else the one in this extension. A workspace can't set this."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "build": "node build.mjs",
+    "typecheck": "tsc -p tsconfig.json",
+    "test": "vitest run",
+    "test:editor": "node test-editor/run.mjs",
+    "package": "node build.mjs && vsce package --no-dependencies --out fortis-security.vsix"
+  },
+  "devDependencies": {
+    "@fortis/shared": "workspace:*",
+    "@types/node": "^22.20.5",
+    "@types/vscode": "1.90.0",
+    "@vscode/test-electron": "^3.1.0",
+    "@vscode/vsce": "^4.1.0",
+    "esbuild": "^0.25.12",
+    "fortis-watchdog": "workspace:*",
+    "ovsx": "^1.3.0",
+    "typescript": "5.9.3",
+    "vitest": "^3.2.7"
+  }
+}

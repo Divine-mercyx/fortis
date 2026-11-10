@@ -14,6 +14,7 @@ import { runScan } from '../src/scan';
  */
 const CASES: [string, string, string][] = [
   ['npm', 'package-lock.json', JSON.stringify({ packages: { '': {}, 'node_modules/axios': { version: '0.21.1' } } })],
+  ['npm (bun.lock)', 'bun.lock', '{"lockfileVersion": 1, "workspaces": {"": {"dependencies": {"axios": "0.21.1",},},}, "packages": {"axios": ["axios@0.21.1", "", {}, "sha512-x"],},}'],
   ['Packagist', 'composer.lock', JSON.stringify({ packages: [{ name: 'guzzlehttp/guzzle', version: 'v7.4.0' }] })],
   ['PyPI', 'requirements.txt', 'Django==3.2.0\n'],
   ['PyPI (uv.lock)', 'uv.lock', '[[package]]\nname = "app"\nversion = "1.0"\nsource = { virtual = "." }\ndependencies = [\n    { name = "django" },\n]\n\n[[package]]\nname = "django"\nversion = "3.2.0"\nsource = { registry = "https://pypi.org/simple" }\n'],
@@ -25,6 +26,11 @@ const CASES: [string, string, string][] = [
   ['Go', 'go.mod', 'module x\n\nrequire golang.org/x/text v0.3.5\n'],
   ['NuGet', 'packages.lock.json', JSON.stringify({ version: 1, dependencies: { 'net8.0': { 'Newtonsoft.Json': { type: 'Direct', resolved: '12.0.1' } } } })],
   ['RubyGems', 'Gemfile.lock', 'GEM\n  remote: https://rubygems.org/\n  specs:\n    rack (2.2.3)\n'],
+  ['Hex (mix.lock)', 'mix.lock', '%{\n  "plug": {:hex, :plug, "1.3.0", "abc", [:mix], [], "hexpm", "def"},\n}\n'],
+  ['Hex (rebar.lock)', 'rebar.lock', '{"1.2.0",\n[{<<"plug">>,{pkg,<<"plug">>,<<"1.3.0">>},0}]}.\n'],
+  ['Hackage', 'cabal.project.freeze', 'constraints: any.aeson ==2.0.0.0\n'],
+  ['CRAN', 'renv.lock', JSON.stringify({ R: { Version: '4.3.0' }, Packages: { commonmark: { Package: 'commonmark', Version: '1.7', Source: 'Repository', Repository: 'CRAN' } } })],
+  ['SwiftURL', 'Package.resolved', JSON.stringify({ pins: [{ identity: 'vapor', kind: 'remoteSourceControl', location: 'https://github.com/vapor/vapor.git', state: { revision: 'x', version: '4.0.0' } }], version: 2 })],
 ];
 
 describe.skipIf(!process.env.FORTIS_LIVE_OSV)('real OSV', () => {

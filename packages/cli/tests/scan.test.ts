@@ -62,7 +62,8 @@ describe('runScan', () => {
     expect(none.notes.join(' ')).toMatch(/package\.json found but no lockfile/);
     expect(none.incompleteChecks).toEqual(['dependencies']);
     const bun = await runScan({ root: repo({ 'package.json': '{}', 'bun.lockb': 'x' }).dir, ...opts });
-    expect(bun.notes.join(' ')).toMatch(/Bun lockfiles are not read yet/);
+    expect(bun.notes.join(' ')).toMatch(/bun\.lockb is Bun's old binary lockfile.*bun install --save-text-lockfile/);
+    expect(bun.notes.join(' ')).not.toMatch(/package\.json found but no lockfile/);
     const pnpm = await runScan({ root: repo({ 'package.json': '{}', 'pnpm-lock.yaml': "lockfileVersion: '9.0'\n" }).dir, ...opts });
     expect(pnpm.notes.join(' ')).not.toMatch(/no lockfile/);
   });
@@ -243,9 +244,9 @@ describe('runScan', () => {
   });
 
   it('says which languages the fintech rules skipped, on full scans only', async () => {
-    const { dir, g } = repo({ 'src/Wallet.java': 'class Wallet {}\n', 'src/Pay.java': 'class Pay {}\n', 'api/pay.php': '<?php\n', 'src/test/WalletTest.java': 'class T {}\n', 'web/app.ts': 'export {};\n' });
+    const { dir, g } = repo({ 'src/Wallet.scala': 'class Wallet {}\n', 'src/Pay.groovy': 'class Pay {}\n', 'api/pay.rb': '# ruby\n', 'src/test/WalletTest.java': 'class T {}\n', 'web/app.ts': 'export {};\n' });
     const full = await runScan({ root: dir, scope: 'full', packs: ['fintech'], offline: true });
-    expect(full.notes.join()).toContain('2 Java/Kotlin, 1 PHP files had secrets and dependency checks only');
+    expect(full.notes.join()).toContain('2 Scala/Groovy, 1 Ruby files had secrets and dependency checks only');
     writeFileSync(join(dir, 'src/Pay.java'), 'class Pay { }\n');
     g('add', '-A');
     g('commit', '-q', '-m', 'edit');
@@ -434,5 +435,25 @@ describe('first push of a new repository or branch', () => {
 
   it('ignores branch deletions', () => {
     expect(parsePushRefs(`(delete) ${'0'.repeat(40)} refs/heads/old ${'a'.repeat(40)}\n`)).toEqual([]);
+  });
+});
+
+describe('following calls between files', () => {
+  const route = "import { getLoan } from '../services/loans';\nrouter.get('/loans/:id', async (req, res) => {\n  res.json(await getLoan(req.params.id));\n});\n";
+
+  it('reports a route whose service loads the record with no owner check', async () => {
+    const { dir } = repo({ 'src/routes/loans.ts': route, 'src/services/loans.ts': 'export const getLoan = (id: string) => Loan.findById(id);\n' });
+    const r = await runScan({ root: dir, scope: 'full', packs: ['fintech'], offline: true });
+    expect(r.detections.map((d) => `${d.ruleId}@${d.file}:${d.line}`)).toEqual(['FX-OWN-001@src/routes/loans.ts:3']);
+  });
+
+  it('trusts the service when it checks the owner', async () => {
+    const service = 'export const getLoan = (id: string) => Loan.findOne({ _id: id, userId: currentUser().id });\n';
+    const { dir, g } = repo({ 'src/routes/loans.ts': 'export {};\n', 'src/services/loans.ts': service });
+    expect((await runScan({ root: dir, scope: 'full', packs: ['fintech'], offline: true })).detections).toEqual([]);
+    writeFileSync(join(dir, 'src/routes/loans.ts'), route);
+    g('add', '-A');
+    g('commit', '-q', '-m', 'route');
+    expect((await runScan({ root: dir, scope: 'full', packs: ['fintech'], offline: true })).detections).toEqual([]);
   });
 });

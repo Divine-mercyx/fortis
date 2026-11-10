@@ -40,9 +40,12 @@ export function printReport(result: ScanResult, opts: { failOn: Severity; prePus
   }
 }
 
+/** From --verify. */
+const SECRET_LABEL = { live: c.red(c.bold('LIVE')), revoked: c.grey('revoked'), unknown: c.grey('liveness unknown') } as const;
+
 function printDetection(d: Detection) {
   const rule = findRule(d.ruleId);
-  log(`  ${sevColour[d.severity]!(LABEL[d.severity].padEnd(8))} ${c.white(c.bold(d.ruleId))}  ${d.title}`);
+  log(`  ${sevColour[d.severity]!(LABEL[d.severity].padEnd(8))} ${c.white(c.bold(d.ruleId))}  ${d.title}${d.secretStatus ? `  ${SECRET_LABEL[d.secretStatus]}` : ''}`);
   log(`  ${' '.repeat(8)} ${c.cyan(d.line ? `${d.file}:${d.line}` : d.file)}`);
   log(`  ${' '.repeat(8)} ${c.grey(maskSnippet(d.snippet).slice(0, 140))}`);
   if (d.fix ?? rule) log(`  ${' '.repeat(8)} ${c.green('fix')} ${d.fix ?? fixFor(rule!, d.file)}`);

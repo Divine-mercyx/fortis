@@ -51,6 +51,8 @@ const PATTERNS: { re: RegExp; keepPrefix: (m: string) => number; when?: (m: stri
   { re: /\beyJ[A-Za-z0-9_-]{10,}\.eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{16,}/g, keepPrefix: () => 3 },
   // African payment providers
   { re: /\b(?:SBSECK_|SBTESTSECK_|OPAYPRV|sandbox_sk_)[A-Za-z0-9_]{8,}/g, keepPrefix: (m) => (m.startsWith('OPAYPRV') ? 7 : m.indexOf('_', m.startsWith('sandbox') ? 8 : 0) + 1) },
+  // African open banking, KYC and messaging: Mono live_sk_/test_sk_, Dojah prod_sk_/test_sk_, Africa's Talking atsk_
+  { re: /\b(?:live_sk_|prod_sk_|test_sk_|atsk_)[A-Za-z0-9]{8,}/g, keepPrefix: (m) => m.lastIndexOf('_', m.startsWith('atsk_') ? 4 : 7) + 1 },
   // Fortis keys themselves
   { re: /\bfts_[A-Za-z0-9]{20,}\b/g, keepPrefix: () => 4 },
   // Long opaque strings (hex/base64-ish) that look like secrets; URL paths and words are left alone

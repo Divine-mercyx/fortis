@@ -6,6 +6,7 @@ import { useEffect, useState, type ReactNode } from 'react';
 import useSWR from 'swr';
 
 import { api, fetcher } from '@/lib/api';
+import { DOCS_URL } from '@/lib/cli';
 import { initials } from '@/lib/format';
 
 import { Alert, Book, Contrast, File, Folder, Help, Terminal, Home, LogoMark, Logout, Menu, Search, Settings, WallsMark } from './icons';
@@ -18,7 +19,6 @@ const NAV = [
   { href: '/projects', label: 'Projects', icon: Folder },
   { href: '/rules', label: 'Rules', icon: Book },
   { href: '/evidence', label: 'Evidence', icon: File },
-  { href: '/docs', label: 'Docs', icon: Terminal },
   { href: '/settings', label: 'Settings', icon: Settings },
 ];
 
@@ -107,20 +107,17 @@ export function Shell({ children }: { children: ReactNode }) {
         </Link>
 
         <nav aria-label="Main">
-          {NAV.map(({ href, label, icon: Icon, badge }) => {
-            const on = pathname.startsWith(href);
-            return (
-              <Link key={href} href={href} className={`nav-link${on ? ' on' : ''}`} aria-current={on ? 'page' : undefined}>
-                <Icon />
-                <span className="tip">{label}</span>
-                {badge && critical > 0 ? (
-                  <span className="count" aria-label={`${critical} open critical`}>
-                    {critical}
-                  </span>
-                ) : null}
-              </Link>
-            );
-          })}
+          {NAV.map(({ href, label, icon: Icon, badge }) => (
+            <Link key={href} href={href} className={`nav-link${pathname.startsWith(href) ? ' on' : ''}`}>
+              <Icon />
+              {label}
+              {badge && critical > 0 ? <span className="count">{critical}</span> : null}
+            </Link>
+          ))}
+          <a href={DOCS_URL} className="nav-link" target="_blank" rel="noreferrer noopener">
+            <Terminal />
+            Docs
+          </a>
         </nav>
 
         <div className="side-foot">

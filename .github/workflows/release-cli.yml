@@ -5,6 +5,7 @@ name: Release CLI
 #   - a Docker image on ghcr.io
 #   - fortis-watchdog on npm
 #   - fortis-watchdog on PyPI, as wheels holding the binary
+#   - Homebrew, Scoop and winget manifests
 #
 # npm uses trusted publishing (OIDC): no npm token is stored in GitHub, and every release carries
 # a signed provenance statement linking it to this workflow run.
@@ -25,11 +26,11 @@ permissions:
 
 jobs:
   check:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 22
           cache: pnpm
@@ -50,6 +51,17 @@ jobs:
 
   binaries:
     needs: [check, e2e]
+    # Signing secrets live in this environment, which an admin limits to cli-v* tags.
+    # Without them, binaries are built as before, and macOS and Windows warn about them.
+    environment: release
+    env:
+      APPLE_CERT_P12_BASE64: ${{ secrets.APPLE_CERT_P12_BASE64 }}
+      APPLE_CERT_PASSWORD: ${{ secrets.APPLE_CERT_PASSWORD }}
+      APPLE_API_KEY_P8_BASE64: ${{ secrets.APPLE_API_KEY_P8_BASE64 }}
+      APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+      APPLE_API_ISSUER_ID: ${{ secrets.APPLE_API_ISSUER_ID }}
+      WINDOWS_CERT_PFX_BASE64: ${{ secrets.WINDOWS_CERT_PFX_BASE64 }}
+      WINDOWS_CERT_PASSWORD: ${{ secrets.WINDOWS_CERT_PASSWORD }}
     strategy:
       fail-fast: true
       matrix:
@@ -61,14 +73,37 @@ jobs:
           - { runner: windows-2025, name: windows-x64, wheel: win_amd64 }
     runs-on: ${{ matrix.runner }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      - name: Refresh the end-of-life dates for the Dockerfile rules
+        working-directory: packages/cli
+        shell: bash
+        run: node scripts/refresh-eol.mjs || echo "::warning::Couldn't reach endoflife.date, so this build uses the dates in the repository."
+      - name: Get the small Node
+        if: runner.os != 'Windows'
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: node-runtime-${{ matrix.name }}
+          path: .runtime
+      - name: Use the small Node
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          chmod +x .runtime/node
+          echo "FORTIS_NODE_RUNTIME=$PWD/.runtime/node" >> "$GITHUB_ENV"
       - run: pnpm --filter fortis-watchdog build:binary
+      - name: Sign and notarize (macOS)
+        if: runner.os == 'macOS' && env.APPLE_CERT_P12_BASE64 != ''
+        run: bash packages/cli/scripts/sign-macos.sh packages/cli/dist-sea/fortis
+      - name: Sign (Windows)
+        if: runner.os == 'Windows' && env.WINDOWS_CERT_PFX_BASE64 != ''
+        shell: pwsh
+        run: ./packages/cli/scripts/sign-windows.ps1 -Binary packages/cli/dist-sea/fortis.exe
       - name: Smoke test
         shell: bash
         run: |
@@ -86,12 +121,15 @@ jobs:
             tar -czf "../out/fortis-${{ matrix.name }}.tar.gz" fortis
           fi
           ls -l ../out
-      - uses: actions/upload-artifact@v4
+      - name: The binary and its download are small enough
+        if: runner.os != 'Windows'
+        run: node packages/cli/scripts/check-binary-size.mjs packages/cli/dist-sea/fortis "packages/cli/out/fortis-${{ matrix.name }}.tar.gz"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: ${{ matrix.name }}
           path: packages/cli/out/*
           if-no-files-found: error
-      - uses: astral-sh/setup-uv@v6
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
       - name: Build and test the wheel
         shell: bash
         run: |
@@ -99,31 +137,54 @@ jobs:
           [ "$RUNNER_OS" = "Windows" ] && EXE=$EXE.exe
           uv run --no-project --python 3.12 python packages/python/build_wheel.py --binary "$EXE" --platform "${{ matrix.wheel }}" --version "${GITHUB_REF_NAME#cli-v}" --out wheels
           bash packages/python/test_wheel.sh wheels/*.whl
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: wheel-${{ matrix.name }}
           path: wheels/*.whl
           if-no-files-found: error
 
+  musl:
+    needs: [check, e2e]
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - { runner: ubuntu-24.04, name: linux-x64-musl }
+          - { runner: ubuntu-24.04-arm, name: linux-arm64-musl }
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - run: bash packages/cli/scripts/build-musl.sh ${{ matrix.name }} packages/cli/out
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ${{ matrix.name }}
+          path: packages/cli/out/*
+          if-no-files-found: error
+
   github-release:
-    needs: binaries
-    runs-on: ubuntu-latest
+    needs: [binaries, musl]
+    runs-on: ubuntu-24.04
     permissions:
       contents: write
       id-token: write
       attestations: write
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           path: release
           merge-multiple: true
           pattern: '*-x64'
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           path: release
           merge-multiple: true
           pattern: '*-arm64'
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          path: release
+          merge-multiple: true
+          pattern: '*-musl'
       - name: Leave the wheels for PyPI
         run: rm -f release/*.whl
       - name: Add install scripts and checksums
@@ -134,7 +195,7 @@ jobs:
           cat SHA256SUMS
       # GitHub only stores attestations for public repositories (or organisation plans), so a
       # private personal repo skips this instead of failing the whole release.
-      - uses: actions/attest-build-provenance@v2
+      - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         if: ${{ !github.event.repository.private }}
         with:
           subject-path: release/*
@@ -143,17 +204,26 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         # Not marked as a prerelease, even for betas: install.sh downloads from releases/latest,
         # which skips prereleases.
-        run: gh release create "$GITHUB_REF_NAME" release/* --verify-tag --latest --title "$GITHUB_REF_NAME" --generate-notes
+        run: |
+          # Notes: this version's section of the changelog in packages/cli/README.md.
+          VERSION="${GITHUB_REF_NAME#cli-v}"
+          awk -v v="**$VERSION**" 'index($0, v) == 1 { on = 1; next } on && /^\*\*[0-9]/ { exit } on' packages/cli/README.md > notes.md
+          if [ -s notes.md ]; then
+            gh release create "$GITHUB_REF_NAME" release/* --verify-tag --latest --title "$GITHUB_REF_NAME" --notes-file notes.md
+          else
+            echo "::warning::No changelog section for $VERSION in packages/cli/README.md; using GitHub's generated notes."
+            gh release create "$GITHUB_REF_NAME" release/* --verify-tag --latest --title "$GITHUB_REF_NAME" --generate-notes
+          fi
 
   docker:
     needs: binaries
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
       contents: read
       packages: write
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           path: artifacts
       - name: Unpack the Linux binaries
@@ -162,9 +232,9 @@ jobs:
           mkdir -p bin/amd64 bin/arm64
           tar -xzf "$GITHUB_WORKSPACE/artifacts/linux-x64/fortis-linux-x64.tar.gz" -C bin/amd64
           tar -xzf "$GITHUB_WORKSPACE/artifacts/linux-arm64/fortis-linux-arm64.tar.gz" -C bin/arm64
-      - uses: docker/setup-qemu-action@v3
-      - uses: docker/setup-buildx-action@v3
-      - uses: docker/login-action@v3
+      - uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4.4.0
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -191,19 +261,19 @@ jobs:
 
   pypi:
     needs: binaries
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     # Only the main repository publishes to the real PyPI. A fork's dry run may not have TestPyPI set up.
     continue-on-error: ${{ github.repository != 'Divine-mercyx/fortis' }}
     environment: pypi
     permissions:
       id-token: write
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           path: dist
           merge-multiple: true
           pattern: wheel-*
-      - uses: pypa/gh-action-pypi-publish@release/v1
+      - uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086 # v1.14.3
         with:
           packages-dir: dist
           repository-url: ${{ github.repository == 'Divine-mercyx/fortis' && 'https://upload.pypi.org/legacy/' || 'https://test.pypi.org/legacy/' }}
@@ -211,21 +281,25 @@ jobs:
   npm:
     needs: [github-release, docker]
     if: github.repository == 'Divine-mercyx/fortis'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
       contents: read
       id-token: write
     steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 22
           cache: pnpm
           registry-url: https://registry.npmjs.org
       - name: Trusted publishing needs npm 11.5 or later
-        run: npm install -g npm@latest
+        run: npm install -g npm@11
       - run: pnpm install --frozen-lockfile
+      - name: Refresh the end-of-life dates for the Dockerfile rules
+        working-directory: packages/cli
+        shell: bash
+        run: node scripts/refresh-eol.mjs || echo "::warning::Couldn't reach endoflife.date, so this build uses the dates in the repository."
       - name: Build
         working-directory: packages/cli
         run: node build.mjs
@@ -234,5 +308,68 @@ jobs:
         run: |
           # The CLI is a single bundled file; drop workspace-only dev dependencies from the published manifest.
           npm pkg delete devDependencies
+          VERSION=$(node -p "require('./package.json').version")
           TAG=$(node -p "require('./package.json').version.includes('-') ? 'beta' : 'latest'")
+          # Published already (by hand, or an earlier run of this tag): nothing to do, not a failure.
+          if [ "$(npm view "fortis-watchdog@$VERSION" version 2>/dev/null)" = "$VERSION" ]; then
+            echo "::notice::fortis-watchdog@$VERSION is already on npm; skipping publish."
+            exit 0
+          fi
           npm publish --provenance --access public --tag "$TAG"
+
+  # A store without its secret or repository is skipped with a notice, so it never fails a release.
+  homebrew-scoop:
+    needs: github-release
+    if: github.repository == 'Divine-mercyx/fortis'
+    runs-on: ubuntu-24.04
+    environment: release
+    env:
+      PACKAGE_REPOS_TOKEN: ${{ secrets.PACKAGE_REPOS_TOKEN }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+      - name: Write the manifests
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release download "$GITHUB_REF_NAME" --pattern SHA256SUMS --dir "$RUNNER_TEMP"
+          node packages/cli/scripts/package-manifests.mjs --version "$GITHUB_REF_NAME" --sums "$RUNNER_TEMP/SHA256SUMS" --out "$RUNNER_TEMP/manifests"
+      - name: Update the Homebrew tap and the Scoop bucket
+        if: env.PACKAGE_REPOS_TOKEN != ''
+        run: bash packages/cli/scripts/publish-manifests.sh "$RUNNER_TEMP/manifests"
+      - name: Say what was skipped
+        if: env.PACKAGE_REPOS_TOKEN == ''
+        run: echo "::notice::PACKAGE_REPOS_TOKEN isn't set, so the Homebrew tap and Scoop bucket weren't updated."
+
+  winget:
+    needs: github-release
+    if: github.repository == 'Divine-mercyx/fortis'
+    runs-on: windows-2025
+    environment: release
+    env:
+      WINGET_TOKEN: ${{ secrets.WINGET_TOKEN }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+      - name: Open a pull request on microsoft/winget-pkgs
+        if: env.WINGET_TOKEN != ''
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          gh release download $env:GITHUB_REF_NAME --pattern SHA256SUMS --dir $env:RUNNER_TEMP
+          node packages/cli/scripts/package-manifests.mjs --version $env:GITHUB_REF_NAME --sums "$env:RUNNER_TEMP/SHA256SUMS" --out "$env:RUNNER_TEMP/manifests"
+          $exe = "$env:RUNNER_TEMP/wingetcreate.exe"
+          Invoke-WebRequest https://github.com/microsoft/winget-create/releases/download/v1.12.13.0/wingetcreate.exe -OutFile $exe
+          if ((Get-FileHash $exe -Algorithm SHA256).Hash -ine '24042bd37915805615e6cf969ac57c6439124c3fe85823327f5f3fb24bd9ffea') { throw 'wingetcreate.exe failed its checksum' }
+          & $exe submit --token $env:WINGET_TOKEN "$env:RUNNER_TEMP/manifests/winget"
+          if ($LASTEXITCODE -ne 0) { throw "wingetcreate exited with $LASTEXITCODE" }
+      - name: Say what was skipped
+        if: env.WINGET_TOKEN == ''
+        shell: bash
+        run: echo "::notice::WINGET_TOKEN isn't set, so no winget pull request was opened."

@@ -47,7 +47,7 @@ function InstallCommands({ initArgs = '' }: { initArgs?: string }) {
           <CodeLine cmd={`irm ${CLI_INSTALL_URL}/install.ps1 | iex`} />
           <p className="small" style={{ margin: '8px 0' }}>Then, in your repository:</p>
           <CodeLine cmd={`${CLI_COMMAND} init${initArgs}`} />
-          <p className="small" style={{ marginBottom: 0 }}>In every language, Fortis checks for leaked secrets and vulnerable dependencies. The fintech code rules cover JavaScript, TypeScript and Python so far.</p>
+          <p className="small" style={{ marginBottom: 0 }}>In every language, Fortis checks for leaked secrets and vulnerable dependencies. The fintech code rules cover JavaScript, TypeScript, Python, Go, C#, PHP, Java and Kotlin so far.</p>
         </>
       )}
     </>

@@ -99,9 +99,12 @@ describe('lockfile formats', () => {
     expect(parsed.packages.map((p) => `${p.name}@${p.version}${p.dev ? ' dev' : ''}`)).toEqual([
       'org.apache.logging.log4j:log4j-core@2.14.1',
       'com.acme:managed@1.2.3',
+      // spring-boot-starter-parent sets the version of its own group's artifacts.
+      'org.springframework.boot:spring-boot-starter-web@3.0.0',
       'junit:junit@4.13 dev',
     ]);
-    expect(parsed.skipped).toBe(2);
+    // com.acme:sibling at ${project.version} is another module of this build, so it isn't counted at all.
+    expect(parsed.skipped).toBe(0);
   });
 
   it('go.mod: single and block requires, without the replace block', () => {
@@ -164,9 +167,9 @@ describe('finding lockfiles', () => {
   });
 
   it('says when a project has no lockfile for an ecosystem it uses', () => {
-    const notes = missingLockfiles(['build.gradle', 'composer.json', 'composer.lock', 'tests/package.json'], [], new Set(['Packagist']));
+    const notes = missingLockfiles(['Cargo.toml', 'composer.json', 'composer.lock', 'tests/package.json'], [], new Set(['Packagist']));
     expect(notes).toHaveLength(1);
-    expect(notes[0]).toContain('build.gradle');
+    expect(notes[0]).toContain('Cargo.toml');
   });
 });
 
@@ -261,7 +264,25 @@ describe('Rust and Dart', () => {
     expect(notes.join('\n')).toMatch(/Cargo\.toml found but no lockfile.*commit Cargo\.lock/);
     expect(notes.join('\n')).toMatch(/pubspec\.yaml found but no lockfile.*commit pubspec\.lock/);
     expect(notes.join('\n')).toMatch(/CocoaPods aren't checked/);
-    expect(notes.join('\n')).toMatch(/Swift packages aren't checked/);
+    // Swift packages are checked now, so Package.swift without Package.resolved asks for the lockfile.
+    expect(notes.join('\n')).toMatch(/Package\.swift found but no lockfile.*commit Package\.resolved/);
     expect(missingLockfiles(['Cargo.toml', 'Cargo.lock'], [], new Set(['crates.io']))).toEqual([]);
+  });
+});
+
+describe('packages without an exact version', () => {
+  it('names them and says how to pin them', async () => {
+    const { readPackages } = await import('../src/rules/dependencies');
+    const { mkdtempSync, writeFileSync } = await import('node:fs');
+    const { tmpdir } = await import('node:os');
+    const { join } = await import('node:path');
+    const dir = mkdtempSync(join(tmpdir(), 'fortis-ranges-'));
+    writeFileSync(join(dir, 'requirements.txt'), ['fastapi>=0.110', 'pydantic~=2.6', 'uvicorn[standard]', 'sqlalchemy<3', 'httpx>0.25', 'celery', 'requests==2.31.0', ''].join('\n'));
+    const r = readPackages(dir, ['requirements.txt']);
+    expect(r.packages.map((p) => p.name)).toEqual(['requests']);
+    const notes = r.notes.join('\n');
+    expect(notes).toContain('6 dependencies have no exact version (pinned by range');
+    expect(notes).toContain('requirements.txt: fastapi, pydantic, uvicorn, sqlalchemy, httpx and 1 more.');
+    expect(notes).toMatch(/uv lock or poetry lock, or pip-compile/);
   });
 });

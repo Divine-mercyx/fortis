@@ -17,11 +17,11 @@ permissions:
 
 jobs:
   pack:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 22
           cache: pnpm
@@ -32,7 +32,7 @@ jobs:
           mkdir ../../pack
           npm pack --pack-destination ../../pack
           mv ../../pack/fortis-watchdog-*.tgz ../../pack/fortis-watchdog.tgz
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: tarball
           path: pack/fortis-watchdog.tgz
@@ -43,20 +43,20 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-15, macos-15-intel, windows-latest]
+        os: [ubuntu-24.04, macos-15, macos-15-intel, windows-2025]
         method: [npm, pnpm, yarn1, yarn-pnp, bun, global]
     runs-on: ${{ matrix.os }}
     name: ${{ matrix.method }} · ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 22
       - if: matrix.method == 'pnpm'
-        uses: pnpm/action-setup@v4
+        uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
       - if: matrix.method == 'bun'
-        uses: oven-sh/setup-bun@v2
-      - uses: actions/download-artifact@v4
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: tarball
           path: pack
@@ -70,25 +70,68 @@ jobs:
         shell: bash
         run: bash packages/cli/scripts/e2e.sh ${{ matrix.method }} pack/fortis-watchdog.tgz
 
-  binary:
+  # The small Node that macOS and Linux binaries are made from. Slow to build, so it's cached
+  # until build-node-runtime.sh changes.
+  runtime:
     strategy:
       fail-fast: false
       matrix:
         include:
-          - { os: ubuntu-latest, name: linux-x64 }
+          - { os: ubuntu-24.04, name: linux-x64 }
+          - { os: ubuntu-24.04-arm, name: linux-arm64 }
           - { os: macos-15, name: macos-arm64 }
           - { os: macos-15-intel, name: macos-x64 }
-          - { os: windows-latest, name: windows-x64 }
+    runs-on: ${{ matrix.os }}
+    name: small Node · ${{ matrix.name }}
+    timeout-minutes: 300
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        id: cache
+        with:
+          path: .runtime/node
+          key: node-runtime-${{ matrix.name }}-${{ hashFiles('packages/cli/scripts/build-node-runtime.sh') }}
+      - if: steps.cache.outputs.cache-hit != 'true'
+        run: bash packages/cli/scripts/build-node-runtime.sh .runtime/node
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: node-runtime-${{ matrix.name }}
+          path: .runtime/node
+          if-no-files-found: error
+
+  binary:
+    needs: runtime
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-24.04, name: linux-x64 }
+          - { os: ubuntu-24.04-arm, name: linux-arm64 }
+          - { os: macos-15, name: macos-arm64 }
+          - { os: macos-15-intel, name: macos-x64 }
+          - { os: windows-2025, name: windows-x64 }
     runs-on: ${{ matrix.os }}
     name: binary and installer · ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      - name: Get the small Node
+        if: runner.os != 'Windows'
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: node-runtime-${{ matrix.name }}
+          path: .runtime
+      - name: Use the small Node
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          chmod +x .runtime/node
+          echo "FORTIS_NODE_RUNTIME=$PWD/.runtime/node" >> "$GITHUB_ENV"
       - run: pnpm --filter fortis-watchdog build:binary
       - name: Lay out a release folder for the installer
         shell: bash
@@ -102,6 +145,9 @@ jobs:
           fi
           cd ../release
           if command -v sha256sum >/dev/null; then sha256sum * > SHA256SUMS; else shasum -a 256 * > SHA256SUMS; fi
+      - name: The binary and its download are small enough
+        if: runner.os != 'Windows'
+        run: node packages/cli/scripts/check-binary-size.mjs packages/cli/dist-sea/fortis "packages/cli/release/fortis-${{ matrix.name }}.tar.gz"
       - name: git identity
         shell: bash
         run: |
@@ -117,13 +163,66 @@ jobs:
       - name: e2e (install script)
         shell: bash
         run: bash packages/cli/scripts/e2e.sh installer packages/cli/release
+      - name: fortis update replaces the binary
+        shell: bash
+        run: |
+          EXE=packages/cli/dist-sea/fortis
+          [ "$RUNNER_OS" = "Windows" ] && EXE=$EXE.exe
+          node packages/cli/scripts/update-check.mjs "$EXE" packages/cli/release
+      - name: The binary still runs once signed (macOS)
+        if: runner.os == 'macOS'
+        env:
+          FORTIS_SIGN_CHECK: '1'
+        run: |
+          cp packages/cli/dist-sea/fortis "$RUNNER_TEMP/fortis-signed"
+          bash packages/cli/scripts/sign-macos.sh "$RUNNER_TEMP/fortis-signed"
+      - name: The binary still runs once signed (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          FORTIS_SIGN_CHECK: '1'
+        run: |
+          Copy-Item packages/cli/dist-sea/fortis.exe "$env:RUNNER_TEMP/fortis-signed.exe"
+          ./packages/cli/scripts/sign-windows.ps1 -Binary "$env:RUNNER_TEMP/fortis-signed.exe"
+
+  # Alpine on both CPUs, on a clean system with nothing but the installer.
+  musl:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-24.04, name: linux-x64-musl }
+          - { os: ubuntu-24.04-arm, name: linux-arm64-musl }
+    runs-on: ${{ matrix.os }}
+    name: Alpine · ${{ matrix.name }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - run: bash packages/cli/scripts/build-musl.sh ${{ matrix.name }} "$RUNNER_TEMP/release"
+      - run: bash packages/cli/scripts/alpine-check.sh "$RUNNER_TEMP/release"
+
+  # The latest published release, through generated manifests and the real package managers.
+  package-managers:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-15, windows-2025]
+    runs-on: ${{ matrix.os }}
+    name: brew, scoop and winget · ${{ matrix.os }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+      - shell: bash
+        run: bash packages/cli/scripts/package-install-check.sh
 
   docker:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 22
           cache: pnpm
@@ -149,14 +248,14 @@ jobs:
 
   windows-shells:
     needs: pack
-    runs-on: windows-latest
-    name: PowerShell and cmd · windows-latest
+    runs-on: windows-2025
+    name: PowerShell and cmd · windows-2025
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 22
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: tarball
           path: pack
@@ -169,38 +268,144 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-15, windows-latest]
+        os: [ubuntu-24.04, macos-15, windows-2025]
     runs-on: ${{ matrix.os }}
     name: baseline · ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 22
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: tarball
           path: pack
       - shell: bash
         run: bash packages/cli/scripts/baseline-parity.sh pack/fortis-watchdog.tgz "fingerprints-${{ matrix.os }}.txt"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: fingerprints-${{ matrix.os }}
           path: fingerprints-${{ matrix.os }}.txt
 
   baseline-parity:
     needs: baseline
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           pattern: fingerprints-*
           merge-multiple: true
       - name: Windows, macOS and Linux write the same baseline
         run: |
           ls fingerprints-*.txt
-          [ -s fingerprints-ubuntu-latest.txt ] || { echo 'no fingerprints from Linux'; exit 1; }
-          for f in fingerprints-macos-15.txt fingerprints-windows-latest.txt; do
-            diff -u fingerprints-ubuntu-latest.txt "$f" || { echo "FAILED: $f differs from Linux"; exit 1; }
+          [ -s fingerprints-ubuntu-24.04.txt ] || { echo 'no fingerprints from Linux'; exit 1; }
+          for f in fingerprints-macos-15.txt fingerprints-windows-2025.txt; do
+            diff -u fingerprints-ubuntu-24.04.txt "$f" || { echo "FAILED: $f differs from Linux"; exit 1; }
           done
-          echo "identical: $(wc -l < fingerprints-ubuntu-latest.txt) fingerprints"
+          echo "identical: $(wc -l < fingerprints-ubuntu-24.04.txt) fingerprints"
+
+  # The documented pre-commit, lefthook and Husky setups, each with a real push.
+  hook-managers:
+    runs-on: ubuntu-24.04
+    name: pre-commit, lefthook and Husky
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+          cache: pnpm
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: '3.12'
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter fortis-watchdog build
+      - run: bash packages/cli/scripts/hook-managers.sh
+
+  # fortis test with ZAP installed on the machine, not in Docker, on each system.
+  zap-local:
+    name: fortis test with a local ZAP · ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-15, windows-2025]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+          cache: pnpm
+      - uses: actions/setup-java@77dd5b2ce225ea11469928ac317850245a74ae78 # v6.2.0
+        with:
+          distribution: temurin
+          java-version: '21'
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter fortis-watchdog build
+      - name: Run fortis test against the sample API
+        shell: bash
+        run: bash packages/cli/scripts/zap-local-check.sh
+
+  # The extension in a real VS Code, from the same .vsix that would be published.
+  vscode:
+    name: VS Code extension · ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-15, windows-2025]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter fortis-security package
+      - name: Run the extension in VS Code
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" = Linux ]; then xvfb-run -a pnpm --filter fortis-security test:editor; else pnpm --filter fortis-security test:editor; fi
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: matrix.os == 'ubuntu-24.04'
+        with:
+          name: fortis-security-vsix
+          path: packages/vscode/fortis-security.vsix
+          if-no-files-found: error
+
+  large-repo:
+    runs-on: ubuntu-24.04
+    name: 100,000-file scan under 30 s
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter fortis-watchdog build
+      - name: Generate a 100,000-file repository
+        run: node packages/cli/scripts/gen-large-repo.mjs "$RUNNER_TEMP/large" 100000
+      - name: Full scan (secrets and dependencies) within the budget
+        working-directory: ${{ runner.temp }}/large
+        run: |
+          set +e
+          start=$(date +%s%N)
+          # Output goes outside the repository: an untracked file in it would be scanned too.
+          out="$RUNNER_TEMP/large-scan.txt"
+          node "$GITHUB_WORKSPACE/packages/cli/dist/fortis.js" scan --offline --no-upload > "$out" 2>&1
+          code=$?
+          ms=$(( ($(date +%s%N) - start) / 1000000 ))
+          grep -m1 "^fortis" "$out"
+          echo "took ${ms} ms"
+          echo "### 100,000-file scan: ${ms} ms" >> "$GITHUB_STEP_SUMMARY"
+          # The generator plants 5 AWS-format keys; the scan must find them all (and so fail with 1).
+          [ "$code" = 1 ] || { echo "FAILED: expected exit 1 (keys found), got $code"; cat "$out"; exit 1; }
+          [ "$(grep -c 'CRITICAL SEC-GEN-001' "$out")" = 5 ] || { echo 'FAILED: did not find the 5 planted keys'; cat "$out"; exit 1; }
+          grep -q '100000 files' "$out" || { echo 'FAILED: did not scan every file'; exit 1; }
+          [ "$ms" -lt 30000 ] || { echo "FAILED: ${ms} ms is over the 30 s target"; exit 1; }

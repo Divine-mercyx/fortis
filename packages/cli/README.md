@@ -1,6 +1,6 @@
 # fortis-watchdog
 
-Fintech security checks on every push, from [Fortis](https://fortis.dev).
+Fintech security checks on every push, from [Fortis](https://fortis.dev). Docs: [fortis.dev/docs](https://fortis.dev/docs.html).
 
 ## Install
 
@@ -33,7 +33,21 @@ irm https://github.com/Divine-mercyx/fortis/releases/latest/download/install.ps1
 
 Then run `fortis init --key fts_…` in your repository.
 
-The scripts check the download against the release's `SHA256SUMS`. `FORTIS_VERSION` pins a version, and `FORTIS_INSTALL_DIR` changes the folder (default `~/.fortis/bin`). Builds exist for Linux (x64, arm64, glibc only), macOS (arm64, x64) and Windows (x64). On Alpine, use npm or the Docker image:
+Or with a package manager:
+
+```bash
+brew install divine-mercyx/tap/fortis
+```
+
+```powershell
+scoop bucket add fortis https://github.com/Divine-mercyx/scoop-bucket
+scoop install fortis
+winget install DivineMercyx.Fortis
+```
+
+The scripts check the download against the release's `SHA256SUMS`. `FORTIS_VERSION` pins a version, and `FORTIS_INSTALL_DIR` changes the folder (default `~/.fortis/bin`). Builds exist for Linux (x64, arm64), macOS (arm64, x64) and Windows (x64).
+
+On Alpine, the install script uses a musl build, which needs one package first: `apk add libstdc++`. The Docker image also works:
 
 ```bash
 docker run --rm -v "$PWD:/src" -w /src -e FORTIS_KEY ghcr.io/divine-mercyx/fortis fortis scan --ci
@@ -41,15 +55,29 @@ docker run --rm -v "$PWD:/src" -w /src -e FORTIS_KEY ghcr.io/divine-mercyx/forti
 
 To verify where a binary came from, run `gh attestation verify fortis-linux-x64.tar.gz --repo Divine-mercyx/fortis`.
 
+### Updating
+
+`fortis update` updates a binary from the install scripts, after checking it against the release's `SHA256SUMS`. If you installed another way, it tells you the command to use.
+
+Once a day, Fortis checks GitHub for a newer release and prints a notice if there is one. It sends nothing about your project, waits at most 1.5 seconds, and is off in CI. Turn it off with `FORTIS_NO_UPDATE_CHECK=1`.
+
 ## What it checks
 
 | Pack | Rules | Languages | Plan |
 |---|---|---|---|
-| Secrets | Paystack / Flutterwave / Monnify secret keys; private keys, AWS, GitHub, Slack, Google and Fortis keys; database passwords, SaaS and registry tokens (SendGrid, Slack, OpenAI, Anthropic, npm, PyPI…) in connection URLs, JDBC URLs and .NET connection strings; random-looking hard-coded secrets, including unquoted values in `.env`, `.properties` and YAML files | Any | Free |
+| Secrets | Paystack / Flutterwave / Monnify / Korapay / BudPay / SeerBit / OPay / Squad secret keys; Mono and Dojah secret keys and Africa's Talking API keys; private keys, AWS, GitHub, Slack, Google and Fortis keys; database passwords, SaaS and registry tokens (SendGrid, Slack, OpenAI, Anthropic, npm, PyPI…) in connection URLs, JDBC URLs and .NET connection strings; random-looking hard-coded secrets, including unquoted values in `.env`, `.properties` and YAML files. Also read: Jupyter notebook cells and their outputs, PEM keys on one line inside JSON, base64-encoded keys, and the values of Kubernetes `Secret` manifests | Any | Free |
 | Dependencies | Known vulnerabilities, from [OSV](https://osv.dev) | See below | Free |
-| Fintech | Money records read without an ownership check; webhooks without a signature check; balance updates outside a transaction; BVN/NIN in logs; weak or leaked OTPs; transfers without an idempotency key | JavaScript, TypeScript and Python (Django, Django REST, Flask, FastAPI) | Core and above |
+| Dependencies (supply chain) | Docker base images with no tag or `latest`, not pinned by digest, or end-of-life; third-party GitHub Actions not pinned to a commit; `pull_request_target` workflows that run the pull request's code | Dockerfiles and GitHub Actions workflows | Free |
+| Fintech | Money records read without an ownership check; webhooks without a signature check; balance updates outside a transaction; BVN/NIN in logs; weak or leaked OTPs; transfers without an idempotency key; money as floating point; card data in logs, analytics or plain text; predictable transaction references; charge amounts taken from the request | JavaScript, TypeScript and Python (Django, Django REST, Flask, FastAPI); the first six checks also in Go (net/http, Gin, Echo, Fiber), C# (ASP.NET Core), PHP (Laravel), and Java and Kotlin (Spring Boot) | Core and above |
 
 `fortis test` and `fortis access` test a running app over HTTP, so they work whatever the backend is written in.
+
+**Secrets that line-by-line matching can't read.**
+
+- **Jupyter notebooks:** read as the code and text output you see in Jupyter (cell sources, printed output, tracebacks; not images), with each finding on the notebook's own line.
+- **PEM keys inside JSON:** a PEM key stored on one line in JSON (`"private_key": "-----BEGIN PRIVATE KEY-----\nMII…"`) is reported when it has key material. Documentation placeholders such as `...` or `<your key>` aren't.
+- **Base64 values:** values 32 to 4,096 characters long that decode to readable text are decoded and checked for the keys named above, up to 200 values per file.
+- **Kubernetes `Secret` manifests:** `data:` values are decoded and `stringData:` values read as they are. Credentials are reported, while usernames, hosts, empty values and Helm templates aren't.
 
 Run `fortis rules` for the list and `fortis explain FX-OWN-001` for why a rule matters and how to fix it.
 
@@ -57,28 +85,55 @@ Run `fortis rules` for the list and `fortis explain FX-OWN-001` for why a rule m
 
 | Language | Files |
 |---|---|
-| JavaScript | `package-lock.json`, `npm-shrinkwrap.json`, `yarn.lock`, `pnpm-lock.yaml` |
+| JavaScript | `package-lock.json`, `npm-shrinkwrap.json`, `yarn.lock`, `pnpm-lock.yaml`, `bun.lock` |
 | PHP | `composer.lock` |
 | Python | `uv.lock`, `poetry.lock`, `pdm.lock`, `pylock.toml`, `Pipfile.lock`, or pinned requirements files |
-| Java / Kotlin | `gradle.lockfile`, `pom.xml`, or an SBOM |
-| Go | `go.mod` |
-| .NET | `packages.lock.json` |
+| Java / Kotlin | `gradle.lockfile`, or without one: `gradle/libs.versions.toml` and dependencies written out in `build.gradle(.kts)`; `pom.xml`; or an SBOM |
+| Scala | `build.sbt.lock` from [sbt-dependency-lock](https://github.com/stringbean/sbt-dependency-lock), or `build.sbt` and `project/*.scala` |
+| Go | `go.mod`, following `go.work` to each module, or `vendor/modules.txt` when the module is vendored |
+| .NET | `packages.lock.json`, or without one: `PackageReference` versions in `.csproj`/`.fsproj`/`.vbproj`, central versions in `Directory.Packages.props`, and `packages.config` |
 | Ruby | `Gemfile.lock` |
 | Rust | `Cargo.lock` |
 | Dart / Flutter | `pubspec.lock` |
+| Swift (iOS, macOS) | `Package.resolved` from Swift Package Manager or Xcode, versions 1 to 3 |
+| Elixir / Erlang | `mix.lock`, `rebar.lock` |
+| Haskell | `cabal.project.freeze`, or `stack.yaml.lock` (which leaves out the snapshot's packages) |
+| R | `renv.lock` (CRAN packages; GitHub and Bioconductor ones are named, not checked) |
+| GitHub Actions | `.github/workflows/*.yml`: actions at an exact version (`@v1.2.3`, or a commit pinned with `# v1.2.3` after it) |
 
-Files are found in any folder of the repository. Dev and test dependencies are left out wherever they can be told apart (yarn workspaces can't, so those are all checked). Findings point at the package's line in the file. If a project has no lockfile, the scan says so.
+Files are found in any folder of the repository. Dev and test dependencies are left out wherever they can be told apart; for Yarn workspaces, that's worked out from each workspace's own `package.json`. Findings point at the package's line in the file. If a project has no lockfile, the scan says so.
+
+**JavaScript packages from git, a tarball or a local folder** have no registry release for OSV to look up, so the scan names them in its notes instead of checking them. pnpm catalogs, npm `overrides` and Yarn or pnpm `resolutions` need nothing extra: the lockfile has the version that's installed. **If a folder has two lockfiles** (say `package-lock.json` beside `pnpm-lock.yaml`), the scan checks the one `packageManager` in `package.json` names, or else the pnpm, Yarn or Bun one, and says which. **Bun's old binary `bun.lockb`** can't be read: the scan says so, and `bun install --save-text-lockfile` writes a `bun.lock` it can (Bun 1.2 and later write one by default).
+
+**Not checked yet:** CocoaPods, and C and C++ packages from Conan or vcpkg, because OSV has no advisories for them. The scan says so, and names the pods in `Podfile.lock`, rather than passing them as clean.
 
 **A hand-written `requirements.txt` lists only direct dependencies,** so the scan says what it couldn't cover. Use a lockfile, compile it with `pip-compile` or `uv pip compile`, or pass an SBOM from [`cyclonedx-py`](https://github.com/CycloneDX/cyclonedx-python). `fortis ci init` adds that step for you on GitHub Actions.
 
-**Maven needs an SBOM for full coverage.** `pom.xml` lists only direct dependencies, and a parent POM or BOM often decides their versions, so Fortis reports how many it could check. To cover everything, including transitive dependencies, have Maven list them and pass the result to Fortis. `fortis ci init` adds this step for you on GitHub Actions.
+**Java, Kotlin and Scala need an SBOM for full coverage.** Build files list only direct dependencies. Fortis fills in versions from properties, parent POMs in the repository and version catalogs, and gives a Spring Boot starter the version of `spring-boot-starter-parent`. It says how many it could check: a version that comes from a BOM outside the repository can't be known without running the build. To cover everything, including transitive dependencies, have the build list them and pass the result to Fortis. `fortis ci init` adds this step for you on GitHub Actions, for Maven and for Gradle.
 
 ```bash
+# Maven
 mvn org.cyclonedx:cyclonedx-maven-plugin:makeAggregateBom -DoutputFormat=json -DoutputName=bom
 fortis scan --sbom target/bom.json
+
+# Gradle: an init script applies CycloneDX's plugin without changing the build's files
+cat > fortis-sbom.gradle <<'EOF'
+import org.cyclonedx.gradle.CyclonedxPlugin
+initscript {
+    repositories { gradlePluginPortal() }
+    dependencies { classpath 'org.cyclonedx.bom:org.cyclonedx.bom.gradle.plugin:3.5.1' }
+}
+rootProject { apply plugin: CyclonedxPlugin }
+EOF
+./gradlew cyclonedxBom --init-script fortis-sbom.gradle
+fortis scan --sbom build/reports/cyclonedx/bom.json
 ```
 
+For sbt, add [sbt-dependency-lock](https://github.com/stringbean/sbt-dependency-lock), run `sbt dependencyLockWrite` and commit `build.sbt.lock`. Gradle's own [dependency locking](https://docs.gradle.org/current/userguide/dependency_locking.html) works too: commit `gradle.lockfile`.
+
 `--sbom` reads any CycloneDX JSON file, so it works for other languages too.
+
+**.NET without a lockfile:** project files list only direct references, so the scan says transitive packages weren't covered. Set `<RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>` and commit `packages.lock.json` to cover them. Floating versions (`8.*`) and ranges are named, not checked.
 
 ## Commands
 
@@ -90,8 +145,13 @@ fortis scan --sbom target/bom.json
 | `fortis scan --fail-on high` | Block at high or above (default: critical) |
 | `fortis scan --json` / `--no-upload` / `--offline` | Machine output (secrets masked, like every other output), keep results local, or skip the network |
 | `fortis scan --sbom bom.json` | Also check a CycloneDX JSON SBOM |
+| `fortis scan --junit report.xml` | Also write JUnit XML for CI test reports |
+| `fortis scan --ci --pr-comment` | Comment on the pull request with what it adds (GitHub and GitLab) |
+| `fortis scan --paths-from list.txt` | Only scan the files listed, one per line (`-` for stdin). Never closes findings. The VS Code extension uses this |
 | `fortis login <key>` / `fortis logout` | Save or remove the key for this machine |
 | `fortis whoami` | Project, workspace and plan for the key |
+| `fortis update` | Update a binary install to the latest version |
+| `fortis doctor` | Find what isn't working here, and how to fix it |
 
 Exit codes: `0` passed, `1` findings at or above the threshold, `2` usage or configuration error, including a full scan that found no files.
 
@@ -100,19 +160,22 @@ If the dependency check can't finish (OSV is down, or a lockfile can't be read),
 ## In CI
 
 ```yaml
-- uses: Divine-mercyx/fortis@cli-v0.1.0-beta.11
-  with:
-    version: 0.1.0-beta.11
+- name: Install Fortis
+  run: |
+    curl -fsSL https://github.com/Divine-mercyx/fortis/releases/download/cli-v0.1.0-beta.12/install.sh | FORTIS_VERSION=0.1.0-beta.12 sh
+    echo "$HOME/.fortis/bin" >> "$GITHUB_PATH"
 - run: fortis scan --ci
   env:
-    FORTIS_KEY: ${{ secrets.FORTIS_KEY }}
+    FORTIS_KEY: ${{ secrets.FORTIS_KEY }}   # optional: without it the free checks run
 ```
+
+The `Divine-mercyx/fortis` Action installs it too, but pin it to a commit SHA if you use it, or Fortis's own SUP-GHA-001 rule reports it.
 
 `fortis ci init` writes this for you. On other CI systems, use the install script or the Docker image.
 
 ## Testing a running app (OWASP ZAP)
 
-`fortis test` runs [OWASP ZAP](https://www.zaproxy.org/) in Docker against a staging URL and syncs the alerts to the dashboard.
+`fortis test` runs [OWASP ZAP](https://www.zaproxy.org/) against a staging URL and syncs the alerts to the dashboard. It uses Docker, or a ZAP installed on your machine when Docker isn't available.
 
 ```bash
 npx fortis test --target https://staging.yourapp.com            # baseline: passive, sends no attacks
@@ -123,12 +186,30 @@ npx fortis test --target http://localhost:3000 --local          # your own machi
 
 Before Fortis will test a URL, an admin adds it under **Project → Staging targets**, proves control of the domain with a DNS TXT record (`_fortis-verify.<host>`), and signs the testing authorisation. Active scans are never allowed against production targets. Pausing a target in the dashboard stops a running test within about 20 seconds.
 
-Needs Docker (image `zaproxy/zap-stable`, override with `FORTIS_ZAP_IMAGE`). For staging on a private network pass extra docker flags with `FORTIS_ZAP_DOCKER_ARGS`, for example `--add-host staging.internal:10.0.0.5`. Without Docker, run ZAP yourself and import its JSON report with `--zap-report report.json`. The default `--fail-on` for tests is `high`.
+With Docker, it uses the image `zaproxy/zap-stable` (override with `FORTIS_ZAP_IMAGE`). For staging on a private network pass extra docker flags with `FORTIS_ZAP_DOCKER_ARGS`, for example `--add-host staging.internal:10.0.0.5`. You can also run ZAP yourself and import its JSON report with `--zap-report report.json`. The default `--fail-on` for tests is `high`.
+
+### ZAP without Docker
+
+If Docker isn't installed or running, Fortis looks for a local ZAP and uses that. ZAP needs Java 17 or newer, unless you use a package that bundles it.
+
+| System | Install | Where Fortis looks |
+|---|---|---|
+| macOS | `brew install --cask zap`, or the installer from [zaproxy.org/download](https://www.zaproxy.org/download/) | `/Applications/ZAP.app`, `~/Applications/ZAP.app`, your `PATH` |
+| Linux | `sudo snap install zaproxy --classic`, or the installer from [zaproxy.org/download](https://www.zaproxy.org/download/) | `/usr/share/zaproxy`, `/opt/zaproxy`, `/snap/bin`, your `PATH` |
+| Windows | `winget install ZAP.ZAP`, or the installer from [zaproxy.org/download](https://www.zaproxy.org/download/) | `Program Files\ZAP\Zed Attack Proxy`, your `PATH` |
+
+Anywhere else, or to use a local ZAP even when Docker is running, set `FORTIS_ZAP_PATH` to its `zap.sh` or `zap.bat`:
+
+```bash
+FORTIS_ZAP_PATH=/path/to/zap.sh npx fortis test --target https://staging.yourapp.com
+```
+
+Fortis runs it with its own temporary settings folder, so a ZAP desktop session you have open is unaffected. The same rules apply to the target, and `FORTIS_ZAP_AUTH` works the same way.
 
 ## CI in one command
 
 ```bash
-fortis ci init                    # GitHub Actions (or --provider gitlab)
+fortis ci init                    # GitHub Actions, or choose with --provider
 ```
 
 This writes `.github/workflows/fortis.yml`, which needs no Node in your project:
@@ -139,7 +220,72 @@ This writes `.github/workflows/fortis.yml`, which needs no Node in your project:
 - **Every push to `staging`** (change it with `--staging-branch`) also gets a ZAP test, once the new deploy is answering.
 - **Maven projects, and Python projects with a hand-written `requirements.txt`,** also get a step that lists every dependency as an SBOM.
 
-Set the `FORTIS_KEY` secret and the `FORTIS_STAGING_URL` variable in the repository settings. Add `--sarif fortis.sarif` to any scan to write SARIF yourself.
+Without a Fortis key, it writes the code scan only, which needs no secrets: the free checks run without one. With a key, it adds the staging test (or pass `--staging`); set the `FORTIS_KEY` secret and the `FORTIS_STAGING_URL` variable in the repository settings. Add `--sarif fortis.sarif` to any scan to write SARIF yourself.
+
+### Other CI systems
+
+Each uses the standalone binary or the Docker image, so your project doesn't need Node.
+
+| `--provider` | Writes | Code scan runs on | ZAP on staging |
+|---|---|---|---|
+| `gitlab` | `fortis.gitlab-ci.yml` | Docker image | Yes |
+| `bitbucket` | `bitbucket-pipelines.yml` | Docker image | No: Bitbucket restricts the Docker mounts ZAP needs |
+| `azure` | `azure-pipelines-fortis.yml` | Binary | Yes |
+| `jenkins` | `Jenkinsfile` | Binary | Yes, if the agent has Docker |
+| `circleci` | `.circleci/config.yml` | Binary | Yes |
+| `buildkite` | `.buildkite/pipeline.yml` | Binary | Yes, if the agent has Docker |
+
+Bitbucket, Jenkins, CircleCI and Buildkite read one fixed pipeline file. If you already have one, Fortis never overwrites it, even with `--force`. It writes `fortis.bitbucket-pipelines.yml`, `Jenkinsfile.fortis`, `.circleci/fortis.yml` or `.buildkite/pipeline.fortis.yml` for you to copy from. Run `fortis ci init` to see which variables each one needs.
+
+### Test reports
+
+`fortis scan --junit fortis-junit.xml` writes JUnit XML, and the templates above publish it. A finding that blocks the build is a failed test, and one below `--fail-on` is skipped. Findings in the baseline aren't included.
+
+### Pull-request comments
+
+`fortis scan --ci --pr-comment` posts one summary comment on the pull request and updates it in place. It lists only what the pull request adds: findings on the lines it adds, or in the files it changes for findings with no line. Nothing is posted if there's nothing to report, and a comment that can't be posted never fails the build.
+
+- **GitHub Actions:** set `GITHUB_TOKEN`, which needs `pull-requests: write`. The `fortis ci init` workflow does this. A pull request from a fork gets a read-only token, so it gets no comment.
+- **GitLab:** set `FORTIS_GITLAB_TOKEN` to a project or personal access token with the `api` scope, because `CI_JOB_TOKEN` can't post comments. It only runs in merge request pipelines.
+
+Other CI systems don't get comments yet. The comment shows the rule, severity, file, line and title. It doesn't show the code.
+
+## Other git hook managers
+
+`fortis init` installs its own pre-push hook, and works with Husky's folder. To run Fortis through your existing hook manager instead, install the CLI so `fortis` is on your `PATH`, and use one of these.
+
+**[pre-commit](https://pre-commit.com):** in `.pre-commit-config.yaml`:
+
+```yaml
+repos:
+  - repo: https://github.com/Divine-mercyx/fortis
+    rev: cli-v0.1.0-beta.12 # the first release with this hook, or any newer cli-v* tag
+    hooks:
+      - id: fortis
+```
+
+```bash
+pip install fortis-watchdog pre-commit
+pre-commit install --hook-type pre-push
+```
+
+**[lefthook](https://lefthook.dev):** in `lefthook.yml`:
+
+```yaml
+pre-push:
+  commands:
+    fortis:
+      run: fortis scan --pre-push --stdin
+      use_stdin: true
+```
+
+**[Husky](https://typicode.github.io/husky/):** in `.husky/pre-push`:
+
+```sh
+npx --no-install fortis scan --pre-push --stdin
+```
+
+`--stdin` reads the refs git is pushing, so a first push covers every new commit. pre-commit doesn't pass those on, so a first push of a new branch compares against the remote's main branch instead.
 
 ## Adopting Fortis in an existing codebase
 
@@ -157,12 +303,58 @@ npx fortis scan --history
 
 This searches every commit on every branch. A key that was committed and later deleted can still be read by anyone who can clone the repository, so it must be rotated. Each secret is reported once, at the commit that introduced it.
 
+## Is a leaked key still live?
+
+```bash
+npx fortis scan --verify
+npx fortis scan --history --verify
+```
+
+`--verify` asks each leaked key's own provider whether the key still works, and labels the finding **live**, **revoked** or **unknown**. Rotate the live ones first. It's off by default, because it's the only check that sends a secret anywhere:
+
+- **Where keys go:** a key only goes to the API host of the provider that issued it, over HTTPS, and redirects aren't followed. Some `sk_live_` keys could be either Stripe or Paystack, going by their shape. Those aren't sent at all, because sending a Stripe key to Paystack would leak it.
+- **What the call does:** each provider gets one read-only call (reading a balance, an account or "who am I"). Nothing is created, changed, sent or charged.
+- **Limits:**
+  - each distinct key is checked once per scan, however many places it's in;
+  - at most 50 keys per scan, with the rest marked unknown;
+  - 4 calls at a time;
+  - 250 ms between calls to the same provider;
+  - a 5-second timeout per call.
+- **Unclear answers:** a timeout, a rate limit or a provider error means **unknown**: treat it as live.
+- **Where the label shows:** in the terminal and in `--json` (`secretStatus`), in SARIF (`properties.secretStatus`) and, on plans that sync findings, in the dashboard. A later scan without `--verify` keeps the last label. With `--offline`, nothing is checked.
+
+| Provider | Keys | Call | Live / revoked |
+|---|---|---|---|
+| Paystack | `sk_live_`, `sk_test_` (Paystack's 40-hex shape) | `GET api.paystack.co/balance` | 200 / 401 |
+| Stripe | `sk_live_`, `sk_test_` (Stripe's shape), `rk_` | `GET api.stripe.com/v1/balance` | 200, or 403 for a restricted key without balance access / 401 |
+| Flutterwave | `FLWSECK-`, `FLWSECK_TEST-` | `GET api.flutterwave.com/v3/balances` | 200 / 401 |
+| GitHub | `ghp_`, `gho_`, `ghu_`, `ghs_`, `ghr_` | `GET api.github.com/user` | 200, or 403 for an app installation token / 401 (a rate-limit 403 is unknown) |
+| Slack | `xoxb-`, `xoxp-` and other `xox` tokens | `POST slack.com/api/auth.test` (only says who the token is) | `ok: true` / `invalid_auth`, `token_revoked`, `token_expired`, `account_inactive` |
+| SendGrid | `SG.` | `GET api.sendgrid.com/v3/scopes` (the key's own permissions) | 200 / 401 |
+| Mailgun | `key-` | `GET /v3/domains` on `api.mailgun.net`, then `api.eu.mailgun.net` | 200 from either / 401 from both |
+| Resend | `re_` | `GET api.resend.com/domains` | 200, or `restricted_api_key` for a sending-only key / 401 |
+| Telegram | bot tokens | `GET api.telegram.org/bot…/getMe` (the bot's own name) | 200 / 401 or 404 |
+| Anthropic | `sk-ant-api` | `GET api.anthropic.com/v1/models` (runs no model, costs nothing) | 200 / 401 |
+| OpenAI | `sk-proj-`, `sk-svcacct-`, `sk-admin-`, legacy `sk-` | `GET api.openai.com/v1/models` (runs no model, costs nothing) | 200 / 401 |
+| npm | `npm_` | `GET registry.npmjs.org/-/whoami` | 200 / 401 |
+| DigitalOcean | `dop_v1_`, `doo_v1_`, `dor_v1_` | `GET api.digitalocean.com/v2/account` | 200 / 401 |
+| Render | `rnd_` | `GET api.render.com/v1/owners` | 200 / 401 |
+| Discord | webhook URLs | `GET` on the webhook URL (returns its name and posts nothing) | 200 / 401 or 404 |
+
+Other secrets aren't checked, and the scan says how many:
+
+- some need a second value to test: AWS access keys, Monnify;
+- some have no read-only call: Slack webhooks would post a message, and PyPI, RubyGems and Docker Hub tokens can't be tested without one;
+- some aren't tied to one service: private keys, database passwords, generic `apiKey = "…"` values.
+
+Treat those as live.
+
 ## Testing behind login
 
 Set `FORTIS_ZAP_AUTH` to a staging test user's token before `fortis test`, and ZAP will crawl and test the pages and APIs behind login. Without it, ZAP only sees what an anonymous visitor sees. `FORTIS_ZAP_AUTH_HEADER` changes the header, for example to `Cookie`. The token:
 
 - is sent to the target host only;
-- is passed to Docker through the environment, never on the command line;
+- is passed to ZAP through the environment, never on the command line;
 - is scrubbed from all output.
 
 ## Access checks: can one customer see another's data?
@@ -177,11 +369,70 @@ Set it up with two ordinary test customers on staging, and give customer A at le
 1. finds A's records;
 2. requests each one as customer B, and again with no login at all.
 
-Django session logins work too: set `"header": "Cookie"` in `.fortis-access.json` and use `sessionid=…` as each user's token. If either request gets A's record back, that's **FX-BOLA-001** or **FX-AUTH-001**: broken access control, the most common way fintech data leaks. Only GET requests are sent, so nothing is created or changed. Access checks need Fortis Plus and a verified, authorised, non-production target.
+Django session logins work too: set `"header": "Cookie"` in `.fortis-access.json` and use `sessionid=…` as each user's token. If either request gets A's record back, that's **FX-BOLA-001** or **FX-AUTH-001**: broken access control, the most common way fintech data leaks. By default the checks are read-only: nothing is created, changed or deleted. Access checks need Fortis Plus and a verified, authorised, non-production target.
+
+### Checking updates and deletes
+
+`fortis access --writes` also checks whether customer B can change or delete customer A's records, which is **FX-BOLA-002**. It only runs for checks with a `writes` block:
+
+```json
+{
+  "name": "Loan",
+  "list": "/api/loans",
+  "get": "/api/loans/{id}",
+  "writes": {
+    "create": { "path": "/api/loans", "body": { "amount": 1, "note": "fortis-test" } },
+    "put": { "body": { "amount": 2, "note": "fortis-test-put" } },
+    "patch": { "body": { "note": "fortis-test-patch" } },
+    "delete": {}
+  }
+}
+```
+
+For each one, Fortis:
+
+1. creates a throwaway record as customer A;
+2. sends each update and delete as customer B;
+3. reads the record as customer A, and reports a finding only if it really changed or disappeared;
+4. deletes the throwaway record as customer A.
+
+Existing records are never written to. `put` and `patch` use the `get` path unless you give a `path`, and `{id}` in a body becomes the record's ID. Use values that differ from `create`, so a change can be seen. Without a `delete`, add a `"cleanup"` path, or Fortis tells you the record is still there. Runs without `--writes` don't close FX-BOLA-002 findings in the dashboard, because they didn't test for them.
+
+### GraphQL
+
+```bash
+FORTIS_USER_A_TOKEN=… npx fortis access init --graphql https://staging.yourapp.com/graphql
+```
+
+This introspects the schema and writes a check for each query that reads one record by ID. It adds that record's mutations under `writes` when it finds ones that create and then update or delete it. If introspection is turned off, save a schema from elsewhere as JSON and pass its file path. Check the generated values under `writes`, because they're placeholders.
+
+GraphQL often answers 200 when it refuses, so a response only counts as success if it has no `errors` and has data. Without `--writes`, only queries are sent, and a config with a mutation in `read` or `list` is rejected.
+
+### Building the config from Postman or HAR
+
+```bash
+npx fortis access init --postman collection.json
+npx fortis access init --har staging.har --target https://staging.yourapp.com
+```
+
+Each pairs a route like `GET /api/loans/{id}` with its list route, as `--openapi` does, and adds a `writes` block with empty bodies to fill in when it sees the create and write routes. Only the method and path are kept: headers, bodies, query strings and real record IDs never reach the config. A HAR file can hold live tokens, so don't commit it. Without `--target`, a HAR import uses the host with the most requests.
 
 ## Accuracy
 
-Every rule is measured against a labelled benchmark in `bench/cases`. A line marked `@hit` must be flagged, and a flag on any other line is a false positive. `pnpm bench` prints precision and recall per rule. The test suite fails if any rule drops below its recorded floor. When a rule is wrong on real code, we add that code to the benchmark first, then fix the rule.
+Every rule is measured against a labelled benchmark in `bench/cases`. A line marked `@hit` must be flagged, and a flag on any other line is a false positive. `pnpm bench` prints precision and recall per rule. The test suite fails if any rule drops below its recorded floor. When a rule is wrong on real code, we add that code to the benchmark first, then fix the rule. Every rule has at least 20 cases, and a test keeps it that way.
+
+**Real code.** `pnpm corpus` scans open-source fintech and payments projects in each supported language, pinned to fixed commits, and compares the findings with `bench/corpus.json`, where each one has been reviewed as right or wrong. It reports precision and recall per rule.
+
+**Every night.** `.github/workflows/nightly.yml` runs the corpus and the live OSV tests, opens one issue if either fails, and closes it when a run passes.
+
+**Your feedback.** False positives marked in the dashboard can become new benchmark cases. An operator exports them as a rule ID, a file extension and the shape of the line, for example `const x = await x.findById(req.params.id);`. Every name, string, number and comment is removed, and a shape is only exported once at least two workspaces have reported it. No code leaves the dashboard this way.
+
+## Git checkouts in CI and large repositories
+
+- **Shallow clones** (CI's default `fetch-depth: 1`): a full scan with `--ci` needs only the latest commit. `--history` and branch comparisons say when they could only see part of the history. `fortis ci init --history` adds `--history` together with `fetch-depth: 0` (GitLab: `GIT_DEPTH: 0`).
+- **Submodules** are separate repositories, so they're skipped with a note. Pass `--submodules` to scan them too.
+- **Worktrees, detached HEAD and sparse checkouts** work. In a sparse checkout, files that aren't on disk are counted in a note. Their findings stay open, since a scan that didn't read them can't say they're fixed.
+- **Large repositories:** files are read and checked one at a time, so memory stays flat. A full scan of 100,000 files takes about 11 seconds, and CI checks that it stays under 30. A scan stops after 10 minutes (`FORTIS_SCAN_BUDGET_SECONDS` to change it) with a note, and is then treated as partial. Ignore generated folders in `.fortis.json` to keep scans quick.
 
 ## Windows
 
@@ -220,7 +471,7 @@ The folder can hold the zips (in subfolders too) or the advisories already unzip
 
 Rules run locally. When your plan syncs findings, the CLI sends the rule ID, severity, file path,
 line number and a masked copy of the line (secrets and BVN/NIN reduced to their last four characters).
-It never sends your source files. `--no-upload` keeps everything local.
+It never sends your source files. `--no-upload` keeps everything local. `fortis scan --verify` is the one exception that sends a secret: each leaked key goes to its own provider's API, and nowhere else, to check whether it still works (see [Is a leaked key still live?](#is-a-leaked-key-still-live)). Without that flag, no key leaves your machine.
 
 Rule packs are signed by the Fortis API with Ed25519 and verified before use. The signing key is pinned
 on first use; set `FORTIS_RULES_PUBLIC_KEY` to pin it explicitly in CI.
@@ -233,7 +484,7 @@ const testKey = 'sk_test_…'; // fortis-ignore
 const t = await Transfer.findById(req.params.id);
 ```
 
-Any comment style works, for example `# fortis-ignore` in Python or YAML.
+Any comment style works, for example `# fortis-ignore` in Python or YAML. Dockerfiles only allow comments on their own line, so use `# fortis-ignore-next-line` above the `FROM`, with your reason on the lines before it.
 
 Or exclude paths in `.fortis.json`: `{ "ignore": ["fixtures/**"] }`.
 
@@ -241,25 +492,36 @@ The git hook can be skipped once with `git push --no-verify`.
 
 ## Releasing (maintainers)
 
-First release, from a maintainer's machine (npm asks for a 2FA code):
+One-time setup, by the package owner on each registry:
 
-```bash
-pnpm install && pnpm --filter fortis-watchdog build
-cd packages/cli && pnpm publish --access public --tag beta
-```
+- **npm:** on npmjs.com, package → Settings → Trusted publishing → GitHub Actions, repository `Divine-mercyx/fortis`, workflow `release-cli.yml`. Until then the npm step fails with a 404, because no token is stored in GitHub.
+- **PyPI:** on pypi.org, add a pending publisher for `fortis-watchdog`, with repository `Divine-mercyx/fortis`, workflow `release-cli.yml`, environment `pypi`.
 
-Then on npmjs.com: package → Settings → Trusted publishing → GitHub Actions, repository
-`Divine-mercyx/fortis`, workflow `release-cli.yml`. After that, bump `version` in
-`packages/cli/package.json` and push a matching tag (for example `cli-v0.1.0`). GitHub Actions then:
+To release, bump `version` in `packages/cli/package.json` and push a matching tag (for example `cli-v0.1.0`). GitHub Actions then:
 
 - tests, and builds and smoke-tests a binary on each platform;
+- refreshes the end-of-life dates the Dockerfile rules use, from [endoflife.date](https://endoflife.date), before building. If the site can't be reached, the build uses the dates in the repository. Commit a fresh copy now and then with `node scripts/refresh-eol.mjs`;
 - runs the install-and-push check (`scripts/e2e.sh`) for npm, pnpm, Yarn 1, Yarn 4 Plug'n'Play, Bun, a global install, the binary, the install script and the Docker image, on Linux, macOS (arm64 and x64) and Windows. Nothing is published unless all of them pass. Run one locally with `bash scripts/e2e.sh npm fortis-watchdog-<version>.tgz`;
 - publishes a GitHub Release with the binaries, install scripts, checksums and build attestations;
 - pushes the Docker image to `ghcr.io`;
-- publishes to npm with provenance. Versions with a pre-release suffix go to the `beta` tag;
+- publishes to npm with provenance. Versions with a pre-release suffix go to the `beta` tag. A version that's already on npm (published by hand) is skipped, not treated as a failure;
+- uses this version's changelog section below as the release notes. Before tagging, change its heading from "(unreleased)" to the release date;
 - builds, tests and publishes the wheels to PyPI (TestPyPI on a fork). `packages/python/build_wheel.py` makes one by hand.
 
-To build a binary for your own machine, run `pnpm --filter fortis-watchdog build:binary`. The result goes in `dist-sea/`. A tag on a fork runs everything except npm, which makes a safe dry run; set `FORTIS_REPO` to install from it.
+A tag also signs the macOS and Windows binaries, builds the Alpine ones, and updates the package managers. Each store or signing step without its secret is skipped. These are set up once, in a GitHub environment called `release` limited to `cli-v*` tags:
+
+| Secrets | What they need |
+|---|---|
+| `APPLE_CERT_P12_BASE64`, `APPLE_CERT_PASSWORD`, `APPLE_API_KEY_P8_BASE64`, `APPLE_API_KEY_ID`, `APPLE_API_ISSUER_ID` | An Apple Developer ID Application certificate, and an App Store Connect API key |
+| `WINDOWS_CERT_PFX_BASE64`, `WINDOWS_CERT_PASSWORD` | A code-signing certificate you can export as a PFX |
+| `PACKAGE_REPOS_TOKEN` | A token that can push to `Divine-mercyx/homebrew-tap` and `Divine-mercyx/scoop-bucket` |
+| `WINGET_TOKEN` | A classic token with the `public_repo` scope, for pull requests to `microsoft/winget-pkgs` |
+
+Workflow actions are pinned to commit SHAs, and runners to image versions, so a release can't change because an action moved its tag. Dependabot proposes updates to the pins.
+
+Release binaries for macOS and Linux are made from a small Node, built by `scripts/build-node-runtime.sh` without the parts the CLI never uses. CI caches it, and fails if a binary goes over 60 MB or its download over 25 MB.
+
+To build a binary for your own machine, run `pnpm --filter fortis-watchdog build:binary`. It uses the Node you're running, so it's about twice the size of a release. Set `FORTIS_NODE_RUNTIME` to use another. The result goes in `dist-sea/`. A tag on a fork runs everything except npm, which makes a safe dry run; set `FORTIS_REPO` to install from it.
 
 Publishing a tarball by hand: `npm pack` rebuilds `dist/` first, so the packed CLI always reports
 the version in `package.json`. Publish it with `npm publish fortis-watchdog-<version>.tgz --tag beta`.
@@ -274,9 +536,66 @@ the version in `package.json`. Publish it with `npm publish fortis-watchdog-<ver
 
 Keys are read from `FORTIS_KEY`, then from `~/.config/fortis/credentials.json` (written by `fortis login`, mode 0600).
 
+Fortis warns about unknown settings and wrong types, and suggests what you may have meant, such as `failOn` for `failon`. For autocomplete in your editor, add this line. `fortis init` adds it for you:
+
+```json
+{ "$schema": "https://cdn.jsdelivr.net/npm/fortis-watchdog/fortis.schema.json" }
+```
+
+## When something isn't working
+
+```bash
+fortis doctor
+```
+
+This checks each of these, and prints the fix for anything wrong:
+
+- the version, and whether a newer one exists;
+- how Fortis is installed, and whether the git hook can find it;
+- whether the hook is installed and current, and is the one git will run (`core.hooksPath`, Husky, lefthook, pre-commit);
+- `.fortis.json`;
+- your key and plan;
+- whether OSV and the Fortis API can be reached, through your proxy if you have one;
+- your git version, shallow clones, and lockfiles;
+- Docker, for `fortis test`;
+- your staging target, with `--target` or `target` in `.fortis.json`.
+
+It exits 1 if something stops Fortis doing its job. Things that are only worth knowing, such as a newer version, no key on the free plan, or no Docker, are shown without failing. `--strict` fails on those too, `--json` prints the results as data, and `--offline` skips the network checks.
+
 ## Changelog
 
-**0.1.0-beta.12** (unreleased)
+**0.1.0-beta.13** (unreleased)
+- The dependency check reads Bun's `bun.lock`, workspaces and aliases included, and works out which packages are dev-only from it. A project with only the old binary `bun.lockb` is told how to get a `bun.lock`.
+- Mono and Dojah secret keys and Africa's Talking API keys are named, each with where to rotate it. Test keys are reported as high, live keys as critical, and public keys are left alone.
+- A secret key that starts `sk_live_` or `sk_test_` and matches no known shape is reported as Stripe, Paystack, Korapay or BudPay, since Korapay and BudPay use the same prefix.
+- The secret checks read Jupyter notebooks as their cells and outputs, decode base64 values and the `data:` of Kubernetes `Secret` manifests, and report encrypted PEM keys. A PEM placeholder in JSON (`-----BEGIN PRIVATE KEY-----\n...`) is no longer reported as a key.
+- `fortis scan --verify` asks each leaked key's own provider, with one read-only call, whether it still works, and labels the finding live, revoked or unknown, so you know what to rotate first. 15 providers are covered, including Paystack, Stripe, Flutterwave, GitHub and Slack. It's off by default; keys only go to their own provider's API. Plans that sync findings show the label in the dashboard.
+- SARIF output keeps `fixedVersion` on dependency findings; a second `properties` object had been replacing it.
+
+**0.1.0-beta.12** (2026-11-09)
+- `fortis update` updates a binary install, and a notice once a day says when a newer version exists. It's off in CI and with `FORTIS_NO_UPDATE_CHECK=1`.
+- The install script works on Alpine and other musl systems, with new `linux-x64-musl` and `linux-arm64-musl` builds. They need `apk add libstdc++`.
+- Install with Homebrew, Scoop or winget, and macOS and Windows binaries are signed, once the release setup is finished.
+- `fortis ci init` writes current major versions of GitHub's actions, so your workflow gets no Node.js 20 deprecation warnings.
+- `fortis ci init` without a Fortis key writes the free code scan only, with no secrets to set up and no staging job. `--staging` adds it.
+- The generated GitHub workflow installs the pinned, checksum-checked binary instead of using the Fortis Action by tag, so Fortis's own SUP-GHA-001 rule doesn't report it.
+- `fortis ci init --provider` also writes pipelines for Bitbucket, Azure DevOps, Jenkins, CircleCI and Buildkite, using the binary or Docker image, so Node isn't needed.
+- `fortis scan --pr-comment` posts one comment per pull request on GitHub and GitLab, listing only what it adds, and updates it in place.
+- `fortis scan --junit` writes JUnit XML for CI test reports.
+- Setups for pre-commit, lefthook and Husky are documented under "Other git hook managers".
+- `fortis doctor` finds what isn't working and prints the fix: the install, the hook, your key, network access, git, lockfiles and Docker.
+- A typo in `.fortis.json` is no longer silently ignored: Fortis warns and suggests the right name. A JSON Schema gives editors autocomplete.
+- `fortis access --writes` checks whether one customer can update or delete another's records, using throwaway records it creates first. It reports **FX-BOLA-002**. The default stays read-only.
+- Access checks cover GraphQL. `fortis access init --graphql <url>` introspects the schema and tests the queries and mutations that take an ID.
+- `fortis access init` also reads Postman collections (`--postman`) and HAR files (`--har`).
+- `fortis test` uses a locally installed ZAP when Docker isn't available. `FORTIS_ZAP_PATH` chooses a specific one.
+- `fortis scan --paths-from` scans only the files you list, and `--json` now includes the repository `root` and marks findings accepted in the baseline. The new VS Code extension uses both.
+- FX-OTP-001 also catches a code made with `Math.random` in a variable such as `verificationCode` or `resetToken`.
+- Four new fintech rules for JavaScript, TypeScript and Python: **FX-MONEY-001** (money as floating point), **FX-PCI-001** (card data in logs, analytics or plain text), **FX-REF-001** (predictable transaction references) and **FX-AMT-001** (charge amounts taken from the request).
+- The six fintech rules now read Go (net/http, Gin, Echo and Fiber, with GORM and sqlx) and C# (ASP.NET Core controllers and minimal APIs, with Entity Framework).
+- The six fintech rules now read PHP: Laravel controllers, routes and API resources, on Eloquent and the query builder.
+- The six fintech rules now read Java and Kotlin: Spring Boot controllers and services, on Spring Data and JdbcTemplate.
+- The macOS and Linux binaries are much smaller, because they use a Node without the parts the CLI never uses. Only English locale data is included.
 - Python is fully supported: `pip install fortis-watchdog`, the fintech rules for Django, Django REST, Flask and FastAPI, and dev packages told apart in uv and Poetry lockfiles.
 - `pip install` needs no Node, and the git hook finds the CLI in `.venv` or `venv` even when it isn't active, and through `uv run` and `poetry run`.
 - More secrets are caught in Python: real-looking defaults such as `os.getenv("KEY", "…")`, SQLAlchemy connection URLs, tokens in URLs, PyPI tokens and notebooks.
@@ -287,6 +606,10 @@ Keys are read from `FORTIS_KEY`, then from `~/.config/fortis/credentials.json` (
 - New token formats: SendGrid, Mailgun, Resend, Slack and Discord webhooks, Telegram, OpenAI, Anthropic, Azure Storage, DigitalOcean, Render, npm, PyPI, RubyGems, NuGet, Docker Hub, `.npmrc` tokens, Supabase `service_role` keys, Twilio auth tokens and Google service-account keys. `.npmrc`, `.pypirc`, `.netrc` and `.yarnrc` are now scanned.
 - SeerBit, OPay and Squad sandbox secret keys are named.
 - A repository with only lockfiles now shows why the dependency check failed, instead of "Found no files to scan".
+- Windows: the hook finds the CLI from GitHub Desktop, VS Code and other apps, and CRLF files, BOMs and backslash paths are handled. A Windows baseline matches a Mac or Linux one.
+- Shallow CI clones, submodules (`--submodules`), worktrees, detached HEAD and sparse checkouts are handled. Large repositories are read one file at a time, with a time budget.
+- Python: the fintech rules cover Django, Flask and FastAPI. More lockfiles are read (`pdm.lock`, `pylock.toml`), and packages without an exact version are named, with how to pin them. Install with pip, pipx or uv, or use the pre-commit hook.
+- Every install method is tested end to end on Linux, macOS and Windows before a release.
 
 **0.1.0-beta.11**
 - The dependency check reads Rust (`Cargo.lock`) and Dart/Flutter (`pubspec.lock`). A Rust or Flutter project without its lockfile, and Swift, CocoaPods or Elixir projects (not read yet), are now reported instead of passing as clean.

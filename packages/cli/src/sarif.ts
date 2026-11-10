@@ -20,7 +20,7 @@ export function toSarif(detections: Detection[]) {
       shortDescription: { text: r?.title ?? sample.title },
       fullDescription: { text: r?.summary ?? sample.title },
       help: { text: r ? `${r.summary}\n\nFix: ${r.fix}` : sample.title, markdown: r ? `${r.summary}\n\n**Fix:** ${r.fix}` : sample.title },
-      helpUri: `https://fortis.dev/rules/${id}`,
+      helpUri: 'https://fortis.dev/docs.html#rules',
       properties: { tags: ['security', r?.pack ?? 'fortis'], 'security-severity': SECURITY_SEVERITY[r?.severity ?? sample.severity] },
       defaultConfiguration: { level: LEVEL[r?.severity ?? sample.severity] },
     };
@@ -36,7 +36,6 @@ export function toSarif(detections: Detection[]) {
           ruleIndex: ids.indexOf(d.ruleId),
           level: LEVEL[d.severity],
           message: { text: `${d.title}${d.commit ? ` (introduced in commit ${d.commit.slice(0, 7)})` : ''}${d.fix ? `\n\nFix: ${d.fix}` : ''}` },
-          ...(d.fixedVersion !== undefined ? { properties: { fixedVersion: d.fixedVersion } } : {}),
           locations: [
             {
               physicalLocation: {
@@ -46,7 +45,12 @@ export function toSarif(detections: Detection[]) {
             },
           ],
           partialFingerprints: { fortis: fingerprintOf(d) },
-          properties: { 'security-severity': SECURITY_SEVERITY[d.severity] },
+          // One properties object: a second one would replace the first.
+          properties: {
+            'security-severity': SECURITY_SEVERITY[d.severity],
+            ...(d.fixedVersion !== undefined ? { fixedVersion: d.fixedVersion } : {}),
+            ...(d.secretStatus ? { secretStatus: d.secretStatus } : {}),
+          },
         })),
       },
     ],

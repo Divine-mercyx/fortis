@@ -1,0 +1,9 @@
+model Wallet {
+  id       String  @id
+  balance  Float // @hit
+  fee      Float // @hit
+  total    Float // @hit
+  rating   Float
+  amount   Decimal
+  price    Int
+}

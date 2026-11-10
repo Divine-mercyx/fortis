@@ -1,0 +1,70 @@
+name: Nightly accuracy
+
+# Things that can change without a commit here: OSV's API, and how the rules behave on real code.
+# A scheduled failure opens one issue, and a later pass closes it. See scripts/report-nightly.mjs.
+
+on:
+  schedule:
+    - cron: '30 2 * * *'
+  workflow_dispatch:
+  # Checks changes to the corpus itself. These runs never touch issues.
+  pull_request:
+    paths:
+      - .github/workflows/nightly.yml
+      - packages/cli/bench/corpus.json
+      - packages/cli/bench/corpus.ts
+
+permissions:
+  contents: read
+
+jobs:
+  live-osv:
+    name: Live OSV tests
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter fortis-watchdog exec vitest run tests/osv-live.test.ts
+        env:
+          FORTIS_LIVE_OSV: '1'
+
+  corpus:
+    name: Real-world corpus
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    env:
+      FORTIS_CORPUS_DIR: ${{ github.workspace }}/.corpus
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .corpus
+          key: corpus-${{ hashFiles('packages/cli/bench/corpus.json') }}
+      - run: pnpm --filter fortis-watchdog corpus
+
+  report:
+    name: Open or close the issue
+    needs: [live-osv, corpus]
+    if: always() && github.event_name != 'pull_request'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - env:
+          GH_TOKEN: ${{ github.token }}
+          RESULT: ${{ (needs.live-osv.result == 'success' && needs.corpus.result == 'success') && 'success' || 'failure' }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: node packages/cli/scripts/report-nightly.mjs "$RESULT" "$RUN_URL"

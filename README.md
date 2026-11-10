@@ -11,6 +11,7 @@ The marketing site lives in a separate repo (`fortis-website`).
 apps/api         Backend API (Fastify, PostgreSQL, Drizzle)
 apps/web         Dashboard (Next.js), styled like fortis.dev
 packages/cli     The CLI (npm: fortis-watchdog, command: fortis)
+packages/vscode  The VS Code extension, also for Cursor and VSCodium
 packages/shared  Plans, rule catalogue, masking and request schemas shared by every app
 ```
 
@@ -116,3 +117,10 @@ Render's free plan puts a service to sleep after 15 minutes without traffic, and
 **The free-hours budget.** Render gives 750 free instance hours a month per workspace, shared by all services. Two services awake 24/7 need about 1,490, so both would be suspended mid-month. The default 12-hour window keeps two services at 744 hours. For always-on, upgrade just the API to a paid instance and set `KEEPALIVE_HOURS=0-24` on it.
 
 Once both services have slept overnight, nothing inside them is running to wake them up. `.github/workflows/wake-render.yml` makes one request each morning to start them. Set the repository variables `FORTIS_WEB_URL` and `FORTIS_API_URL` if your URLs differ from the defaults.
+
+## Contributing, security and licence
+
+- To work on Fortis, see [CONTRIBUTING.md](CONTRIBUTING.md).
+- For what's built, and the setup that's still left and who owns it, see [ROADMAP.md](ROADMAP.md).
+- To report a vulnerability, follow [SECURITY.md](SECURITY.md). Please do not open a public issue.
+- `packages/cli`, `packages/shared` and `packages/python` are MIT licensed. The rest of this repository, including `apps/api` and `apps/web`, is not open source. See [LICENSE](LICENSE).

@@ -185,7 +185,13 @@ describe('FX-SEC-001 names the right provider', () => {
     expect(title(['sk', 'live', hex].join('_'))).toBe('Live Paystack secret key in code');
     expect(title(['sk', 'test', hex].join('_'))).toBe('Paystack test secret key in code');
     expect(title(['sk', 'live', stripeBody].join('_'))).toBe('Live Stripe secret key in code');
-    expect(title(['sk', 'live', 'a1B2c3D4e5F6g7H8i9J0k1L2m3N4'].join('_'))).toBe('Live Stripe or Paystack secret key in code');
+    expect(title(['sk', 'live', 'a1B2c3D4e5F6g7H8i9J0k1L2m3N4'].join('_'))).toBe('Live Stripe, Paystack, Korapay or BudPay secret key in code');
+  });
+  it('names Korapay and BudPay among the providers a key of no known shape can belong to', () => {
+    // Both use sk_live_ / sk_test_ and document no length or alphabet, so neither can be named alone.
+    expect(title(['sk', 'live', 'aB3dE6gH9jK2mN5pQ8sT1vW4yZ7bC0eF3hI6kL9n'].join('_'))).toBe('Live Stripe, Paystack, Korapay or BudPay secret key in code');
+    const d = run(paymentKeyRule, 'src/pay.ts', `const k = '${['sk', 'test', 'q7w2e9r4t1y6u3i8o5p0a7s2d9f4g1h6j3k8l5z'].join('_')}';`);
+    expect(d.map((x) => [x.severity, x.title])).toEqual([['high', 'Stripe, Paystack, Korapay or BudPay test secret key in code']]);
   });
   it('reports Stripe restricted keys and webhook secrets, and masks them', () => {
     expect(title(['rk', 'live', stripeBody].join('_'))).toBe('Live Stripe restricted key in code');
@@ -219,7 +225,7 @@ describe('SEC-GEN-001 SaaS, cloud and registry tokens', () => {
   });
 
   it('calls a PEM inside a service-account JSON a Google Cloud key', () => {
-    const src = `{\n  "type": "service_account",\n  "private_key": "-----BEGIN PRIVATE KEY-----\\nMIIE\\n"\n}`; // fortis-ignore: test input
+    const src = `{\n  "type": "service_account",\n  "private_key": "-----BEGIN PRIVATE KEY-----\\nMIIEvQIBADANBgkqhkiG9w0BAQEFAASC\\n"\n}`; // fortis-ignore: test input
     expect(run(genericSecretRule, 'deploy/sa.json', src).map((d) => [d.line, d.severity, d.title])).toEqual([[3, 'critical', 'Google Cloud service account key in code']]);
   });
 
@@ -254,5 +260,56 @@ describe('FX-SEC-001 African payment providers', () => {
   it('leaves public keys alone under every rule', () => {
     const src = `export const SEERBIT_PUBLIC_KEY = '${SEERBIT_PUB}';\nexport const OPAY_PUBLIC_KEY = '${OPAY_PUB}';`;
     expect([...run(paymentKeyRule, 'src/pay.ts', src), ...run(genericSecretRule, 'src/pay.ts', src)]).toEqual([]);
+  });
+});
+
+describe('SEC-GEN-001 African open banking, KYC and messaging keys', () => {
+  const BODY = 'aB3dE6gH9jK2mN5pQ8sT1vW4';
+  const MONO_LIVE = ['live', 'sk', BODY].join('_');
+  const MONO_TEST = ['test', 'sk', BODY].join('_');
+  const DOJAH_PROD = ['prod', 'sk', BODY].join('_');
+  const AT_KEY = ['atsk', '0a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b'].join('_');
+  const src = [
+    `const mono = axios.create({ headers: { 'mono-sec-key': '${MONO_LIVE}' } });`,
+    `const dojah = { AppId: 'app', Authorization: '${DOJAH_PROD}' };`,
+    `const sandbox = new Mono({ secretKey: '${MONO_TEST}' });`,
+    `const at = AfricasTalking({ username: 'acme', apiKey: '${AT_KEY}' });`,
+  ].join('\n');
+
+  it('names each provider, with live keys critical and test keys high', () => {
+    expect(run(genericSecretRule, 'src/kyc.ts', src).map((d) => [d.line, d.severity, d.title])).toEqual([
+      [1, 'critical', 'Live Mono secret key in code'],
+      [2, 'critical', 'Live Dojah secret key in code'],
+      [3, 'high', 'Mono or Dojah test secret key in code'],
+      [4, 'high', "Africa's Talking API key in code"],
+    ]);
+    expect(run(paymentKeyRule, 'src/kyc.ts', src)).toEqual([]);
+  });
+
+  it('says where to rotate each key', () => {
+    const fixes = run(genericSecretRule, 'src/kyc.ts', src).map((d) => d.fix);
+    expect(fixes[0]).toContain('Mono dashboard');
+    expect(fixes[1]).toContain('Dojah dashboard');
+    expect(fixes[2]).toMatch(/Mono .* or Dojah/);
+    expect(fixes[3]).toContain("Africa's Talking dashboard");
+  });
+
+  it('masks the keys and keeps the prefix that names the provider', () => {
+    const masked = src.split('\n').map((line) => maskSnippet(line));
+    for (const key of [MONO_LIVE, DOJAH_PROD, MONO_TEST, AT_KEY]) expect(masked.join('\n')).not.toContain(key.slice(-16));
+    expect(masked[0]).toContain('live_sk_••••••••');
+    expect(masked[1]).toContain('prod_sk_••••••••');
+    expect(masked[2]).toContain('test_sk_••••••••');
+    expect(masked[3]).toContain('atsk_••••••••');
+  });
+
+  it('leaves Mono public keys, docs placeholders and env reads alone', () => {
+    const near = [
+      `export const MONO_PUBLIC_KEY = '${['live', 'pk', BODY].join('_')}';`,
+      `export const MONO_TEST_PUBLIC_KEY = '${['test', 'pk', BODY].join('_')}';`,
+      "const docs = { secretKey: 'live_sk_...', apiKey: 'atsk_your_actual_key_here' };",
+      'const k = process.env.MONO_SECRET_KEY ?? process.env.AT_API_KEY;',
+    ].join('\n');
+    expect(run(genericSecretRule, 'src/kyc.ts', near)).toEqual([]);
   });
 });

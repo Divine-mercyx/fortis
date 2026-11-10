@@ -1,0 +1,58 @@
+lockfileVersion: '9.0'
+
+settings:
+  autoInstallPeers: true
+  excludeLinksFromLockfile: false
+
+importers:
+
+  .:
+    dependencies:
+      escape-string-regexp:
+        specifier: https://codeload.github.com/sindresorhus/escape-string-regexp/tar.gz/refs/tags/v5.0.0
+        version: https://codeload.github.com/sindresorhus/escape-string-regexp/tar.gz/refs/tags/v5.0.0
+      is-number:
+        specifier: github:jonschlinkert/is-number#98e8ff1da1a89f93d1397a24d7413ed15421c139
+        version: https://codeload.github.com/jonschlinkert/is-number/tar.gz/98e8ff1da1a89f93d1397a24d7413ed15421c139
+      lodash:
+        specifier: 4.17.15
+        version: 4.17.15
+      ms:
+        specifier: https://registry.npmjs.org/ms/-/ms-2.1.3.tgz
+        version: 2.1.3
+      shared:
+        specifier: file:./shared
+        version: file:shared
+
+packages:
+
+  escape-string-regexp@https://codeload.github.com/sindresorhus/escape-string-regexp/tar.gz/refs/tags/v5.0.0:
+    resolution: {tarball: https://codeload.github.com/sindresorhus/escape-string-regexp/tar.gz/refs/tags/v5.0.0}
+    version: 5.0.0
+    engines: {node: '>=12'}
+
+  is-number@https://codeload.github.com/jonschlinkert/is-number/tar.gz/98e8ff1da1a89f93d1397a24d7413ed15421c139:
+    resolution: {tarball: https://codeload.github.com/jonschlinkert/is-number/tar.gz/98e8ff1da1a89f93d1397a24d7413ed15421c139}
+    version: 7.0.0
+    engines: {node: '>=0.12.0'}
+
+  lodash@4.17.15:
+    resolution: {integrity: sha512-8xOcRHvCjnocdS5cpwXQXVzmmh5e5+saE2QGoeQmbKmRS6J3VQppPOIt0MnmE+4xlZoumy0GPG0D0MVIQbNA1A==}
+
+  ms@2.1.3:
+    resolution: {integrity: sha512-6FlzubTLZG3J2a/NVCAleEhjzq5oxgHyaCU9yYXvcLsvoVaHJq/s5xXI6/XXP6tz7R9xAOtHnSO/tXtF3WRTlA==}
+
+  shared@file:shared:
+    resolution: {directory: shared, type: directory}
+
+snapshots:
+
+  escape-string-regexp@https://codeload.github.com/sindresorhus/escape-string-regexp/tar.gz/refs/tags/v5.0.0: {}
+
+  is-number@https://codeload.github.com/jonschlinkert/is-number/tar.gz/98e8ff1da1a89f93d1397a24d7413ed15421c139: {}
+
+  lodash@4.17.15: {}
+
+  ms@2.1.3: {}
+
+  shared@file:shared: {}

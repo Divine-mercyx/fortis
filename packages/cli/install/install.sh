@@ -27,8 +27,13 @@ esac
 if [ "$OS" = macos ] && [ "$ARCH" = x64 ] && [ "$(sysctl -n sysctl.proc_translated 2>/dev/null || echo 0)" = 1 ]; then
   ARCH=arm64
 fi
+# Alpine and other musl systems have their own build, which needs the C++ runtime Node is built on.
+LIBC=""
 if [ "$OS" = linux ] && { [ -f /etc/alpine-release ] || ldd --version 2>&1 | grep -qi musl; }; then
-  fail "the binary needs glibc, and this system uses musl. Use the Docker image, or npm (npm i -D fortis-watchdog)."
+  LIBC="-musl"
+  if [ ! -e /usr/lib/libstdc++.so.6 ] && [ ! -e /lib/libstdc++.so.6 ]; then
+    fail "this build needs libstdc++. Install it first: apk add libstdc++"
+  fi
 fi
 
 # FORTIS_DOWNLOAD_BASE: a mirror (or, in Fortis's own tests, a local folder as file://...).
@@ -39,9 +44,9 @@ elif [ -n "$VERSION" ]; then
 else
   BASE="https://github.com/$REPO/releases/latest/download"
 fi
-ASSET="fortis-$OS-$ARCH.tar.gz"
+ASSET="fortis-$OS-$ARCH$LIBC.tar.gz"
 
-# Small files quietly; the binary with a progress bar (about 40 MB), so a slow line doesn't look
+# Small files quietly; the binary with a progress bar, so a slow line doesn't look
 # like a hang. Retries dropped connections, and gives up if nothing arrives for a minute.
 fetch() {
   if command -v curl >/dev/null 2>&1; then
@@ -60,7 +65,7 @@ fetch() {
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 
-echo "Downloading $ASSET (about 40 MB) ..."
+echo "Downloading $ASSET ..."
 fetch "$BASE/$ASSET" "$TMP/$ASSET" progress || fail "could not download $BASE/$ASSET (check your connection and run this again)"
 fetch "$BASE/SHA256SUMS" "$TMP/SHA256SUMS" || fail "could not download the checksums"
 

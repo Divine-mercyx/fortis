@@ -7,9 +7,11 @@
  *   pnpm --filter fortis-watchdog bench --update   # record current scores as the new floor
  */
 import { readdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { dirname, join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { ALL_LANGUAGES, loadGrammars } from '../src/analysis/parser';
+import { createProject } from '../src/analysis/project';
 import { FILE_RULES } from '../src/rules/index';
 import { emptyContext, TEST_PATH, type SourceFile } from '../src/rules/types';
 import { buildContext } from '../src/scan';
@@ -34,7 +36,14 @@ const FAKES: Record<string, string> = {
   OPAY_PRIVATE: ['OPAY', 'PRV', rand(30, '0123456789')].join(''),
   OPAY_PUBLIC: ['OPAY', 'PUB', rand(30, '0123456789')].join(''),
   SQUAD_SANDBOX: ['sandbox', 'sk', rand(44, '0123456789abcdef')].join('_'),
-  MONNIFY_PROD: ['MK', 'PROD', rand(10, 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789')].join('_'),
+  KORAPAY_LIVE: ['sk', 'live', rand(40)].join('_'),
+  BUDPAY_TEST: ['sk', 'test', rand(39, 'abcdefghijklmnopqrstuvwxyz0123456789')].join('_'),
+  MONO_LIVE: ['live', 'sk', rand(20)].join('_'),
+  MONO_TEST: ['test', 'sk', rand(20)].join('_'),
+  MONO_PUBLIC: ['live', 'pk', rand(20)].join('_'),
+  DOJAH_PROD: ['prod', 'sk', rand(25)].join('_'),
+  AT_KEY: ['atsk', rand(64, '0123456789abcdef')].join('_'),
+  MONNIFY_PROD:['MK', 'PROD', rand(10, 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789')].join('_'),
   AWS_KEY: `AKIA${rand(16, 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567')}`,
   GH_TOKEN: `ghp_${rand(36)}`,
   GENERIC: rand(28),
@@ -68,22 +77,48 @@ const FAKES: Record<string, string> = {
   WEBHOOK_SECRET: ['whsec', rand(32)].join('_'),
 };
 
+// Encoded values (base64 in config, Kubernetes Secret data), from the fakes above.
+const b64 = (s: string) => Buffer.from(s).toString('base64');
+const PEM = [['-----BEGIN', 'PRIVATE KEY-----'].join(' '), 'MIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQC7', `${rand(64)}`, '-----END PRIVATE KEY-----', ''].join('\n');
+Object.assign(FAKES, {
+  PAYSTACK_LIVE_B64: b64(FAKES.PAYSTACK_LIVE!),
+  GH_TOKEN_B64: b64(FAKES.GH_TOKEN!),
+  GH_TOKEN_B64URL: Buffer.from(FAKES.GH_TOKEN!).toString('base64url'),
+  PEM_B64: b64(PEM),
+  PEM_JSON: JSON.stringify(PEM).slice(1, -1),
+  ENCRYPTED_PEM_JSON: JSON.stringify(PEM.replace(/PRIVATE KEY/g, 'ENCRYPTED PRIVATE KEY')).slice(1, -1),
+  PG_URL_B64: b64(`postgres://app:${rand(20)}@db.prod.example.com:5432/app`),
+  K8S_PASSWORD_B64: b64(rand(24)),
+  K8S_USER_B64: b64('admin'),
+  K8S_HOST_B64: b64('db.prod.example.com'),
+  PLAIN_TEXT_B64: b64('This is ordinary text that happens to be base64 encoded for transport.'),
+  SHA512_B64: Buffer.from(rand(64, '0123456789abcdef'), 'hex').toString('base64'),
+  PNG_B64: Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, ...Array.from({ length: 60 }, (_, i) => (i * 37) % 256)]).toString('base64'),
+});
+
 type Score = { tp: number; fp: number; fn: number; misses: string[]; falsePositives: string[] };
 
 /** Scored per language, so a strong JavaScript score can't hide a weak Python one. */
-const scoreKey = (ruleId: string, path: string) => (/\.py$/.test(path) ? `${ruleId}:py` : ruleId);
+const scoreKey = (ruleId: string, path: string) => (/\.py$/.test(path) ? `${ruleId}:py` : /\.go$/.test(path) ? `${ruleId}:go` : /\.cs$/.test(path) ? `${ruleId}:cs` : /\.php$/.test(path) ? `${ruleId}:php` : /\.java$/.test(path) ? `${ruleId}:java` : /\.kt$/.test(path) ? `${ruleId}:kt` : ruleId);
 
-export function runBench(): Record<string, Score> {
+export async function runBench(): Promise<Record<string, Score>> {
+  await loadGrammars(ALL_LANGUAGES);
   const scores: Record<string, Score> = {};
   for (const ruleId of readdirSync(casesDir)) {
     const rules = FILE_RULES.filter((r) => r.id === ruleId);
     if (!rules.length) throw new Error(`bench/cases/${ruleId}: no rule with that ID`);
-    const files: SourceFile[] = readdirSync(join(casesDir, ruleId)).map((name) => {
+    const names = readdirSync(join(casesDir, ruleId), { recursive: true, withFileTypes: true })
+      .filter((e) => e.isFile())
+      .map((e) => relative(join(casesDir, ruleId), join(e.parentPath, e.name)).replace(/\\/g, '/'));
+    const files: SourceFile[] = names.map((name) => {
       const text = readFileSync(join(casesDir, ruleId, name), 'utf8').replace(/\{\{(\w+)\}\}/g, (_, k: string) => FAKES[k] ?? k);
-      // A realistic app path, so path-based rules (money words, test folders) behave as in a repo.
-      return { path: `src/${name.replace(/\.(txt)$/, '')}`, text, lines: text.split(/\r?\n/) };
+      // A realistic app path, so path-based rules (money words, test folders) behave as in a repo. A case in
+      // a subfolder keeps its own path, for rules that need one, such as .github/workflows/ci.yml.
+      return { path: name.includes('/') ? name : `src/${name.replace(/\.(txt)$/, '')}`, text, lines: text.split(/\r?\n/) };
     });
     const ctx = files.length ? buildContext(files) : emptyContext();
+    // Each folder is one small project, so a case can follow a call into another file in it.
+    ctx.project = createProject(files.map((f) => f.path), (p) => files.find((f) => f.path === p) ?? null);
     for (const f of files) {
       const s = (scores[scoreKey(ruleId, f.path)] ??= { tp: 0, fp: 0, fn: 0, misses: [], falsePositives: [] });
       const expected = new Set(f.lines.flatMap((l, i) => (l.includes('@hit') ? [i + 1] : [])));
@@ -109,7 +144,7 @@ export const precision = (s: Score) => (s.tp + s.fp ? s.tp / (s.tp + s.fp) : 1);
 export const recall = (s: Score) => (s.tp + s.fn ? s.tp / (s.tp + s.fn) : 1);
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
-  const scores = runBench();
+  const scores = await runBench();
   const update = process.argv.includes('--update');
   const floors: Record<string, { precision: number; recall: number }> = update ? {} : JSON.parse(readFileSync(thresholdsFile, 'utf8'));
   let failed = false;

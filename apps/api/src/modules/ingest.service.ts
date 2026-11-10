@@ -80,7 +80,7 @@ export async function ingestScan(auth: CliAuth, input: CliScanInput): Promise<In
     // Normalise, mask and de-duplicate within this upload.
     const incoming = new Map<string, {
       ruleId: string; severity: string; title: string; file: string; line: number | null; snippet: string | null;
-      detail: string | null; kind: string; targetId: string | null;
+      detail: string | null; kind: string; targetId: string | null; secretStatus?: string;
     }>();
     for (const f of input.findings) {
       const file = normaliseFile(f.file);
@@ -100,6 +100,7 @@ export async function ingestScan(auth: CliAuth, input: CliScanInput): Promise<In
         detail: f.detail ? maskText(f.detail).slice(0, 4000) : null,
         kind: input.kind,
         targetId,
+        ...(f.secretStatus ? { secretStatus: f.secretStatus } : {}),
       });
     }
     const fingerprints = [...incoming.keys()];
@@ -126,6 +127,7 @@ export async function ingestScan(auth: CliAuth, input: CliScanInput): Promise<In
             projectId: auth.projectId,
             fingerprint,
             ...f,
+            ...(f.secretStatus ? { secretCheckedAt: now } : {}),
             status: 'open',
             firstSeenAt: now,
             lastSeenAt: now,
@@ -161,6 +163,8 @@ export async function ingestScan(auth: CliAuth, input: CliScanInput): Promise<In
           line: f.line,
           snippet: f.snippet,
           detail: f.detail,
+          // A scan without --verify says nothing about the key, so the last check stands.
+          ...(f.secretStatus ? { secretStatus: f.secretStatus, secretCheckedAt: now } : {}),
           lastSeenAt: now,
           lastScanId: scan.id,
           ...(reopen ? { status: 'open', fixedAt: null, statusReason: null } : {}),
@@ -188,6 +192,8 @@ export async function ingestScan(auth: CliAuth, input: CliScanInput): Promise<In
       }
       // "Couldn't check" is not "fixed": a failed dependency check leaves its findings open.
       if (input.incompleteChecks?.includes('dependencies')) conditions.push(ne(findings.ruleId, 'DEP-OSV'));
+      // A read-only access run never tested writes, so it can't say a write problem is fixed.
+      if (input.incompleteChecks?.includes('access-writes')) conditions.push(ne(findings.ruleId, 'FX-BOLA-002'));
       if (fingerprints.length) conditions.push(notInArray(findings.fingerprint, fingerprints));
       const closed = await tx
         .update(findings)
