@@ -104,6 +104,11 @@ jobs:
         if: runner.os == 'Windows' && env.WINDOWS_CERT_PFX_BASE64 != ''
         shell: pwsh
         run: ./packages/cli/scripts/sign-windows.ps1 -Binary packages/cli/dist-sea/fortis.exe
+      # beta.12's Linux binary needed glibc 2.38, so its Docker image failed and its wheels' manylinux_2_28
+      # label was wrong. Nothing publishes unless this binary runs on glibc 2.28.
+      - name: The binary runs on glibc 2.28 (Debian 12, Ubuntu 22.04, AlmaLinux 8)
+        if: runner.os == 'Linux'
+        run: bash packages/cli/scripts/check-old-linux.sh packages/cli/dist-sea/fortis
       - name: Smoke test
         shell: bash
         run: |

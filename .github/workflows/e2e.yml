@@ -133,6 +133,9 @@ jobs:
           chmod +x .runtime/node
           echo "FORTIS_NODE_RUNTIME=$PWD/.runtime/node" >> "$GITHUB_ENV"
       - run: pnpm --filter fortis-watchdog build:binary
+      - name: The binary runs on glibc 2.28 (Debian 12, Ubuntu 22.04, AlmaLinux 8)
+        if: runner.os == 'Linux'
+        run: bash packages/cli/scripts/check-old-linux.sh packages/cli/dist-sea/fortis
       - name: Lay out a release folder for the installer
         shell: bash
         working-directory: packages/cli/dist-sea
