@@ -14,6 +14,7 @@ import { runScan } from '../src/scan';
  */
 const CASES: [string, string, string][] = [
   ['npm', 'package-lock.json', JSON.stringify({ packages: { '': {}, 'node_modules/axios': { version: '0.21.1' } } })],
+  ['npm (bun.lock)', 'bun.lock', '{"lockfileVersion": 1, "workspaces": {"": {"dependencies": {"axios": "0.21.1",},},}, "packages": {"axios": ["axios@0.21.1", "", {}, "sha512-x"],},}'],
   ['Packagist', 'composer.lock', JSON.stringify({ packages: [{ name: 'guzzlehttp/guzzle', version: 'v7.4.0' }] })],
   ['PyPI', 'requirements.txt', 'Django==3.2.0\n'],
   ['PyPI (uv.lock)', 'uv.lock', '[[package]]\nname = "app"\nversion = "1.0"\nsource = { virtual = "." }\ndependencies = [\n    { name = "django" },\n]\n\n[[package]]\nname = "django"\nversion = "3.2.0"\nsource = { registry = "https://pypi.org/simple" }\n'],

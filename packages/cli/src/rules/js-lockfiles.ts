@@ -3,12 +3,12 @@ import { join } from 'node:path';
 
 /*
  * Lockfile readers for the dependency check: npm (package-lock.json / npm-shrinkwrap.json),
- * pnpm (pnpm-lock.yaml v5, v6 and v9) and yarn (yarn.lock v1 and berry). No YAML library:
+ * pnpm (pnpm-lock.yaml v5, v6 and v9), yarn (yarn.lock v1 and berry) and Bun (bun.lock). No YAML library:
  * these files are machine-written with a fixed, indentation-based layout, so a line reader is
  * enough and keeps the CLI dependency-free.
  *
  * Every reader returns the installed packages and whether each is only needed for development.
- * When a lockfile doesn't say (pnpm v9, yarn), dev-only is worked out by walking the dependency
+ * When a lockfile doesn't say (pnpm v9, yarn, Bun), dev-only is worked out by walking the dependency
  * graph from package.json's production dependencies (every workspace's, for Yarn workspaces);
  * if that walk finds nothing, every package is treated as production so nothing is hidden.
  *
@@ -44,7 +44,7 @@ export function sourceOf(ref: string): PackageSource | undefined {
 export type Lockfile = { file: string; packages: LockedPackage[] };
 
 /** Lockfiles we read, in the order we prefer them when a repo has more than one. */
-export const SUPPORTED_LOCKFILES = ['package-lock.json', 'npm-shrinkwrap.json', 'pnpm-lock.yaml', 'yarn.lock'] as const;
+export const SUPPORTED_LOCKFILES = ['package-lock.json', 'npm-shrinkwrap.json', 'pnpm-lock.yaml', 'yarn.lock', 'bun.lock'] as const;
 
 const SEMVER = /^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.+-]*)?$/;
 
@@ -56,6 +56,7 @@ export function readLockfile(root: string): Lockfile | null {
     const manifest = readManifest(root);
     if (file === 'pnpm-lock.yaml') return { file, packages: parsePnpmLock(text) };
     if (file === 'yarn.lock') return { file, packages: parseYarnLock(text, manifest) };
+    if (file === 'bun.lock') return { file, packages: parseBunLock(text) };
     return { file, packages: parseNpmLock(text) };
   }
   return null;
@@ -460,4 +461,105 @@ function yarnChildren(body: Line[], field: string, berry: boolean): [string, str
     out.push([n, r]);
   }
   return out;
+}
+
+// ---------------------------------------------------------------- bun
+
+/** bun.lock is JSON with trailing commas (JSONC). Drops those and any comments, leaving strings alone. */
+export function parseJsonc(text: string): unknown {
+  let out = '';
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i]!;
+    if (c === '"') {
+      let j = i + 1;
+      while (j < text.length && text[j] !== '"') j += text[j] === '\\' ? 2 : 1;
+      out += text.slice(i, j + 1);
+      i = j;
+    } else if (c === '/' && text[i + 1] === '/') {
+      while (i < text.length && text[i] !== '\n') i++;
+      out += '\n';
+    } else if (c === '/' && text[i + 1] === '*') {
+      const end = text.indexOf('*/', i + 2);
+      i = end === -1 ? text.length : end + 1;
+    } else if (c === ',') {
+      let j = i + 1;
+      while (j < text.length && /\s/.test(text[j]!)) j++;
+      if (text[j] !== '}' && text[j] !== ']') out += c;
+    } else out += c;
+  }
+  return JSON.parse(out.charCodeAt(0) === 0xfeff ? out.slice(1) : out);
+}
+
+/** `name@spec` → [name, spec], for scoped names too. */
+function splitAt(ident: string): [string, string] {
+  const at = ident.indexOf('@', ident.startsWith('@') ? 1 : 0);
+  return at === -1 ? [ident, ''] : [ident.slice(0, at), ident.slice(at + 1)];
+}
+
+/** A package key's path of names: `@babel/highlight/chalk` → ['@babel/highlight', 'chalk']. */
+function keyNames(key: string): string[] {
+  const parts = key.split('/');
+  const out: string[] = [];
+  for (let i = 0; i < parts.length; i++) out.push(parts[i]!.startsWith('@') && i + 1 < parts.length ? `${parts[i]}/${parts[++i]}` : parts[i]!);
+  return out;
+}
+
+type BunDeps = { dependencies?: Record<string, string>; optionalDependencies?: Record<string, string>; peerDependencies?: Record<string, string>; devDependencies?: Record<string, string> };
+
+/**
+ * Bun's text lockfile (Bun 1.2 and later). `packages` maps a key to
+ * `["name@version", registry, { dependencies… }, integrity]`; the key is the name the package is
+ * installed under (an alias's own name), and nested copies are keyed by path, `parent/name`, which
+ * is how a dependency is found: the nearest key going up, as in node_modules. `workspaces` lists
+ * each workspace's dependencies and devDependencies, so dev-only packages come from the lockfile
+ * itself, by walking from the production ones.
+ */
+export function parseBunLock(text: string): LockedPackage[] {
+  const lock = parseJsonc(text) as { workspaces?: Record<string, BunDeps & { name?: string }>; packages?: Record<string, unknown[]> };
+  const pkgs = lock.packages ?? {};
+
+  // Each package is on its own line: `    "key": ["name@version", …],` inside "packages".
+  const lineOfKey = new Map<string, number>();
+  const all = text.split(/\r?\n/);
+  const start = all.findIndex((l) => /^\s*"packages"\s*:\s*\{/.test(l));
+  for (let i = start + 1; start !== -1 && i < all.length; i++) {
+    const m = /^\s*("(?:[^"\\]|\\.)*")\s*:\s*\[/.exec(all[i]!);
+    if (m) lineOfKey.set(JSON.parse(m[1]!) as string, i + 1);
+  }
+
+  const resolve = (from: string[], dep: string): string | undefined => {
+    for (let n = from.length; n >= 0; n--) {
+      const key = [...from.slice(0, n), dep].join('/');
+      if (pkgs[key]) return key;
+    }
+    return undefined;
+  };
+  const depNames = (d: BunDeps | undefined) => Object.keys({ ...d?.dependencies, ...d?.optionalDependencies, ...d?.peerDependencies });
+
+  const nodes = new Map<string, { name: string; version: string; line: number; deps: string[]; source?: PackageSource }>();
+  for (const [key, entry] of Object.entries(pkgs)) {
+    if (!Array.isArray(entry) || typeof entry[0] !== 'string') continue;
+    const [name, spec] = splitAt(entry[0]);
+    // The project's own code: workspaces and the root.
+    if (/^(?:workspace|root):/.test(spec)) continue;
+    const info = (entry.find((e, i) => i > 0 && e && typeof e === 'object' && !Array.isArray(e)) ?? {}) as BunDeps;
+    const source = /^(?:file|link):/.test(spec) ? 'local' : /^https?:\/\//.test(spec) ? (sourceOf(spec) ?? 'tarball') : sourceOf(spec);
+    const from = keyNames(key);
+    const deps = depNames(info)
+      .map((d) => resolve(from, d))
+      .filter((d): d is string => Boolean(d));
+    nodes.set(key, { name, version: source ? '' : spec, line: lineOfKey.get(key) ?? 0, deps, ...(source ? { source } : {}) });
+  }
+
+  // Roots: every workspace's dependencies, looked up from the workspace (a member's own copies are
+  // keyed under its name). Other workspaces are the project's own code, not roots.
+  const prodRoots: string[] = [];
+  const devRoots: string[] = [];
+  for (const [path, ws] of Object.entries(lock.workspaces ?? {})) {
+    const from = path && ws.name ? [ws.name] : [];
+    const roots = (names: string[]) => names.map((d) => resolve(from, d)).filter((d): d is string => Boolean(d) && nodes.has(d!));
+    prodRoots.push(...roots(depNames(ws)));
+    devRoots.push(...roots(Object.keys(ws.devDependencies ?? {})));
+  }
+  return classify(nodes, [...new Set(prodRoots)], [...new Set(devRoots)]);
 }

@@ -62,7 +62,8 @@ describe('runScan', () => {
     expect(none.notes.join(' ')).toMatch(/package\.json found but no lockfile/);
     expect(none.incompleteChecks).toEqual(['dependencies']);
     const bun = await runScan({ root: repo({ 'package.json': '{}', 'bun.lockb': 'x' }).dir, ...opts });
-    expect(bun.notes.join(' ')).toMatch(/Bun lockfiles are not read yet/);
+    expect(bun.notes.join(' ')).toMatch(/bun\.lockb is Bun's old binary lockfile.*bun install --save-text-lockfile/);
+    expect(bun.notes.join(' ')).not.toMatch(/package\.json found but no lockfile/);
     const pnpm = await runScan({ root: repo({ 'package.json': '{}', 'pnpm-lock.yaml': "lockfileVersion: '9.0'\n" }).dir, ...opts });
     expect(pnpm.notes.join(' ')).not.toMatch(/no lockfile/);
   });

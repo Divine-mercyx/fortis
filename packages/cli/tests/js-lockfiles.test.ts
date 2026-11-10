@@ -5,15 +5,16 @@ import { join } from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
 
 import { scanDependencies } from '../src/rules/dependencies';
-import { parsePnpmLock, parseYarnLock, readLockfile, splitPnpmKey } from '../src/rules/js-lockfiles';
+import { parseBunLock, parsePnpmLock, parseYarnLock, readLockfile, splitPnpmKey } from '../src/rules/js-lockfiles';
 
 /*
  * Fixtures are real lockfiles generated from the same package.json by npm 10, pnpm 10
- * (lockfile v9), pnpm 8 (v6), yarn 1.22 and yarn 4.5: prod deps lodash, react, react-dom
+ * (lockfile v9), pnpm 8 (v6), yarn 1.22, yarn 4.5 and Bun 1.4.4 (bun.lock, which `bun install` migrated
+ * from the npm fixture's package-lock.json, so every version matches): prod deps lodash, react, react-dom
  * (peer dep on react), @babel/code-frame; dev deps minimist, @types/node.
  */
 const FIXTURES = join(__dirname, 'fixtures', 'lockfiles');
-const FORMATS = ['npm', 'pnpm9', 'pnpm8', 'yarn1', 'berry'] as const;
+const FORMATS = ['npm', 'pnpm9', 'pnpm8', 'yarn1', 'berry', 'bun'] as const;
 
 const summary = (dir: string) => {
   const lock = readLockfile(join(FIXTURES, dir))!;
@@ -40,7 +41,7 @@ describe('lockfile readers', () => {
   }
 
   it('points findings at the line of the package in the lockfile', () => {
-    for (const f of ['pnpm9', 'pnpm8', 'yarn1', 'berry']) {
+    for (const f of ['pnpm9', 'pnpm8', 'yarn1', 'berry', 'bun']) {
       const lodash = readLockfile(join(FIXTURES, f))!.packages.find((p) => p.name === 'lodash')!;
       expect(lodash.line, f).toBeGreaterThan(1);
     }
@@ -69,7 +70,7 @@ describe('lockfile readers', () => {
   });
 });
 
-describe('dependency check on pnpm and yarn projects', () => {
+describe('dependency check on pnpm, yarn and Bun projects', () => {
   const dirs: string[] = [];
   afterAll(() => dirs.forEach((d) => rmSync(d, { recursive: true, force: true })));
 
@@ -83,9 +84,10 @@ describe('dependency check on pnpm and yarn projects', () => {
     return new Response(JSON.stringify({ id: 'GHSA-p6mc-m468-83gw', summary: 'Prototype Pollution in lodash', aliases: ['CVE-2020-8203'], database_specific: { severity: 'HIGH' } }));
   };
 
-  for (const f of ['pnpm9', 'yarn1', 'berry'] as const) {
+  const LOCKFILE = { pnpm9: 'pnpm-lock.yaml', yarn1: 'yarn.lock', berry: 'yarn.lock', bun: 'bun.lock' } as const;
+  for (const f of ['pnpm9', 'yarn1', 'berry', 'bun'] as const) {
     it(`${f}: finds the vulnerable package and reports the lockfile it came from`, async () => {
-      const lockfile = f === 'pnpm9' ? 'pnpm-lock.yaml' : 'yarn.lock';
+      const lockfile = LOCKFILE[f];
       const r = await scanDependencies(join(FIXTURES, f), [lockfile, 'package.json'], { fetchImpl: osv });
       expect(r.error).toBeUndefined();
       expect(r.checked).toBe(17); // dev-only packages are not checked by default
@@ -93,7 +95,7 @@ describe('dependency check on pnpm and yarn projects', () => {
       expect(r.detections[0]).toMatchObject({
         ruleId: 'DEP-OSV',
         severity: 'high',
-        file: f === 'pnpm9' ? 'pnpm-lock.yaml' : 'yarn.lock',
+        file: lockfile,
         snippet: 'lodash@4.17.15 · CVE-2020-8203',
       });
       expect(r.detections[0]!.line).toBeGreaterThan(1);
@@ -111,11 +113,11 @@ describe('dependency check on pnpm and yarn projects', () => {
 });
 
 describe('direct and indirect dependencies', () => {
-  for (const f of ['pnpm9', 'yarn1', 'berry'] as const) {
+  for (const f of ['pnpm9', 'yarn1', 'berry', 'bun'] as const) {
     it(`${f}: names the direct dependency an indirect one comes through`, () => {
       const dir = join(FIXTURES, f);
-      const lock = readFileSync(join(dir, f === 'pnpm9' ? 'pnpm-lock.yaml' : 'yarn.lock'), 'utf8');
-      const list = f === 'pnpm9' ? parsePnpmLock(lock) : parseYarnLock(lock, JSON.parse(readFileSync(join(dir, 'package.json'), 'utf8')));
+      const lock = readFileSync(join(dir, { pnpm9: 'pnpm-lock.yaml', yarn1: 'yarn.lock', berry: 'yarn.lock', bun: 'bun.lock' }[f]), 'utf8');
+      const list = f === 'pnpm9' ? parsePnpmLock(lock) : f === 'bun' ? parseBunLock(lock) : parseYarnLock(lock, JSON.parse(readFileSync(join(dir, 'package.json'), 'utf8')));
       expect(list.find((p) => p.name === '@babel/code-frame')).toMatchObject({ direct: true });
       expect(list.find((p) => p.name === 'chalk')).toMatchObject({ direct: false, via: '@babel/code-frame' });
     });
