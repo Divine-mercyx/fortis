@@ -1,6 +1,10 @@
 {
   "repos": [
-    {"repo": "stripe-samples/accept-a-payment", "commit": "1a57c3b2f5aaf4ecd8de59ab0b1c3c5638827625", "languages": ["JavaScript"], "minPackages": 1229, "findings": [
+    {"repo": "stripe-samples/accept-a-payment", "commit": "1a57c3b2f5aaf4ecd8de59ab0b1c3c5638827625", "languages": ["JavaScript"], "minPackages": 1065, "findings": [
+      {"rule": "SUP-GHA-001", "file": ".github/workflows/android_e2e.yml", "line": 29, "verdict": "true", "why": "Another publisher's action used by tag"},
+      {"rule": "SUP-GHA-001", "file": ".github/workflows/android_e2e.yml", "line": 38, "verdict": "true", "why": "Another publisher's action used by tag"},
+      {"rule": "SUP-GHA-001", "file": ".github/workflows/react_native_android_e2e.yml", "line": 29, "verdict": "true", "why": "Another publisher's action used by tag"},
+      {"rule": "SUP-GHA-001", "file": ".github/workflows/react_native_android_e2e.yml", "line": 38, "verdict": "true", "why": "Another publisher's action used by tag"}
     ]},
     {"repo": "PaystackHQ/sample-charge-card-backend", "commit": "885122564655a546d6f2e36621266f90e4228ec4", "languages": ["JavaScript"], "findings": [
     ]},
@@ -24,27 +28,44 @@
       {"rule": "SEC-GEN-001", "file": "documentation/tokenization.md", "line": 30, "verdict": "false", "why": "Sample value in API documentation"},
       {"rule": "SEC-GEN-001", "file": "documentation/tokenization.md", "line": 91, "verdict": "false", "why": "Sample value in API documentation"},
       {"rule": "SEC-GEN-001", "file": "documentation/transactions.md", "line": 541, "verdict": "false", "why": "Sample value in API documentation"},
-      {"rule": "SEC-GEN-001", "file": "documentation/transactions.md", "line": 616, "verdict": "false", "why": "Sample value in API documentation"}
+      {"rule": "SEC-GEN-001", "file": "documentation/transactions.md", "line": 616, "verdict": "false", "why": "Sample value in API documentation"},
+      {"rule": "SUP-GHA-001", "file": ".github/workflows/change-review.yml", "line": 39, "verdict": "true", "why": "Another publisher's action used by tag"},
+      {"rule": "SUP-GHA-001", "file": ".github/workflows/change-review.yml", "line": 42, "verdict": "true", "why": "Another publisher's action used by tag"},
+      {"rule": "SUP-GHA-001", "file": ".github/workflows/package-publish.yml", "line": 28, "verdict": "true", "why": "Another publisher's action used by tag"},
+      {"rule": "SUP-GHA-001", "file": ".github/workflows/package-publish.yml", "line": 54, "verdict": "true", "why": "Another publisher's action used by tag"}
     ]},
-    {"repo": "actualbudget/actual", "commit": "92865f32f307ec04e0556a8c2052819d49e8e204", "languages": ["TypeScript"], "minPackages": 2726, "findings": [
+    {"repo": "actualbudget/actual", "commit": "92865f32f307ec04e0556a8c2052819d49e8e204", "languages": ["TypeScript"], "minPackages": 1630, "findings": [
+      {"rule": "FX-MONEY-001", "file": "packages/sync-server/src/app-gocardless/banks/cetelem_cetmptp1xxx.ts", "line": 18, "verdict": "true", "why": "A bank amount negated through parseFloat"},
+      {"rule": "FX-MONEY-001", "file": "packages/sync-server/src/app-gocardless/banks/seb_kort_bank_ab.ts", "line": 46, "verdict": "true", "why": "A bank amount negated through parseFloat"},
       {"rule": "SEC-GEN-001", "file": "packages/sync-server/src/app-https-config.test.ts", "line": 10, "verdict": "true", "why": "A private key committed in a test"},
       {"rule": "SEC-GEN-001", "file": "packages/sync-server/src/app-https-config.test.ts", "line": 15, "verdict": "true", "why": "A private key committed in a test"},
       {"rule": "SEC-GEN-001", "file": "packages/sync-server/src/services/secrets-service.js", "line": 16, "verdict": "false", "why": "A setting's name, not a secret"},
-      {"rule": "SEC-GEN-001", "file": "packages/sync-server/src/services/secrets-service.js", "line": 21, "verdict": "false", "why": "A setting's name, not a secret"}
+      {"rule": "SEC-GEN-001", "file": "packages/sync-server/src/services/secrets-service.js", "line": 21, "verdict": "false", "why": "A setting's name, not a secret"},
+      {"rule": "SUP-IMG-002", "file": "Dockerfile", "line": 8, "verdict": "false", "why": "The development container's Dockerfile, with one stage named dev"},
+      {"rule": "SUP-IMG-002", "file": "packages/sync-server/docker/alpine.Dockerfile", "line": 1, "verdict": "true", "why": "Base image named by tag only"},
+      {"rule": "SUP-IMG-002", "file": "packages/sync-server/docker/alpine.Dockerfile", "line": 38, "verdict": "true", "why": "Base image named by tag only"},
+      {"rule": "SUP-IMG-002", "file": "packages/sync-server/docker/ubuntu.Dockerfile", "line": 1, "verdict": "true", "why": "Base image named by tag only"},
+      {"rule": "SUP-IMG-002", "file": "packages/sync-server/docker/ubuntu.Dockerfile", "line": 28, "verdict": "true", "why": "Base image named by tag only"},
+      {"rule": "SUP-IMG-002", "file": "sync-server.Dockerfile", "line": 1, "verdict": "true", "why": "Base image named by tag only"},
+      {"rule": "SUP-IMG-002", "file": "sync-server.Dockerfile", "line": 54, "verdict": "true", "why": "Base image named by tag only"}
     ]},
     {"repo": "django-oscar/django-oscar", "commit": "a5ed3c9c17d4cf6ee18aa9795b493172416ab68b", "languages": ["Python"], "findings": [
       {"rule": "SEC-GEN-001", "file": "sandbox/fixtures/auth.json", "line": 15, "verdict": "false", "why": "Password hash in a sample fixture"},
       {"rule": "SEC-GEN-001", "file": "sandbox/fixtures/auth.json", "line": 33, "verdict": "false", "why": "Password hash in a sample fixture"},
       {"rule": "SEC-GEN-001", "file": "sandbox/settings.py", "line": 120, "verdict": "true", "why": "Hard-coded default for Django's SECRET_KEY"},
-      {"rule": "SEC-GEN-001", "file": "src/oscar/test/testcases.py", "line": 35, "verdict": "false", "why": "Made-up password in a test helper"}
+      {"rule": "SEC-GEN-001", "file": "src/oscar/test/testcases.py", "line": 35, "verdict": "false", "why": "Made-up password in a test helper"},
+      {"rule": "SUP-GHA-001", "file": ".github/workflows/test.yml", "line": 66, "verdict": "true", "why": "Another publisher's action used by tag"},
+      {"rule": "SUP-IMG-002", "file": "Dockerfile", "line": 1, "verdict": "true", "why": "Base image named by tag only"}
     ]},
     {"repo": "apache/fineract", "commit": "405c18dcabfc235325e71616e816290234eead87", "languages": ["Java"], "findings": [
       {"rule": "SEC-GEN-001", "file": "integration-tests/src/test/java/org/apache/fineract/integrationtests/PasswordResetIntegrationTest.java", "line": 84, "verdict": "false", "why": "Made-up password in a test"},
       {"rule": "SEC-GEN-001", "file": "twofactor-tests/src/test/java/org/apache/fineract/twofactortests/TwoFactorAuthenticationTest.java", "line": 61, "verdict": "false", "why": "An HTTP header's name"}
     ]},
     {"repo": "moov-io/ach", "commit": "ff3a0988df1f84421b069bc58ff9c1315ba3b448", "languages": ["Go"], "minPackages": 71, "findings": [
+      {"rule": "SUP-IMG-002", "file": "Dockerfile", "line": 1, "verdict": "true", "why": "Base image named by tag only"}
     ]},
     {"repo": "bagisto/bagisto", "commit": "678a43c804321a310dd41fd39deda78d316ac6f5", "languages": ["PHP"], "minPackages": 181, "findings": [
+      {"rule": "FX-IDEM-001", "file": "packages/Webkul/Shop/src/Routes/customer-routes.php", "line": 189, "verdict": "false", "why": "An EU order-withdrawal request, which moves no money"},
       {"rule": "SEC-GEN-001", "file": "lang/ja/auth.php", "line": 17, "verdict": "false", "why": "A translated label"},
       {"rule": "SEC-GEN-001", "file": "lang/ja/passwords.php", "line": 19, "verdict": "false", "why": "A translated label"},
       {"rule": "SEC-GEN-001", "file": "packages/Webkul/Admin/src/Http/Controllers/User/AccountController.php", "line": 39, "verdict": "false", "why": "A validation rule, not a value"},
@@ -72,9 +93,32 @@
       {"rule": "SEC-GEN-001", "file": "packages/Webkul/Shop/src/Http/Requests/Customer/RegistrationRequest.php", "line": 31, "verdict": "false", "why": "A validation rule, not a value"},
       {"rule": "SEC-GEN-001", "file": "packages/Webkul/Shop/tests/Feature/Customers/LoginThrottleTest.php", "line": 31, "verdict": "false", "why": "Made-up value or a form field's name in a test"},
       {"rule": "SEC-GEN-001", "file": "packages/Webkul/Shop/tests/Feature/Customers/LoginThrottleTest.php", "line": 68, "verdict": "false", "why": "Made-up value or a form field's name in a test"},
-      {"rule": "SEC-GEN-001", "file": "packages/Webkul/User/src/Database/Factories/AdminFactory.php", "line": 27, "verdict": "false", "why": "Password hash in a test factory"}
+      {"rule": "SEC-GEN-001", "file": "packages/Webkul/User/src/Database/Factories/AdminFactory.php", "line": 27, "verdict": "false", "why": "Password hash in a test factory"},
+      {"rule": "SUP-GHA-001", "file": ".github/workflows/docker-publish.yml", "line": 155, "verdict": "true", "why": "Another publisher's action used by tag"},
+      {"rule": "SUP-GHA-001", "file": ".github/workflows/docker-publish.yml", "line": 160, "verdict": "true", "why": "Another publisher's action used by tag"},
+      {"rule": "SUP-GHA-001", "file": ".github/workflows/docker-publish.yml", "line": 163, "verdict": "true", "why": "Another publisher's action used by tag"},
+      {"rule": "SUP-GHA-001", "file": ".github/workflows/docker-publish.yml", "line": 170, "verdict": "true", "why": "Another publisher's action used by tag"},
+      {"rule": "SUP-GHA-001", "file": ".github/workflows/docker-publish.yml", "line": 217, "verdict": "true", "why": "Another publisher's action used by tag"},
+      {"rule": "SUP-GHA-001", "file": ".github/workflows/docker-publish.yml", "line": 220, "verdict": "true", "why": "Another publisher's action used by tag"},
+      {"rule": "SUP-GHA-001", "file": ".github/workflows/pest-tests.yml", "line": 129, "verdict": "true", "why": "Another publisher's action used by tag"},
+      {"rule": "SUP-GHA-001", "file": ".github/workflows/playwright-tests.yml", "line": 223, "verdict": "true", "why": "Another publisher's action used by tag"},
+      {"rule": "SUP-GHA-001", "file": ".github/workflows/playwright-tests.yml", "line": 90, "verdict": "true", "why": "Another publisher's action used by tag"},
+      {"rule": "SUP-GHA-001", "file": ".github/workflows/translation-tests.yml", "line": 24, "verdict": "true", "why": "Another publisher's action used by tag"},
+      {"rule": "SUP-IMG-002", "file": "docker/production/apache/Dockerfile", "line": 21, "verdict": "true", "why": "Base image named by tag only"},
+      {"rule": "SUP-IMG-002", "file": "docker/production/litespeed/Dockerfile", "line": 21, "verdict": "true", "why": "Base image named by tag only"},
+      {"rule": "SUP-IMG-002", "file": "docker/production/nginx/Dockerfile", "line": 21, "verdict": "true", "why": "Base image named by tag only"}
     ]},
     {"repo": "btcpayserver/btcpayserver", "commit": "c16fc29eb3aa5e9704257f3bb89ad173b95a2db6", "languages": ["C#"], "findings": [
+      {"rule": "FX-IDEM-001", "file": "BTCPayServer/Controllers/GreenField/GreenfieldPullPaymentController.cs", "line": 426, "verdict": "true", "why": "Creates a payout claim with no idempotency key"},
+      {"rule": "FX-IDEM-001", "file": "BTCPayServer/Controllers/GreenField/GreenfieldPullPaymentController.cs", "line": 480, "verdict": "true", "why": "Creates a payout with no idempotency key"},
+      {"rule": "FX-IDEM-001", "file": "BTCPayServer/Controllers/GreenField/GreenfieldPullPaymentController.cs", "line": 632, "verdict": "false", "why": "Approval needs the payout's current revision, so a repeat is rejected"},
+      {"rule": "FX-IDEM-001", "file": "BTCPayServer/Controllers/GreenField/GreenfieldPullPaymentController.cs", "line": 633, "verdict": "false", "why": "Approval needs the payout's current revision, so a repeat is rejected"},
+      {"rule": "FX-IDEM-001", "file": "BTCPayServer/Controllers/UIStorePullPaymentsController.PullPayments.cs", "line": 298, "verdict": "false", "why": "Each command skips payouts that have already left the state it acts on"},
+      {"rule": "FX-IDEM-001", "file": "BTCPayServer/Controllers/UIStorePullPaymentsController.PullPayments.cs", "line": 299, "verdict": "false", "why": "Each command skips payouts that have already left the state it acts on"},
+      {"rule": "FX-IDEM-001", "file": "BTCPayServer/Controllers/UIStorePullPaymentsController.PullPayments.cs", "line": 300, "verdict": "false", "why": "Each command skips payouts that have already left the state it acts on"},
+      {"rule": "FX-IDEM-001", "file": "BTCPayServer/Controllers/UIStorePullPaymentsController.PullPayments.cs", "line": 301, "verdict": "false", "why": "Each command skips payouts that have already left the state it acts on"},
+      {"rule": "FX-OWN-001", "file": "BTCPayServer/Controllers/UIInvoiceController.UI.cs", "line": 287, "verdict": "false", "why": "The policy is checked against the invoice's own store, by a scope provider in another file"},
+      {"rule": "FX-OWN-001", "file": "BTCPayServer/Controllers/UIStorePullPaymentsController.PullPayments.cs", "line": 558, "verdict": "false", "why": "Only the pull payment's name is read, and pull payments are public by ID"},
       {"rule": "SEC-GEN-001", "file": "BTCPayServer.Abstractions/Constants/AuthenticationSchemes.cs", "line": 13, "verdict": "false", "why": "A constant's name, not a secret"},
       {"rule": "SEC-GEN-001", "file": "BTCPayServer.Tests/DatabaseTests.cs", "line": 310, "verdict": "false", "why": "Made-up value in a test"},
       {"rule": "SEC-GEN-001", "file": "BTCPayServer.Tests/DatabaseTests.cs", "line": 314, "verdict": "false", "why": "Made-up value in a test"},
@@ -83,7 +127,11 @@
       {"rule": "SEC-GEN-001", "file": "BTCPayServer/Hosting/BTCPayServerServices.cs", "line": 253, "verdict": "false", "why": "Placeholder in a help message"},
       {"rule": "SEC-GEN-001", "file": "BTCPayServer/Hosting/BTCPayServerServices.cs", "line": 255, "verdict": "false", "why": "Placeholder in a help message"},
       {"rule": "SEC-GEN-001", "file": "BTCPayServer/Models/InvoiceResponse.cs", "line": 232, "verdict": "false", "why": "Sample value in a comment"},
-      {"rule": "SEC-GEN-001", "file": "BTCPayServer/Plugins/Emails/ServerMailTriggers.cs", "line": 5, "verdict": "false", "why": "A constant's name, not a secret"}
+      {"rule": "SEC-GEN-001", "file": "BTCPayServer/Plugins/Emails/ServerMailTriggers.cs", "line": 5, "verdict": "false", "why": "A constant's name, not a secret"},
+      {"rule": "SUP-GHA-001", "file": ".github/workflows/release.yml", "line": 80, "verdict": "true", "why": "Another publisher's action used by tag"},
+      {"rule": "SUP-GHA-001", "file": ".github/workflows/release.yml", "line": 82, "verdict": "true", "why": "Another publisher's action used by tag"},
+      {"rule": "SUP-IMG-002", "file": "Dockerfile", "line": 1, "verdict": "true", "why": "Base image named by tag only"},
+      {"rule": "SUP-IMG-002", "file": "Dockerfile", "line": 24, "verdict": "true", "why": "Base image named by tag only"}
     ]},
     {"repo": "maybe-finance/maybe", "commit": "77b5469832758d1cbee1a940f3012a1ae1c74cd3", "languages": ["Ruby"], "minPackages": 215, "findings": [
       {"rule": "SEC-GEN-001", "file": "docs/hosting/docker.md", "line": 93, "verdict": "false", "why": "Placeholder in the documentation"},
@@ -106,12 +154,34 @@
       {"rule": "SEC-GEN-001", "file": "test/vcr_cassettes/plaid/get_item_investments.yml", "line": 8, "verdict": "true", "why": "A recorded Plaid sandbox token"},
       {"rule": "SEC-GEN-001", "file": "test/vcr_cassettes/plaid/get_item_liabilities.yml", "line": 8, "verdict": "true", "why": "A recorded Plaid sandbox token"},
       {"rule": "SEC-GEN-001", "file": "test/vcr_cassettes/plaid/get_item.yml", "line": 8, "verdict": "true", "why": "A recorded Plaid sandbox token"},
-      {"rule": "SEC-GEN-001", "file": "test/vcr_cassettes/plaid/link_token.yml", "line": 60, "verdict": "true", "why": "A recorded Plaid sandbox token"}
+      {"rule": "SEC-GEN-001", "file": "test/vcr_cassettes/plaid/link_token.yml", "line": 60, "verdict": "true", "why": "A recorded Plaid sandbox token"},
+      {"rule": "SUP-GHA-001", "file": ".github/workflows/ci.yml", "line": 110, "verdict": "true", "why": "Another publisher's action used by tag"},
+      {"rule": "SUP-GHA-001", "file": ".github/workflows/ci.yml", "line": 15, "verdict": "true", "why": "Another publisher's action used by tag"},
+      {"rule": "SUP-GHA-001", "file": ".github/workflows/ci.yml", "line": 31, "verdict": "true", "why": "Another publisher's action used by tag"},
+      {"rule": "SUP-GHA-001", "file": ".github/workflows/ci.yml", "line": 47, "verdict": "true", "why": "Another publisher's action used by tag"},
+      {"rule": "SUP-GHA-001", "file": ".github/workflows/publish.yml", "line": 47, "verdict": "true", "why": "Another publisher's action used by tag"},
+      {"rule": "SUP-GHA-001", "file": ".github/workflows/publish.yml", "line": 50, "verdict": "true", "why": "Another publisher's action used by tag"},
+      {"rule": "SUP-GHA-001", "file": ".github/workflows/publish.yml", "line": 53, "verdict": "true", "why": "Another publisher's action used by tag"},
+      {"rule": "SUP-GHA-001", "file": ".github/workflows/publish.yml", "line": 61, "verdict": "true", "why": "Another publisher's action used by tag"},
+      {"rule": "SUP-GHA-001", "file": ".github/workflows/publish.yml", "line": 72, "verdict": "true", "why": "Another publisher's action used by tag"},
+      {"rule": "SUP-IMG-002", "file": "Dockerfile", "line": 5, "verdict": "true", "why": "Base image named by tag only"},
+      {"rule": "SUP-IMG-003", "file": ".devcontainer/Dockerfile", "line": 2, "verdict": "true", "why": "Debian 11 (bullseye) no longer gets security fixes"}
     ]},
     {"repo": "lightningdevkit/ldk-sample", "commit": "89000584f73452ebe0c58b295f8f89917117c8a2", "languages": ["Rust"], "minPackages": 108, "findings": [
     ]},
     {"repo": "flutter-stripe/flutter_stripe", "commit": "c3d84c91cf63b553907386f86bbe6e50a1bbe7c1", "languages": ["Dart"], "minPackages": 516, "findings": [
-      {"rule": "FX-OWN-001", "file": "example/server/src/index.ts", "line": 849, "verdict": "true", "why": "Payment options read by a customer ID from the request, with no ownership check"}
+      {"rule": "FX-OWN-001", "file": "example/server/src/index.ts", "line": 849, "verdict": "true", "why": "Payment options read by a customer ID from the request, with no ownership check"},
+      {"rule": "SUP-GHA-001", "file": ".github/workflows/all_plugins.yaml", "line": 130, "verdict": "true", "why": "Another publisher's action used by tag"},
+      {"rule": "SUP-GHA-001", "file": ".github/workflows/all_plugins.yaml", "line": 137, "verdict": "true", "why": "Another publisher's action used by tag"},
+      {"rule": "SUP-GHA-001", "file": ".github/workflows/all_plugins.yaml", "line": 196, "verdict": "true", "why": "Another publisher's action used by tag"},
+      {"rule": "SUP-GHA-001", "file": ".github/workflows/all_plugins.yaml", "line": 216, "verdict": "true", "why": "Another publisher's action used by tag"},
+      {"rule": "SUP-GHA-001", "file": ".github/workflows/all_plugins.yaml", "line": 255, "verdict": "true", "why": "Another publisher's action used by tag"},
+      {"rule": "SUP-GHA-001", "file": ".github/workflows/all_plugins.yaml", "line": 50, "verdict": "true", "why": "Another publisher's action used by tag"},
+      {"rule": "SUP-GHA-001", "file": ".github/workflows/all_plugins.yaml", "line": 67, "verdict": "true", "why": "Another publisher's action used by tag"},
+      {"rule": "SUP-GHA-001", "file": ".github/workflows/all_plugins.yaml", "line": 98, "verdict": "true", "why": "Another publisher's action used by tag"},
+      {"rule": "SUP-GHA-001", "file": ".github/workflows/spellcheck.yaml", "line": 15, "verdict": "true", "why": "Another publisher's action used by branch"},
+      {"rule": "SUP-GHA-001", "file": ".github/workflows/stripe_js.yaml", "line": 30, "verdict": "true", "why": "Another publisher's action used by tag"},
+      {"rule": "SUP-GHA-001", "file": ".github/workflows/stripe_js.yaml", "line": 66, "verdict": "true", "why": "Another publisher's action used by tag"}
     ]}
   ]
 }
