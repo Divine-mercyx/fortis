@@ -162,7 +162,7 @@ If the dependency check can't finish (OSV is down, or a lockfile can't be read),
 ```yaml
 - name: Install Fortis
   run: |
-    curl -fsSL https://github.com/Divine-mercyx/fortis/releases/download/cli-v0.1.0-beta.12/install.sh | FORTIS_VERSION=0.1.0-beta.12 sh
+    curl -fsSL https://github.com/Divine-mercyx/fortis/releases/download/cli-v0.1.0-beta.13/install.sh | FORTIS_VERSION=0.1.0-beta.13 sh
     echo "$HOME/.fortis/bin" >> "$GITHUB_PATH"
 - run: fortis scan --ci
   env:
@@ -564,7 +564,8 @@ It exits 1 if something stops Fortis doing its job. Things that are only worth k
 
 ## Changelog
 
-**0.1.0-beta.13** (unreleased)
+**0.1.0-beta.13** (2026-11-10)
+- The Linux binaries, the Linux wheels and the Docker image run on glibc 2.28 again: Debian 12, Ubuntu 22.04 and RHEL 8 and newer. beta.12's needed glibc 2.38.
 - The dependency check reads Bun's `bun.lock`, workspaces and aliases included, and works out which packages are dev-only from it. A project with only the old binary `bun.lockb` is told how to get a `bun.lock`.
 - Mono and Dojah secret keys and Africa's Talking API keys are named, each with where to rotate it. Test keys are reported as high, live keys as critical, and public keys are left alone.
 - A secret key that starts `sk_live_` or `sk_test_` and matches no known shape is reported as Stripe, Paystack, Korapay or BudPay, since Korapay and BudPay use the same prefix.

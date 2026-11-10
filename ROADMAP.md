@@ -4,9 +4,9 @@ This is the status of the CLI roadmap tracked in [issue #4](https://github.com/D
 
 **Status on 2026-11-10:** all 35 items are built and merged. What remains is setup that only an owner can do: repository settings, store accounts, signing certificates and a tagged release. It is listed under [What's left, and who does it](#whats-left-and-who-does-it).
 
-## Where the CLI stands (0.1.0-beta.12)
+## Where the CLI stands (0.1.0-beta.13)
 
-Merged since beta.12 and waiting for beta.13: Bun lockfiles; Mono, Dojah, Africa's Talking, Korapay and BudPay keys named; secrets read inside notebooks, PEM keys in JSON, base64 values and Kubernetes Secrets; and `fortis scan --verify`.
+New in beta.13: Linux binaries, wheels and the Docker image run on glibc 2.28 again (Debian 12, Ubuntu 22.04); Bun lockfiles; Mono, Dojah, Africa's Talking, Korapay and BudPay keys named; secrets read inside notebooks, PEM keys in JSON, base64 values and Kubernetes Secrets; and `fortis scan --verify`.
 
 - **Secrets:** checked in any file. Covers payment keys (Stripe, Paystack, Flutterwave, Monnify, SeerBit, OPay, Squad), cloud, SaaS and registry tokens, and passwords in database and broker URLs.
 - **Dependencies:** lockfiles for JavaScript, PHP, Python, Java, Kotlin, Scala, Go, .NET, Ruby, Rust, Dart, Swift, Elixir, Erlang, Haskell and R are checked against OSV. Findings show the fixed version and the upgrade command.
@@ -92,7 +92,7 @@ The code for each of these is merged. Each one waits on an account, a setting or
 
 | What | Who | State |
 |---|---|---|
-| Push the tag `cli-v0.1.0-beta.12`. This builds the binaries, the GitHub release, the Docker image and the attestations. The workflow sees that npm already has the version and skips that step | A maintainer who can push tags | Not done. npm has beta.12, but the newest tag and GitHub release are beta.10, so the install scripts still deliver beta.10 |
+| Push the tag `cli-v0.1.0-beta.13`. This builds the binaries, the GitHub release, the Docker image, PyPI wheels, npm and the attestations | A maintainer who can push tags | Not done. beta.12 is on GitHub, PyPI and npm, but its Docker image failed (its Linux binary needed glibc 2.38), so beta.13 is the first with an image |
 | npm: package → Settings → Trusted publishing → GitHub Actions, repository `Divine-mercyx/fortis`, workflow `release-cli.yml` | `divine-fortis`, the only npm maintainer | Not proven. The last three release runs failed, and beta.12 has no release run |
 | PyPI: add a pending publisher for `fortis-watchdog`, same repository and workflow, environment `pypi` | Whoever will own the project on pypi.org | Not done. The project doesn't exist, so `pip install fortis-watchdog` fails |
 | After the tag: try each install, and check Gatekeeper on macOS and SmartScreen on Windows | A maintainer | Waits on the tag |
@@ -135,7 +135,7 @@ Microsoft reviews the first winget pull request by hand, so `winget install` wor
 |---|---|
 | #62: run migration `0002_secret_status.sql` with `pnpm db:migrate` when the API deploys. Until then the API accepts `secretStatus` but can't store it | Whoever deploys the API |
 | #64: for any provider it leaves unnamed, add a link to its key documentation, or a revoked key, to issue #7. Confirm the Africa's Talking key length the same way | A maintainer |
-| To release 0.1.0-beta.13: set that version in `packages/cli/package.json` and change "(unreleased)" in the changelog to the date. All four pull requests' lines are already under that one heading | Whoever releases |
+| Done: 0.1.0-beta.13 is set in `packages/cli/package.json` and the changelog is dated. Push the tag to release it | Whoever releases |
 
 ### Checks to run once
 
