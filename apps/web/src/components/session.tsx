@@ -24,8 +24,20 @@ export function useSession(): Session {
   return s;
 }
 
-/** Loads the signed-in user; sends anyone signed out to /login and back here afterwards. */
-export function SessionProvider({ children, fallback }: { children: ReactNode; fallback: ReactNode }) {
+/**
+ * Loads the signed-in user; sends anyone signed out to /login and back here afterwards.
+ * If the session cannot be loaded for any other reason (server down, no connection), it renders `unavailable`
+ * and keeps retrying, so nobody is left on the loading screen.
+ */
+export function SessionProvider({
+  children,
+  fallback,
+  unavailable,
+}: {
+  children: ReactNode;
+  fallback: ReactNode;
+  unavailable: (retry: () => void) => ReactNode;
+}) {
   const router = useRouter();
   const pathname = usePathname();
   const { data, error, mutate } = useSWR<Me>('/v1/auth/me', fetcher, { revalidateOnFocus: true, shouldRetryOnError: false });
@@ -45,6 +57,15 @@ export function SessionProvider({ children, fallback }: { children: ReactNode; f
     }
   }, [error, pathname, router]);
 
+  // Anything but "signed out" means Fortis could not be reached.
+  const down = Boolean(error) && !(error instanceof ApiError && error.status === 401);
+
+  useEffect(() => {
+    if (!down) return;
+    const t = setInterval(() => void mutate(), 15_000);
+    return () => clearInterval(t);
+  }, [down, mutate]);
+
   const setOrgId = useCallback((id: string) => {
     setOrgIdState(id);
     try {
@@ -60,6 +81,12 @@ export function SessionProvider({ children, fallback }: { children: ReactNode; f
     return { user: data.user, orgs: data.orgs, org, setOrgId, refresh: () => mutate() };
   }, [data, orgId, setOrgId, mutate]);
 
-  if (!value) return <>{fallback}</>;
-  return <SessionCtx.Provider value={value}>{children}</SessionCtx.Provider>;
+  if (!value) return <>{down ? unavailable(() => void mutate()) : fallback}</>;
+  return (
+    <SessionCtx.Provider value={value}>
+      {/* Already signed in when the server stopped answering: keep the page, and say so. */}
+      {down ? <div className="net-bar" role="status">Fortis can&apos;t reach its server. Retrying…</div> : null}
+      {children}
+    </SessionCtx.Provider>
+  );
 }

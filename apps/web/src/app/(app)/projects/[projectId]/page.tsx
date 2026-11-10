@@ -10,9 +10,10 @@ import { CountUp, Words } from '@/components/motion';
 import { useSession } from '@/components/session';
 import { StagingTargets } from '@/components/targets';
 import { CodeLine, CopyButton, Empty, FormError, Modal, SeverityPill, Skeleton, StatusTag, useToast } from '@/components/ui';
+import { StatTile } from '@/components/widgets';
 import { api, ApiError, fetcher } from '@/lib/api';
 import { CLI_COMMAND, CLI_INSTALL_URL, CLI_PACKAGE, CLI_PYTHON_PACKAGE } from '@/lib/cli';
-import { timeAgo } from '@/lib/format';
+import { initials, timeAgo } from '@/lib/format';
 import type { FindingRow, ScanRow } from '@/lib/types';
 
 type Project = { id: string; name: string; slug: string; repoUrl: string | null; createdAt: string };
@@ -165,30 +166,31 @@ export default function ProjectPage() {
 
   return (
     <div className="stack">
-      <div className="page-head">
-        <div>
-          <Link href="/projects" className="eyebrow reveal" style={{ display: 'inline-flex', gap: 6 }}>← Projects</Link>
-          <h1 className="display">{p ? <Words>{p.name}</Words> : <Skeleton h={48} w={280} />}</h1>
-          <p className="lead reveal" style={{ ['--d' as string]: '150ms' }}>
+      <section className="band band-row reveal">
+        <span className="band-av" aria-hidden="true">{p ? initials(p.name) : ''}</span>
+        <div className="band-txt">
+          <Link href="/projects" className="eyebrow" style={{ display: 'inline-flex', gap: 6 }}>← Projects</Link>
+          <h1 className="display">{p ? <Words>{p.name}</Words> : <Skeleton h={40} w={280} />}</h1>
+          <p className="lead">
             {p?.repoUrl ? <a href={p.repoUrl} target="_blank" rel="noreferrer noopener" className="link-arrow">{p.repoUrl.replace(/^https?:\/\//, '')} <Arrow /></a> : 'Fintech checks on every push and CI run.'}
           </p>
         </div>
-        {isAdmin ? (
-          <button className="btn btn-primary reveal" style={{ ['--d' as string]: '200ms' }} onClick={() => setNewKey(true)}><Key /> New CLI key</button>
-        ) : null}
-      </div>
+        <div className="band-actions">
+          {open ? <span className={`chip${critical ? ' bad' : ''}`}>{critical ? `${critical} critical open` : 'No open criticals'}</span> : null}
+          {isAdmin ? (
+            <button className="btn btn-primary" onClick={() => setNewKey(true)}><Key /> New CLI key</button>
+          ) : null}
+        </div>
+      </section>
 
-      <div className="tiles">
+      <div className="tiles stagger">
         {[
-          { lbl: 'Open critical', v: critical, cls: 'red', c: 'var(--red)' },
-          { lbl: 'Open findings', v: open?.total, cls: '', c: 'var(--amber)' },
-          { lbl: 'Recent scans', v: scans?.scans.length, cls: '', c: 'var(--blue)' },
-          { lbl: 'Active keys', v: canSeeKeys ? active.length : undefined, cls: 'green', c: 'var(--green)' },
-        ].map((t, i) => (
-          <div className="tile reveal" key={t.lbl} style={{ ['--d' as string]: `${i * 70}ms`, ['--c' as string]: t.c }}>
-            <div className="lbl">{t.lbl}</div>
-            <div className={`v ${t.cls}`}>{t.v === undefined ? '–' : <CountUp value={t.v} />}</div>
-          </div>
+          { lbl: 'Open critical', v: critical, cls: 'red' as const, c: 'var(--red)' },
+          { lbl: 'Open findings', v: open?.total, cls: undefined, c: 'var(--amber)' },
+          { lbl: 'Recent scans', v: scans?.scans.length, cls: undefined, c: 'var(--blue)' },
+          { lbl: 'Active keys', v: canSeeKeys ? active.length : undefined, cls: 'green' as const, c: 'var(--green)' },
+        ].map((t) => (
+          <StatTile key={t.lbl} label={t.lbl} tone={t.cls} accent={t.c} value={t.v === undefined ? '–' : <CountUp value={t.v} />} />
         ))}
       </div>
 

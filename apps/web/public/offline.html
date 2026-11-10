@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex">
+  <meta name="theme-color" content="#071632">
+  <title>You're offline · Fortis</title>
+  <!-- Shown by sw.js when a page cannot be fetched because this device has no connection.
+       Self-contained on purpose: no stylesheet, font or script to fetch. -->
+  <style>
+    html, body { height: 100%; margin: 0; }
+    body { display: grid; place-items: center; padding: 24px; box-sizing: border-box; background: radial-gradient(70% 90% at 50% 50%, #0C2147, #071632); color: #C9D2E3; font: 16px/1.6 "Manrope", "Inter", system-ui, -apple-system, "Segoe UI", sans-serif; text-align: center; }
+    main { max-width: 440px; }
+    .mark { width: 72px; height: 72px; color: #fff; margin: 0 auto 28px; display: block; }
+    .mark g g { transform-box: view-box; transform-origin: 50% 50%; animation: turn 16s linear infinite; }
+    .mark g g + g { animation-duration: 11s; animation-direction: reverse; }
+    h1 { margin: 0 0 12px; color: #fff; font-size: clamp(28px, 6vw, 38px); font-weight: 800; letter-spacing: -.03em; line-height: 1.1; }
+    p { margin: 0; }
+    button { margin-top: 28px; height: 48px; padding: 0 22px; border: 0; border-radius: 12px; background: #7DF2B2; color: #0B3B2C; font: inherit; font-weight: 800; cursor: pointer; }
+    button:hover { background: #fff; }
+    button:focus-visible { outline: 2px solid #7DF2B2; outline-offset: 3px; }
+    .note { margin-top: 16px; font-size: 13.5px; color: #93A0B8; min-height: 1.6em; }
+    @keyframes turn { to { transform: rotate(360deg); } }
+    @media (prefers-reduced-motion: reduce) { .mark g g { animation: none; } }
+  </style>
+</head>
+<body>
+  <main>
+    <svg class="mark" viewBox="0 0 56 56" aria-hidden="true"><g fill="none" stroke="currentColor"><g><circle cx="28" cy="28" r="23" stroke-width="8" stroke-dasharray="132.5 12" transform="rotate(105 28 28)"/></g><g><circle cx="28" cy="28" r="11.5" stroke-width="7" stroke-dasharray="63.3 9" transform="rotate(-22.6 28 28)"/></g></g><circle cx="28" cy="28" r="4.5" fill="#13955F"/></svg>
+    <h1>You're offline.</h1>
+    <p>Fortis can't reach the internet from this device. Check your Wi-Fi or mobile data.</p>
+    <button type="button" id="retry">Try again</button>
+    <p class="note" id="note" role="status">This page reloads by itself when you're back online.</p>
+  </main>
+  <script>
+    var note = document.getElementById('note');
+    function retry() { note.textContent = 'Checking…'; location.reload(); }
+    document.getElementById('retry').addEventListener('click', retry);
+    window.addEventListener('online', retry);
+  </script>
+</body>
+</html>
