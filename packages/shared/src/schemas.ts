@@ -54,6 +54,8 @@ export const cliFindingSchema = z.object({
   snippet: z.string().max(MAX_SNIPPET_LENGTH).optional(),
   /** Longer explanation and fix from the tool (used for DAST findings, which have no catalogue entry). */
   detail: z.string().max(4000).optional(),
+  /** Secret findings checked with `fortis scan --verify`: does the key still work? Left out when not checked. */
+  secretStatus: z.enum(['live', 'revoked', 'unknown']).optional(),
   /** Stable hash from the CLI; the API computes one if missing. */
   fingerprint: z.string().trim().min(8).max(128).optional(),
 });

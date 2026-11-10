@@ -22,6 +22,7 @@ import { checkoutInfo, currentBranch, currentCommit, parsePushRefs, repoRoot, ty
 import { installHook } from './hook';
 import { explain, printDastReport, printReport } from './report';
 import { meetsThreshold, runScan } from './scan';
+import { verifySecrets } from './verify';
 import { configureNetwork } from './net';
 import { osvCacheDir } from './rules/osv-cache';
 import { installKind, selfUpdate, UPDATE_HINT, updateCheckEnabled, updateNotice } from './update';
@@ -57,6 +58,7 @@ ${c.bold('Scan options')}
   --no-upload      keep results on this machine
   --offline        skip the network (no dependency check, no upload)
   --history        also search all git history for secrets (deleted keys still need rotating)
+  --verify         ask each leaked key's own provider, read-only, whether it still works: live, revoked or unknown
   --sarif <file>   write SARIF for GitHub code scanning, GitLab and IDEs
   --junit <file>   write JUnit XML for CI systems that show test reports
   --pr-comment     in CI, post one comment on the pull request listing what it adds, updated in place
@@ -216,6 +218,11 @@ async function cmdScan(flags: Flags): Promise<number> {
     const h = await scanHistory(root, { since: str(flags.since), ignore: config.ignore });
     result.detections.push(...h.detections);
     result.notes.push(`Searched ${h.commitsScanned} commits that added code: ${h.detections.length} found in history. Rotate every one, even if the file was deleted.`);
+  }
+
+  if (flags.verify) {
+    if (offline) result.notes.push('--verify needs the network, so with --offline no key was checked.');
+    else result.notes.push(...(await verifySecrets(result.detections)).notes);
   }
 
   const baseline = flags['no-baseline'] ? null : readBaseline(root);

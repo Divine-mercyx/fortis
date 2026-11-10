@@ -14,6 +14,8 @@ export type FindingRow = {
   file: string;
   line: number | null;
   status: string;
+  /** Leaked keys checked with `fortis scan --verify`; null when never checked. */
+  secretStatus?: 'live' | 'revoked' | 'unknown' | null;
   firstSeenAt: string;
   lastSeenAt: string;
   fixedAt: string | null;
