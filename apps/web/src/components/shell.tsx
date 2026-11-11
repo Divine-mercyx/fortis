@@ -107,16 +107,23 @@ export function Shell({ children }: { children: ReactNode }) {
         </Link>
 
         <nav aria-label="Main">
-          {NAV.map(({ href, label, icon: Icon, badge }) => (
-            <Link key={href} href={href} className={`nav-link${pathname.startsWith(href) ? ' on' : ''}`}>
-              <Icon />
-              {label}
-              {badge && critical > 0 ? <span className="count">{critical}</span> : null}
-            </Link>
-          ))}
+          {NAV.map(({ href, label, icon: Icon, badge }) => {
+            const on = pathname.startsWith(href);
+            return (
+              <Link key={href} href={href} className={`nav-link${on ? ' on' : ''}`} aria-current={on ? 'page' : undefined}>
+                <Icon />
+                <span className="tip">{label}</span>
+                {badge && critical > 0 ? (
+                  <span className="count" aria-label={`${critical} open critical`}>
+                    {critical}
+                  </span>
+                ) : null}
+              </Link>
+            );
+          })}
           <a href={DOCS_URL} className="nav-link" target="_blank" rel="noreferrer noopener">
             <Terminal />
-            Docs
+            <span className="tip">Docs</span>
           </a>
         </nav>
 
