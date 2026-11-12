@@ -11,6 +11,7 @@ New in beta.13: Linux binaries, wheels and the Docker image run on glibc 2.28 ag
 - **Secrets:** checked in any file. Covers payment keys (Stripe, Paystack, Flutterwave, Monnify, SeerBit, OPay, Squad), cloud, SaaS and registry tokens, and passwords in database and broker URLs.
 - **Dependencies:** lockfiles for JavaScript, PHP, Python, Java, Kotlin, Scala, Go, .NET, Ruby, Rust, Dart, Swift, Elixir, Erlang, Haskell and R are checked against OSV. Findings show the fixed version and the upgrade command.
 - **Supply chain:** Docker base images and GitHub Actions.
+- **Infrastructure (unreleased):** its own free rule pack and dashboard tab. Terraform (AWS, Google Cloud, Azure), Kubernetes and Docker Compose files that open admin or database ports to the internet, make storage public, give a database a public address, or put a database on a public load balancer.
 - **Fintech code rules:** JavaScript, TypeScript and Python on syntax trees. The first six checks also run in Go, C#, PHP, Java and Kotlin.
 - **`fortis test` and `fortis access`:** test a running app. Access checks cover writes, GraphQL, and Postman or HAR imports. ZAP runs with or without Docker.
 - **Pre-push hook:** works with npm, pnpm, Yarn, Bun, pip, uv, Poetry, a global install, or no Node, in every Windows shell.
@@ -149,9 +150,23 @@ Microsoft reviews the first winget pull request by hand, so `winget install` wor
 
 These are limits of what was built, not missing setup.
 
+- **Infrastructure checks read literal values only.** A CIDR, port or flag that comes from a variable, a module, a `locals` block or a Helm value isn't resolved, so it isn't judged. CloudFormation, Pulumi, Bicep/ARM and rendered Helm charts aren't read yet.
 - **CocoaPods, Conan and vcpkg:** OSV has no advisories for them. The scan names the packages and says they weren't checked.
 - **Java, Kotlin, Scala and .NET without a lockfile:** only direct dependencies are covered. Transitive ones need an SBOM or a lockfile, and the scan says so.
 - **Fintech rules in Go, C#, PHP, Java and Kotlin** have the first six checks, on line patterns. The four newer checks (money as floating point, card data, predictable references, client amounts) and the syntax-tree engine cover JavaScript, TypeScript and Python only.
 - **Provider keys with no documented format** have no named pattern: Infobip, Termii, Smile ID, Prembly, VerifyMe, Youverify, Anchor, Sudo, Paga, Remita, Okra and Moniepoint. The generic checks still report them in a secret-looking assignment.
 - **`fortis scan --verify`** is tested against mocked providers only. No real key has been checked.
 - **macOS and Windows binaries are unsigned** until the certificates above exist, so Gatekeeper and SmartScreen warn on first run.
+
+## Next checks, not built yet
+
+Ideas agreed on but not started, so they aren't forgotten. Each would follow the same pattern as the existing rules: catalog text, a fix, a compliance mapping and 20+ benchmark cases.
+
+| What | Why it matters | Notes |
+|---|---|---|
+| Missing rate limits on login, OTP and PIN endpoints | Brute-forcing PINs and OTPs is a common way into fintech accounts | A code rule, like the fintech checks: a route that verifies an OTP, PIN or password with no rate limiter in front of it |
+| Weak JWT and session handling | Tokens that never expire, `alg: none`, short or hard-coded signing secrets | A code rule |
+| Insecure password and PIN reset | Reset codes that are guessable, reusable, or returned in the response | A code rule |
+| Mobile app checks | API keys and secrets shipped inside an APK or IPA, no certificate pinning | Needs a scan of the built app, not only the repository |
+| Scanning a company's internet-facing addresses | Finds exposed databases, admin panels and old services that aren't described in code | A different product shape: Fortis must first prove the customer owns the domains or IP ranges (for example with a DNS record), and it needs a server-side scanner, not just the CLI |
+| More infrastructure formats | CloudFormation, Pulumi, Bicep/ARM, rendered Helm charts, Terraform variables and modules | Extends the Infrastructure pack |
