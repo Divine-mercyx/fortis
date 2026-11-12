@@ -6,7 +6,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from
 
 import { pool } from '../src/db/client';
 import { setExposureProbeOptions } from '../src/modules/exposure.routes';
-import { exposureFindings, isPublicAddress, probeHost, SERVICES, type Service } from '../src/modules/exposure.service';
+import { exposureFindings, isPublicAddress, PAGE_CHECKS, probeHost, probePages, SERVICES, type Service } from '../src/modules/exposure.service';
 import { setTxtResolver } from '../src/modules/targets.routes';
 import { projectWithKey, resetDb, setPlan, setupApp, signup, type Client } from './helpers';
 
@@ -75,7 +75,7 @@ describe('probeHost', () => {
     const ports: Record<number, number> = { 6379: redis, 22: ssh, 9200: es, 5432: pgPort };
     const { addresses, results } = await probeHost('db.example.com', {
       resolve: async () => ['127.0.0.1'],
-      allowPrivate: true,
+      allowPrivate: true, pages: [],
       services: [svc(6379), svc(22), svc(9200), svc(5432)],
       dialPort: (p) => ports[p]!,
       timeoutMs: 800,
@@ -93,7 +93,7 @@ describe('probeHost', () => {
     const redis = await fake((d) => (/PING/.test(d) ? '-NOAUTH Authentication required.\r\n' : null));
     const es = await fake(() => 'HTTP/1.0 401 Unauthorized\r\nWWW-Authenticate: Basic\r\n\r\n{"error":"security_exception"}');
     const ports: Record<number, number> = { 6379: redis, 9200: es };
-    const { results } = await probeHost('db.example.com', { resolve: async () => ['127.0.0.1'], allowPrivate: true, services: [svc(6379), svc(9200)], dialPort: (p) => ports[p]!, timeoutMs: 800 });
+    const { results } = await probeHost('db.example.com', { resolve: async () => ['127.0.0.1'], allowPrivate: true, pages: [], services: [svc(6379), svc(9200)], dialPort: (p) => ports[p]!, timeoutMs: 800 });
     expect(results.every((r) => r.open && !r.noAuth)).toBe(true);
   });
 
@@ -106,8 +106,71 @@ describe('probeHost', () => {
   });
 
   it('caps the addresses per host', async () => {
-    const { addresses } = await probeHost('many.example.com', { resolve: async () => ['127.0.0.1', '127.0.0.2', '127.0.0.3', '127.0.0.4', '127.0.0.5', '127.0.0.6'], allowPrivate: true, services: [] });
+    const { addresses } = await probeHost('many.example.com', { resolve: async () => ['127.0.0.1', '127.0.0.2', '127.0.0.3', '127.0.0.4', '127.0.0.5', '127.0.0.6'], allowPrivate: true, services: [], pages: [] });
     expect(addresses).toHaveLength(4);
+  });
+});
+
+describe('probePages', () => {
+  /** An HTTP server that serves these paths, and the given fallback for everything else. */
+  async function site(routes: Record<string, string>, fallback: { status: number; body: string } = { status: 404, body: 'Not found' }) {
+    const { createServer: createHttp } = await import('node:http');
+    const server = createHttp((req, res) => {
+      const body = routes[req.url ?? ''];
+      if (body !== undefined) { res.writeHead(200); res.end(body); return; }
+      res.writeHead(fallback.status); res.end(fallback.body);
+    });
+    await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));
+    fakes.push({ server: server as unknown as Server, port: (server.address() as AddressInfo).port });
+    return (server.address() as AddressInfo).port;
+  }
+
+  it('finds exposed files and panels by their fingerprints', async () => {
+    const http = await site({
+      '/': '<html>ok</html>',
+      '/.env': 'APP_ENV=production\nDB_PASSWORD=example\n',
+      '/.git/config': '[core]\n\trepositoryformatversion = 0\n',
+      '/actuator/env': '{"activeProfiles":["prod"],"propertySources":[]}',
+      '/phpmyadmin/': '<title>phpMyAdmin</title>',
+      '/swagger.json': '{"openapi":"3.0.1","info":{}}',
+      '/__fortis_not_a_page__': "<p>You're seeing this error because you have <code>DEBUG = True</code> in your Django settings file.</p>",
+    });
+    const https = await closedPort();
+    const ports: Record<number, number> = { 80: http, 443: https };
+    const pages = await probePages('app.example.com', '127.0.0.1', { dialPort: (p) => ports[p]!, timeoutMs: 1500 });
+    expect(pages.map((p) => `${p.check.ruleId} ${p.check.severity} ${p.url}`).sort()).toEqual([
+      'EXP-FILE-001 critical http://app.example.com/.env',
+      'EXP-FILE-001 critical http://app.example.com/.git/config',
+      'EXP-PANEL-001 critical http://app.example.com/actuator/env',
+      'EXP-PANEL-001 high http://app.example.com/__fortis_not_a_page__',
+      'EXP-PANEL-001 high http://app.example.com/phpmyadmin/',
+      'EXP-PANEL-001 medium http://app.example.com/swagger.json',
+    ]);
+    const f = exposureFindings('app.example.com', [], pages);
+    expect(f.find((x) => x.ruleId === 'EXP-FILE-001' && x.file.endsWith('/.env'))!.detail).toMatch(/rotate/);
+  });
+
+  it('ignores a single-page app that answers every path with its homepage', async () => {
+    const spa = '<!doctype html><html><head><title>Paywave</title></head><body><div id="root"></div><script src="/main.js"></script></body></html>';
+    const http = await site({ '/': spa }, { status: 200, body: spa });
+    const ports: Record<number, number> = { 80: http, 443: await closedPort() };
+    expect(await probePages('app.example.com', '127.0.0.1', { dialPort: (p) => ports[p]!, timeoutMs: 1500 })).toEqual([]);
+  });
+
+  it('only counts 200 responses, and skips origins that do not answer', async () => {
+    const http = await site({ '/': 'ok' }, { status: 403, body: '<title>phpMyAdmin</title> forbidden' });
+    const ports: Record<number, number> = { 80: http, 443: await closedPort() };
+    expect(await probePages('app.example.com', '127.0.0.1', { dialPort: (p) => ports[p]!, timeoutMs: 1500 })).toEqual([]);
+    const none: Record<number, number> = { 80: await closedPort(), 443: await closedPort() };
+    expect(await probePages('app.example.com', '127.0.0.1', { dialPort: (p) => none[p]!, timeoutMs: 800 })).toEqual([]);
+  });
+
+  it('every check names a real fingerprint and a fix', () => {
+    for (const c of PAGE_CHECKS) {
+      expect(c.path.startsWith('/'), c.path).toBe(true);
+      expect(c.fix.length, c.path).toBeGreaterThan(30);
+      expect(c.match.test('<!doctype html><html><body><div id="root"></div></body></html>'), c.path).toBe(false);
+    }
   });
 });
 
@@ -181,7 +244,7 @@ describe('exposure routes', () => {
     const redis = await fake((d) => (/PING/.test(d) ? '+PONG\r\n' : null));
     const ssh = await fake(() => null, 'SSH-2.0-OpenSSH_9.6\r\n');
     let ports: Record<number, number> = { 6379: redis, 22: ssh };
-    setExposureProbeOptions({ resolve: async () => ['127.0.0.1'], allowPrivate: true, services: [svc(6379), svc(22)], dialPort: (p) => ports[p]!, timeoutMs: 800 });
+    setExposureProbeOptions({ resolve: async () => ['127.0.0.1'], allowPrivate: true, pages: [], services: [svc(6379), svc(22)], dialPort: (p) => ports[p]!, timeoutMs: 800 });
 
     const first = await c.req({ method: 'POST', url: `${base}/${id}/exposure` });
     expect(first.statusCode).toBe(200);
@@ -202,6 +265,21 @@ describe('exposure routes', () => {
     // Exposure findings live with the rest, in the findings list.
     const list = await c.req({ method: 'GET', url: `/v1/orgs/${c.orgId}/findings?status=open` });
     expect(list.statusCode).toBe(200);
+  });
+
+  it('reports exposed pages through the route', async () => {
+    const { c, base } = await setup();
+    const id = await target(c, base);
+    const { createServer: createHttp } = await import('node:http');
+    const server = createHttp((req, res) => { res.writeHead(req.url === '/.git/config' || req.url === '/' ? 200 : 404); res.end(req.url === '/.git/config' ? '[core]\n' : 'x'); });
+    await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));
+    fakes.push({ server: server as unknown as Server, port: (server.address() as AddressInfo).port });
+    const ports: Record<number, number> = { 80: (server.address() as AddressInfo).port, 443: await closedPort() };
+    setExposureProbeOptions({ resolve: async () => ['127.0.0.1'], allowPrivate: true, services: [], dialPort: (p) => ports[p]!, timeoutMs: 1500 });
+    const res = await c.req({ method: 'POST', url: `${base}/${id}/exposure` });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().pages).toEqual([{ url: 'http://staging.paywave.example/.git/config', what: 'Git repository (.git) is served to anyone', severity: 'critical' }]);
+    expect(res.json().findings.map((f: { ruleId: string }) => f.ruleId)).toEqual(['EXP-FILE-001']);
   });
 
   it('turns a private-only host into a clear error', async () => {

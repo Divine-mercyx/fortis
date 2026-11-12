@@ -1,4 +1,6 @@
 import { lookup } from 'node:dns/promises';
+import { request as httpRequest } from 'node:http';
+import { request as httpsRequest } from 'node:https';
 import { isIP, Socket } from 'node:net';
 
 /*
@@ -102,6 +104,8 @@ export type ProbeOptions = {
   concurrency?: number;
   /** At most this many addresses per host. */
   maxAddresses?: number;
+  /** Which page checks to run. Defaults to PAGE_CHECKS; an empty list turns them off. */
+  pages?: readonly PageCheck[];
 };
 
 const defaultResolve = async (hostname: string) => (await lookup(hostname, { all: true, verbatim: true })).map((a) => a.address);
@@ -176,7 +180,7 @@ export class ExposureError extends Error {
 }
 
 /** Resolve a verified host, refuse non-public addresses, and check every service port. */
-export async function probeHost(hostname: string, opts: ProbeOptions = {}): Promise<{ addresses: string[]; refused: string[]; results: PortResult[] }> {
+export async function probeHost(hostname: string, opts: ProbeOptions = {}): Promise<{ addresses: string[]; refused: string[]; results: PortResult[]; pages: PageResult[] }> {
   const resolve = opts.resolve ?? defaultResolve;
   let all: string[];
   try {
@@ -207,12 +211,114 @@ export async function probeHost(hostname: string, opts: ProbeOptions = {}): Prom
     }
     return result;
   });
-  return { addresses, refused, results };
+  // Admin pages and files, on the first address: a load balancer serves the same site on all of them.
+  const pages = opts.pages && opts.pages.length === 0 ? [] : await probePages(hostname, addresses[0]!, opts);
+  return { addresses, refused, results, pages };
+}
+
+/* ------------------------------------------------- admin pages and files over HTTP */
+
+export type PageCheck = {
+  path: string;
+  /** What the response must contain for it to be the real thing, not a single-page app's catch-all. */
+  match: RegExp;
+  ruleId: 'EXP-PANEL-001' | 'EXP-FILE-001';
+  severity: 'critical' | 'high' | 'medium';
+  what: string;
+  fix: string;
+};
+
+const PANEL_FIX = 'Take it off the public internet: serve it only on the private network or behind your VPN or SSO, or remove it from production builds.';
+const FILE_FIX = 'Remove the file from the web root and block dotfiles and dumps in the web server or CDN. Treat everything in it as leaked: rotate the keys and passwords it holds.';
+
+/** Read-only GETs of well-known paths. Each must match a fingerprint of the real page or file. */
+export const PAGE_CHECKS: readonly PageCheck[] = [
+  { path: '/.env', match: /^\s*(?:export\s+)?(?:APP_KEY|APP_ENV|DB_PASSWORD|DB_HOST|DATABASE_URL|SECRET_KEY|JWT_SECRET|AWS_SECRET_ACCESS_KEY|PAYSTACK_SECRET_KEY|[A-Z][A-Z0-9_]*_(?:SECRET|PASSWORD|KEY))\s*=/m, ruleId: 'EXP-FILE-001', severity: 'critical', what: 'Environment file (.env) is served to anyone', fix: FILE_FIX },
+  { path: '/.git/config', match: /^\[core\]/m, ruleId: 'EXP-FILE-001', severity: 'critical', what: 'Git repository (.git) is served to anyone', fix: 'Block /.git in the web server or CDN and deploy build output instead of a checkout. Anyone can download the source and its history, secrets included: rotate any that were ever committed.' },
+  { path: '/backup.sql', match: /(?:CREATE TABLE|INSERT INTO)\s/i, ruleId: 'EXP-FILE-001', severity: 'critical', what: 'Database dump (backup.sql) is served to anyone', fix: FILE_FIX },
+  { path: '/dump.sql', match: /(?:CREATE TABLE|INSERT INTO)\s/i, ruleId: 'EXP-FILE-001', severity: 'critical', what: 'Database dump (dump.sql) is served to anyone', fix: FILE_FIX },
+  { path: '/actuator/env', match: /"(?:activeProfiles|propertySources)"\s*:/, ruleId: 'EXP-PANEL-001', severity: 'critical', what: 'Spring Boot Actuator shows the environment (/actuator/env)', fix: 'Expose only health and info: management.endpoints.web.exposure.include=health,info, on a separate management port that isn\'t public.' },
+  { path: '/actuator/heapdump', match: /^JAVA PROFILE/, ruleId: 'EXP-PANEL-001', severity: 'critical', what: 'Spring Boot Actuator serves heap dumps (/actuator/heapdump)', fix: 'Expose only health and info: management.endpoints.web.exposure.include=health,info, on a separate management port that isn\'t public.' },
+  { path: '/h2-console/', match: /H2 Console|h2-console/i, ruleId: 'EXP-PANEL-001', severity: 'critical', what: 'H2 database console is open (/h2-console)', fix: 'Turn the H2 console off in production: spring.h2.console.enabled=false.' },
+  { path: '/phpmyadmin/', match: /phpMyAdmin/, ruleId: 'EXP-PANEL-001', severity: 'high', what: 'phpMyAdmin is open to the internet', fix: PANEL_FIX },
+  { path: '/adminer.php', match: /\bAdminer\b/, ruleId: 'EXP-PANEL-001', severity: 'high', what: 'Adminer database manager is open to the internet', fix: PANEL_FIX },
+  { path: '/_ignition/health-check', match: /"can_execute_commands"\s*:/, ruleId: 'EXP-PANEL-001', severity: 'high', what: 'Laravel Ignition (debug mode) is reachable', fix: 'Set APP_DEBUG=false in production and remove facade/ignition from production dependencies.' },
+  { path: '/telescope', match: /Laravel Telescope|telescope-app|window\.Telescope/i, ruleId: 'EXP-PANEL-001', severity: 'high', what: 'Laravel Telescope is open to the internet', fix: 'Limit Telescope to local environments, or gate it with the viewTelescope authorisation.' },
+  { path: '/horizon', match: /Laravel Horizon|window\.Horizon/i, ruleId: 'EXP-PANEL-001', severity: 'high', what: 'Laravel Horizon is open to the internet', fix: 'Gate Horizon with the viewHorizon authorisation, or serve it only on the private network.' },
+  { path: '/__fortis_not_a_page__', match: /You're seeing this error because you have <code>DEBUG = True<\/code>|Werkzeug Debugger|Whoops! There was an error|<title>Exception<\/title>[\s\S]{0,200}stack trace/i, ruleId: 'EXP-PANEL-001', severity: 'high', what: 'Debug mode shows error pages to anyone', fix: 'Turn debug mode off in production (DEBUG = False, APP_DEBUG=false, FLASK_DEBUG=0) and log errors privately instead.' },
+  { path: '/server-status', match: /Apache Server Status for/, ruleId: 'EXP-PANEL-001', severity: 'medium', what: 'Apache server-status is public', fix: 'Allow /server-status only from localhost or the private network.' },
+  { path: '/jenkins/', match: /Dashboard \[Jenkins\]|X-Jenkins|jenkins-head-icon/, ruleId: 'EXP-PANEL-001', severity: 'high', what: 'Jenkins is open to the internet', fix: PANEL_FIX },
+  { path: '/grafana/login', match: /<title>Grafana<\/title>|grafana-app/, ruleId: 'EXP-PANEL-001', severity: 'medium', what: 'Grafana login is open to the internet', fix: PANEL_FIX },
+  { path: '/swagger-ui.html', match: /swagger-ui/i, ruleId: 'EXP-PANEL-001', severity: 'medium', what: 'API documentation (Swagger UI) is public', fix: 'Serve API docs only in staging behind SSO, or turn them off in production builds. They map every route for an attacker.' },
+  { path: '/swagger.json', match: /"(?:swagger|openapi)"\s*:\s*"\d/, ruleId: 'EXP-PANEL-001', severity: 'medium', what: 'API specification (swagger.json) is public', fix: 'Serve API docs only in staging behind SSO, or turn them off in production builds. They map every route for an attacker.' },
+  { path: '/api-docs', match: /"(?:swagger|openapi)"\s*:\s*"\d|swagger-ui/i, ruleId: 'EXP-PANEL-001', severity: 'medium', what: 'API documentation (/api-docs) is public', fix: 'Serve API docs only in staging behind SSO, or turn them off in production builds. They map every route for an attacker.' },
+];
+
+export type PageResult = { url: string; check: PageCheck };
+
+/** One GET, pinned to an address we already vetted, with a short timeout and a capped body. */
+function fetchPage(scheme: 'http' | 'https', ip: string, port: number, hostname: string, path: string, timeoutMs: number): Promise<{ status: number; body: string; headers: string } | null> {
+  return new Promise((resolve) => {
+    const req = (scheme === 'https' ? httpsRequest : httpRequest)(
+      {
+        host: ip,
+        port,
+        path,
+        method: 'GET',
+        servername: scheme === 'https' ? hostname : undefined,
+        headers: { Host: hostname, 'User-Agent': 'fortis-exposure-check', Accept: '*/*', Connection: 'close' },
+        // This checks what's exposed, not the certificate; a self-signed staging host still counts.
+        rejectUnauthorized: false,
+        timeout: timeoutMs,
+      },
+      (res) => {
+        let body = '';
+        res.setEncoding('latin1');
+        res.on('data', (c: string) => {
+          body += c;
+          if (body.length > 65_536) res.destroy();
+        });
+        const done = () => resolve({ status: res.statusCode ?? 0, body: body.slice(0, 65_536), headers: JSON.stringify(res.headers) });
+        res.on('end', done);
+        res.on('close', done);
+        res.on('error', done);
+      },
+    );
+    req.on('timeout', () => req.destroy());
+    req.on('error', () => resolve(null));
+    req.end();
+  });
+}
+
+/** Check every well-known path over HTTPS and HTTP; report each one once, preferring HTTPS. */
+export async function probePages(hostname: string, ip: string, opts: ProbeOptions = {}): Promise<PageResult[]> {
+  const checks = opts.pages ?? PAGE_CHECKS;
+  const timeout = opts.timeoutMs ?? 4000;
+  const origins: { scheme: 'http' | 'https'; port: number }[] = [
+    { scheme: 'https', port: 443 },
+    { scheme: 'http', port: 80 },
+  ];
+  // Skip an origin that doesn't answer at all, so a closed port costs one request, not one per path.
+  const live: typeof origins = [];
+  for (const o of origins) {
+    const port = opts.dialPort ? opts.dialPort(o.port) : o.port;
+    if (await fetchPage(o.scheme, ip, port, hostname, '/', timeout)) live.push(o);
+  }
+  const jobs = live.flatMap((o) => checks.map((check) => ({ o, check })));
+  const hits = await pool(jobs, opts.concurrency ?? 8, async ({ o, check }) => {
+    const port = opts.dialPort ? opts.dialPort(o.port) : o.port;
+    const res = await fetchPage(o.scheme, ip, port, hostname, check.path, timeout);
+    if (!res || res.status !== 200 || !(check.match.test(res.body) || check.match.test(res.headers))) return null;
+    return { url: `${o.scheme}://${hostname}${o.port === (o.scheme === 'https' ? 443 : 80) ? '' : `:${o.port}`}${check.path}`, check };
+  });
+  const out: PageResult[] = [];
+  for (const h of hits) if (h && !out.some((x) => x.check.path === h.check.path)) out.push(h);
+  return out;
 }
 
 /* ------------------------------------------------- findings */
 
-export type ExposureFinding = { ruleId: 'EXP-PORT-001' | 'EXP-NOAUTH-001'; severity: 'critical' | 'high' | 'medium'; title: string; file: string; snippet: string; detail: string };
+export type ExposureFinding = { ruleId: 'EXP-PORT-001' | 'EXP-NOAUTH-001' | 'EXP-PANEL-001' | 'EXP-FILE-001'; severity: 'critical' | 'high' | 'medium'; title: string; file: string; snippet: string; detail: string };
 
 const FIX: Record<Service['kind'], string> = {
   admin: 'Close this port to the internet. Reach the machine through a VPN, a bastion host, or your cloud\'s session manager (AWS SSM, Google IAP, Azure Bastion), and allow only those addresses in the firewall or security group.',
@@ -224,8 +330,11 @@ const FIX: Record<Service['kind'], string> = {
 };
 
 /** Turn port results into findings: one per open port, raised to critical when it answered without a password. */
-export function exposureFindings(hostname: string, results: PortResult[]): ExposureFinding[] {
+export function exposureFindings(hostname: string, results: PortResult[], pages: PageResult[] = []): ExposureFinding[] {
   const out: ExposureFinding[] = [];
+  for (const p of pages) {
+    out.push({ ruleId: p.check.ruleId, severity: p.check.severity, title: p.check.what, file: p.url, snippet: `GET ${p.check.path} 200`, detail: `${p.check.what}, at ${p.url}. ${p.check.fix}` });
+  }
   for (const r of results.filter((x) => x.open)) {
     const svc = SERVICES.find((s) => s.port === r.port)!;
     const where = `${hostname}:${r.port}`;

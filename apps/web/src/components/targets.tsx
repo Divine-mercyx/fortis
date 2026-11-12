@@ -168,9 +168,9 @@ function Exposure({ t, base, canRun }: { t: StagingTarget; base: string; canRun:
   async function run() {
     setRunning(true);
     try {
-      const r = await api<{ open: unknown[]; newCount: number; fixedCount: number; refused: string[] }>(url, { method: 'POST' });
-      const open = r.open.length;
-      toast(open ? `${open} port${open === 1 ? '' : 's'} open to the internet${r.fixedCount ? ` · ${r.fixedCount} closed since last check` : ''}` : `No admin or database ports open${r.fixedCount ? ` · ${r.fixedCount} closed since last check` : ''}`, open > 0);
+      const r = await api<{ open: unknown[]; pages: unknown[]; newCount: number; fixedCount: number; refused: string[] }>(url, { method: 'POST' });
+      const open = r.open.length + r.pages.length;
+      toast(open ? `${open} thing${open === 1 ? '' : 's'} open to the internet${r.fixedCount ? ` · ${r.fixedCount} closed since last check` : ''}` : `Nothing exposed${r.fixedCount ? ` · ${r.fixedCount} closed since last check` : ''}`, open > 0);
       await mutate();
     } catch (err) {
       toast((err as Error).message, true);
@@ -184,16 +184,16 @@ function Exposure({ t, base, canRun }: { t: StagingTarget; base: string; canRun:
     <div className="exposure">
       <div className="exposure-head">
         <div>
-          <b>Exposed ports</b>
+          <b>Exposed to the internet</b>
           <span className="small">
             {data?.lastScan
-              ? `Checked ${timeAgo(data.lastScan.at)} · ${n} admin and database ports`
-              : `Checks ${n} admin and database ports (SSH, Remote Desktop, PostgreSQL, Redis, MongoDB, the Docker API…) from the internet`}
+              ? `Checked ${timeAgo(data.lastScan.at)} · ${n} admin and database ports, admin pages and secret files`
+              : `Checks ${n} admin and database ports (SSH, PostgreSQL, Redis, the Docker API…), admin pages (phpMyAdmin, Actuator, debug pages) and files (.env, .git) from the internet`}
           </span>
         </div>
         {canRun && t.status === 'ready' ? (
           <button className="btn btn-outline btn-sm" disabled={running} onClick={run}>
-            {running ? <span className="spinner" /> : <Shield />} {data?.lastScan ? 'Check again' : 'Check exposed ports'}
+            {running ? <span className="spinner" /> : <Shield />} {data?.lastScan ? 'Check again' : 'Check exposure'}
           </button>
         ) : null}
       </div>
@@ -210,7 +210,7 @@ function Exposure({ t, base, canRun }: { t: StagingTarget; base: string; canRun:
           ))}
         </ul>
       ) : data?.lastScan ? (
-        <p className="exposure-clear"><Check /> No admin or database ports answer from the internet.</p>
+        <p className="exposure-clear"><Check /> No admin ports, admin pages or secret files answer from the internet.</p>
       ) : null}
     </div>
   );

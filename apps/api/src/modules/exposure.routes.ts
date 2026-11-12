@@ -61,7 +61,7 @@ export async function exposureRoutes(app: FastifyInstance) {
       if (e instanceof ExposureError) throw badRequest(e.message, e.code);
       throw e;
     }
-    const found = exposureFindings(target.hostname, probe.results);
+    const found = exposureFindings(target.hostname, probe.results, probe.pages);
     const result = await ingestScan(
       { orgId, projectId, tokenId: null },
       {
@@ -83,6 +83,7 @@ export async function exposureRoutes(app: FastifyInstance) {
       addresses: probe.addresses,
       refused: probe.refused,
       checked: SERVICES.length,
+      pages: probe.pages.map((p) => ({ url: p.url, what: p.check.what, severity: p.check.severity })),
       open: probe.results.filter((r) => r.open).map((r) => ({ ip: r.ip, port: r.port, service: r.service, noAuth: r.noAuth ?? null, banner: r.banner ?? null })),
       findings: found,
       newCount: result.newCount,

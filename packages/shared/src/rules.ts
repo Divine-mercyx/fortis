@@ -236,6 +236,22 @@ export const RULE_CATALOG: readonly RuleMeta[] = [
     fix: 'Take it off the internet now (firewall or security group), turn authentication on, and check its logs and data for access you don\'t recognise. Rotate any credentials or tokens it held.',
   },
   {
+    id: 'EXP-PANEL-001',
+    pack: 'infrastructure',
+    title: 'Admin panel or debug page open to the internet',
+    severity: 'high',
+    summary: 'A verified domain serves an admin tool or debug page to anyone: phpMyAdmin, Adminer, the H2 console, Jenkins, Grafana, Laravel Telescope or Horizon, Spring Boot Actuator environment or heap dumps, Laravel Ignition, a framework debug error page, Apache server-status, or public API documentation. Each is found with a read-only GET and a fingerprint of the real page, so a single-page app that answers every path is not mistaken for one.',
+    fix: 'Serve admin and debug tools only on the private network or behind your VPN or SSO, turn debug modes off in production, and expose only health and info from Actuator.',
+  },
+  {
+    id: 'EXP-FILE-001',
+    pack: 'infrastructure',
+    title: 'Secret file served from the website',
+    severity: 'critical',
+    summary: 'A verified domain serves a file that should never be public: a .env file with keys and passwords, a .git folder with the source and its history, or a database dump. Found with a read-only GET and a fingerprint of the file\'s contents.',
+    fix: 'Remove the file from the web root, block dotfiles and dumps in the web server or CDN, deploy build output rather than a checkout, and rotate every key and password the file held.',
+  },
+  {
     id: 'INF-NET-001',
     pack: 'infrastructure',
     title: 'Firewall open to the internet on an admin or database port',
