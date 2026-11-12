@@ -4,6 +4,7 @@ import { takeAnalysisFailures } from './analysis/facts';
 import { languageOf, loadGrammars, type Language } from './analysis/parser';
 import { createProject } from './analysis/project';
 import { scanDependencies } from './rules/dependencies';
+import { GLOBAL_LIMIT } from './rules/auth';
 import { rulesFor } from './rules/index';
 import { findLockfiles } from './rules/lockfiles';
 import { JS_TS, PYTHON, TEST_PATH, type Detection, type ProjectContext, type SourceFile } from './rules/types';
@@ -176,17 +177,23 @@ export async function runScan(opts: ScanOptions): Promise<ScanResult> {
 /** buildContext over files read one at a time. */
 function buildContextFrom(root: string, paths: string[]): ProjectContext {
   const idempotencyHelpers = new Set<string>();
+  let rateLimitAll = false;
   for (const p of paths) {
     const f = readSource(root, p);
-    if (f) for (const name of buildContext([f]).idempotencyHelpers) idempotencyHelpers.add(name);
+    if (!f) continue;
+    const one = buildContext([f]);
+    for (const name of one.idempotencyHelpers) idempotencyHelpers.add(name);
+    rateLimitAll ||= Boolean(one.rateLimitAll);
   }
-  return { idempotencyHelpers };
+  return { idempotencyHelpers, rateLimitAll };
 }
 
 /** Names exported from modules that implement idempotency keys, e.g. withPaymentGuard. */
 export function buildContext(files: SourceFile[]): ProjectContext {
   const idempotencyHelpers = new Set<string>();
+  let rateLimitAll = false;
   for (const f of files) {
+    if (!TEST_PATH.test(f.path) && GLOBAL_LIMIT.test(f.text)) rateLimitAll = true;
     if (TEST_PATH.test(f.path) || !/idempoten/i.test(f.text)) continue;
     if (PYTHON.test(f.path)) {
       for (const m of f.text.matchAll(/^(?:async\s+)?def\s+([A-Za-z_]\w*)/gm)) idempotencyHelpers.add(m[1]!);
@@ -196,7 +203,7 @@ export function buildContext(files: SourceFile[]): ProjectContext {
       }
     }
   }
-  return { idempotencyHelpers };
+  return { idempotencyHelpers, rateLimitAll };
 }
 
 export const meetsThreshold = (sev: Severity, failOn: Severity) => SEVERITY_RANK[sev] >= SEVERITY_RANK[failOn];

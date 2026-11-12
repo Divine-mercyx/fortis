@@ -274,5 +274,29 @@
   "INF-STO-001": {
     "precision": 1,
     "recall": 1
+  },
+  "FX-RATE-001": {
+    "precision": 1,
+    "recall": 1
+  },
+  "FX-RATE-001:py": {
+    "precision": 1,
+    "recall": 1
+  },
+  "FX-JWT-001": {
+    "precision": 1,
+    "recall": 1
+  },
+  "FX-JWT-001:py": {
+    "precision": 1,
+    "recall": 1
+  },
+  "FX-RESET-001": {
+    "precision": 1,
+    "recall": 1
+  },
+  "FX-RESET-001:py": {
+    "precision": 1,
+    "recall": 1
   }
 }

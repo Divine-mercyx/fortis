@@ -69,7 +69,7 @@ Once a day, Fortis checks GitHub for a newer release and prints a notice if ther
 | Dependencies | Known vulnerabilities, from [OSV](https://osv.dev) | See below | Free |
 | Dependencies (supply chain) | Docker base images with no tag or `latest`, not pinned by digest, or end-of-life; third-party GitHub Actions not pinned to a commit; `pull_request_target` workflows that run the pull request's code | Dockerfiles and GitHub Actions workflows | Free |
 | Infrastructure | Firewall rules that open SSH, Remote Desktop, databases, caches or cluster APIs to the whole internet; public storage buckets; databases with a public address; Kubernetes services that put a database on a public load balancer or node port; Compose files that publish a database port on every interface | Terraform (AWS, Google Cloud, Azure), Kubernetes manifests, Docker Compose | Free |
-| Fintech | Money records read without an ownership check; webhooks without a signature check; balance updates outside a transaction; BVN/NIN in logs; weak or leaked OTPs; transfers without an idempotency key; money as floating point; card data in logs, analytics or plain text; predictable transaction references; charge amounts taken from the request | JavaScript, TypeScript and Python (Django, Django REST, Flask, FastAPI); the first six checks also in Go (net/http, Gin, Echo, Fiber), C# (ASP.NET Core), PHP (Laravel), and Java and Kotlin (Spring Boot) | Core and above |
+| Fintech | Money records read without an ownership check; webhooks without a signature check; balance updates outside a transaction; BVN/NIN in logs; weak or leaked OTPs; transfers without an idempotency key; money as floating point; card data in logs, analytics or plain text; predictable transaction references; charge amounts taken from the request; login, OTP and PIN routes without a rate limit; weak JWTs and session cookies; insecure password and PIN resets | JavaScript, TypeScript and Python (Django, Django REST, Flask, FastAPI); the first six checks also in Go (net/http, Gin, Echo, Fiber), C# (ASP.NET Core), PHP (Laravel), and Java and Kotlin (Spring Boot) | Core and above |
 
 `fortis test` and `fortis access` test a running app over HTTP, so they work whatever the backend is written in.
 
@@ -566,6 +566,7 @@ It exits 1 if something stops Fortis doing its job. Things that are only worth k
 ## Changelog
 
 **Unreleased**
+- Account-takeover checks in the Fintech pack, for JavaScript, TypeScript and Python: login, OTP and PIN routes without a rate limit or lockout (FX-RATE-001), weak JWTs and sessions such as hard-coded or fallback secrets, unverified tokens, no expiry, weak cookies and tokens in localStorage (FX-JWT-001), and insecure password and PIN resets (FX-RESET-001).
 - New infrastructure checks, free on every plan: firewall rules open to the internet on admin and database ports (INF-NET-001), Compose files publishing a database port (INF-NET-002), public storage buckets (INF-STO-001), databases with a public address (INF-DB-001) and Kubernetes services exposing a database (INF-K8S-001), in a new Infrastructure rule pack with its own tab on the dashboard's Rules page. They read Terraform for AWS, Google Cloud and Azure, Kubernetes manifests and Docker Compose files.
 
 **0.1.0-beta.13** (2026-11-10)

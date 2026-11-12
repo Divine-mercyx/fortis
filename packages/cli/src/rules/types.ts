@@ -29,6 +29,8 @@ export type ProjectContext = {
   idempotencyHelpers: Set<string>;
   /** The repository's other files, for following calls into them. Without it, calls stop at the file. */
   project?: Project;
+  /** A rate limiter guards the whole app (app.use(limiter), DEFAULT_THROTTLE_CLASSES, ...). */
+  rateLimitAll?: boolean;
 };
 
 export const emptyContext = (): ProjectContext => ({ idempotencyHelpers: new Set() });
