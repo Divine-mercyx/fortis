@@ -150,7 +150,8 @@ Microsoft reviews the first winget pull request by hand, so `winget install` wor
 
 These are limits of what was built, not missing setup.
 
-- **Exposure checks** connect only to the ports in the service list (admin, database, cache, queue, cluster and search ports) on a ready target's own host name, at up to four public addresses. Private and reserved addresses are always refused. They don't follow other host names, don't run on a schedule yet, and their read-only probes cover Redis, Elasticsearch, CouchDB, etcd, Consul, Memcached, the Docker API and kubelet.
+- **Exposure checks** connect only to the ports in the service list and to about twenty well-known admin and file paths on 443 and 80, on a ready target's own host name, at up to four public addresses. Private and reserved addresses are always refused. Scheduled runs need `CRON_SECRET` on the API and `FORTIS_CRON_SECRET` in the repository; without them the daily job does nothing.
+- **Auth checks in Go, C#, PHP, Java and Kotlin** are line patterns: a limiter, lockout or expiry check in a different file from the route isn't seen, so review those findings and mark them accepted with that reason.
 - **Rate-limit check (FX-RATE-001)** looks for a limiter on the route, in its handler, in the services it calls, or across the app. A limit enforced only by a gateway, a WAF or a load balancer outside the repository isn't visible, so mark those findings as accepted with that reason.
 - **Infrastructure checks read values written in the repository.** Terraform variables, locals and `.tfvars` are followed, but values passed in from a pipeline, a remote state or a custom module's internals aren't. Helm values are read, rendered chart templates aren't. CloudFormation `!Ref` and Pulumi values computed at run time aren't resolved.
 - **CocoaPods, Conan and vcpkg:** OSV has no advisories for them. The scan names the packages and says they weren't checked.
@@ -162,12 +163,10 @@ These are limits of what was built, not missing setup.
 
 ## Next checks, not built yet
 
-The account-takeover checks (rate limits, tokens and sessions, resets), the Mobile pack with `fortis mobile`, the extra infrastructure formats and the exposure check are built. What's left of those ideas:
+Everything on the earlier list is built: the account-takeover checks in every supported language, the Mobile pack with `fortis mobile` (binary manifests and plists included), the extra infrastructure formats, and exposure checks with admin pages and secret files, on demand, on a schedule and from the CLI. Ideas for later:
 
 | What | Why it matters | Notes |
 |---|---|---|
-| Scheduled exposure checks | A port opened next week should be caught without someone pressing the button | The check runs on demand from the dashboard today. A nightly run per ready target needs a job runner on the API (a cron worker or the Render cron) |
-| Exposure checks from the CLI | Teams that live in CI want `fortis exposure` | The route needs a session today; a project-key route that follows the same target safeguards would make it callable from CI |
-| HTTP admin panels in the exposure check | Exposed admin dashboards, phpMyAdmin, Adminer and the like on 80/443 | Needs path checks over HTTP, with the same read-only rules |
-| Auth checks in Go, C#, PHP, Java and Kotlin | The rate-limit, token and reset checks cover JavaScript, TypeScript and Python | Same pattern as the other fintech rules: line patterns first, syntax trees later |
-| Binary AndroidManifest and binary plists in `fortis mobile` | Cleartext and App Transport Security settings in a build are only judged in XML plists and network security config today | Needs small AXML and bplist readers; the source repository is checked by `fortis scan` already |
+| Syntax trees for the Go, C#, PHP, Java and Kotlin auth checks | The line patterns follow a handler in the same file and annotations above it; a limiter or lockout two calls away in another file isn't seen | The JavaScript and Python versions follow calls across files already |
+| Exposure checks on other host names | Today only the target's own host is checked | Would need each extra host verified the same way |
+| HTTPS admin pages on non-standard ports | Pages are checked on 443 and 80 | 8080, 8443 and 9000 are common for admin tools |

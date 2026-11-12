@@ -1,6 +1,7 @@
 import type { RulePack } from '@fortis/shared';
 
 import { AUTH_RULES } from './auth';
+import { OTHER_AUTH_RULES } from './auth-languages';
 import { FINTECH_RULES } from './fintech';
 import { CSHARP_FINTECH_RULES } from './fintech-csharp';
 import { GO_FINTECH_RULES } from './fintech-go';
@@ -14,6 +15,6 @@ import { genericSecretRule, paymentKeyRule } from './secrets';
 import { SUPPLY_CHAIN_RULES } from './supply-chain';
 import type { FileRule } from './types';
 
-export const FILE_RULES: FileRule[] = [paymentKeyRule, genericSecretRule, ...FINTECH_RULES, ...GO_FINTECH_RULES, ...CSHARP_FINTECH_RULES, ...PHP_FINTECH_RULES, ...JVM_FINTECH_RULES, ...MONEY_RULES, ...AUTH_RULES, ...SUPPLY_CHAIN_RULES, ...INFRASTRUCTURE_RULES, ...FORMAT_RULES, ...MOBILE_RULES];
+export const FILE_RULES: FileRule[] = [paymentKeyRule, genericSecretRule, ...FINTECH_RULES, ...GO_FINTECH_RULES, ...CSHARP_FINTECH_RULES, ...PHP_FINTECH_RULES, ...JVM_FINTECH_RULES, ...MONEY_RULES, ...AUTH_RULES, ...OTHER_AUTH_RULES, ...SUPPLY_CHAIN_RULES, ...INFRASTRUCTURE_RULES, ...FORMAT_RULES, ...MOBILE_RULES];
 
 export const rulesFor = (packs: readonly RulePack[]) => FILE_RULES.filter((r) => packs.includes(r.pack));
