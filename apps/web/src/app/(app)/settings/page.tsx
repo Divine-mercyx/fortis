@@ -167,7 +167,7 @@ export default function SettingsPage() {
                 </div>
                 <ul style={{ listStyle: 'none', padding: 0, margin: '12px 0 0', fontSize: 13, color: id === 'plus' ? '#D3DBEA' : 'var(--ink-2)', display: 'grid', gap: 6 }}>
                   <li>{limit(p.maxProjects)} projects · {limit(p.maxSeats)} seats</li>
-                  <li>{p.rulePacks.includes('fintech') ? 'Fintech rule pack' : 'Secrets, dependencies and infrastructure'}</li>
+                  <li>{p.rulePacks.includes('fintech') ? 'Fintech rule pack' : 'Secrets, dependencies, infrastructure and mobile'}</li>
                   <li>{p.dashboard ? 'Findings dashboard' : 'Results stay local'}</li>
                   {p.dast !== 'none' ? <li>OWASP ZAP {p.dast === 'full' ? 'baseline + full scans' : 'baseline scans'} · {limit(p.maxTargets)} targets</li> : null}
                   {p.stagingChecks ? <li>Access checks with two test users</li> : null}

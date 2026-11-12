@@ -47,7 +47,7 @@ describe('entitlements and rule packs', () => {
     const c = await signup(app);
     const { key } = await projectWithKey(c);
     const who = await app.inject({ method: 'GET', url: '/v1/cli/whoami', headers: { authorization: `Bearer ${key}` } });
-    expect(who.json().entitlements).toMatchObject({ rulePacks: ['secrets', 'dependencies', 'infrastructure'], uploadFindings: false });
+    expect(who.json().entitlements).toMatchObject({ rulePacks: ['secrets', 'dependencies', 'infrastructure', 'mobile'], uploadFindings: false });
     const res = await upload(key, scanPayload([liveKeyFinding]));
     expect(res.statusCode).toBe(402);
   });

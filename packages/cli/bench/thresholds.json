@@ -310,5 +310,25 @@
   "INF-STO-001:py": {
     "precision": 1,
     "recall": 1
+  },
+  "MOB-KEY-001": {
+    "precision": 1,
+    "recall": 1
+  },
+  "MOB-PIN-001": {
+    "precision": 1,
+    "recall": 1
+  },
+  "MOB-TLS-001": {
+    "precision": 1,
+    "recall": 1
+  },
+  "MOB-TLS-001:kt": {
+    "precision": 1,
+    "recall": 1
+  },
+  "MOB-TLS-001:java": {
+    "precision": 1,
+    "recall": 1
   }
 }

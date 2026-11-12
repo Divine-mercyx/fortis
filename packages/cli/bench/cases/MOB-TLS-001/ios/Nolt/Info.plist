@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<plist version="1.0">
+<dict>
+    <key>CFBundleIdentifier</key>
+    <string>com.nolt.app</string>
+    <key>NSAppTransportSecurity</key>
+    <dict>
+        <key>NSAllowsArbitraryLoads</key> <!-- @hit -->
+        <true/>
+        <key>NSAllowsArbitraryLoadsInWebContent</key> <!-- @hit -->
+        <true/>
+        <key>NSAllowsArbitraryLoadsForMedia</key>
+        <false/>
+    </dict>
+</dict>
+</plist>

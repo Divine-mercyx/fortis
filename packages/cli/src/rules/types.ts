@@ -33,6 +33,8 @@ export type ProjectContext = {
   rateLimitAll?: boolean;
   /** Literal values of Terraform variables and locals, by folder, so `var.x` can be judged. */
   terraform?: Map<string, Map<string, string>>;
+  /** Some file in the project pins certificates (CertificatePinner, a pin-set, TrustKit, ...). */
+  pinning?: boolean;
 };
 
 export const emptyContext = (): ProjectContext => ({ idempotencyHelpers: new Set() });

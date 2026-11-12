@@ -1,0 +1,12 @@
+{
+  "expo": {
+    "name": "Nolt",
+    "extra": {
+      "apiUrl": "https://api.nolt.example",
+      "paystackSecretKey": "sk_test_example_value", // @hit
+      "paystackPublicKey": "pk_test_example_value",
+      "supabaseServiceRole": "service-role-example", // @hit
+      "adminPassword": "example-password" // @hit
+    }
+  }
+}

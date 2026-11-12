@@ -695,7 +695,7 @@ h1, h2, h3, h4 { color: var(--ink); margin: 0; font-weight: 800; letter-spacing:
 /* Rules page */
 .pack-ic { width: 40px; height: 40px; border-radius: 12px; background: var(--navy); color: var(--mint); display: flex; align-items: center; justify-content: center; flex: none; }
 .pack-ic svg { width: 19px; height: 19px; }
-.packs { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 12px; }
+.packs { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
 .pack { display: flex; align-items: center; gap: 12px; padding: 16px; text-align: left; border-radius: var(--radius); background: var(--surface); border: 1px solid var(--line); box-shadow: var(--shadow-sm); transition: border-color .2s, box-shadow .2s, transform .3s var(--ease-out); }
 .pack:hover { transform: translateY(-2px); border-color: var(--line-2); }
 .pack[aria-selected="true"] { border-color: var(--green); box-shadow: 0 0 0 3px rgba(14, 122, 85, .14), var(--shadow-sm); }

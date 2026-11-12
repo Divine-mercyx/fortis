@@ -6,7 +6,7 @@
 export const PLAN_IDS = ['free', 'core', 'plus', 'enterprise'] as const;
 export type PlanId = (typeof PLAN_IDS)[number];
 
-export const RULE_PACKS = ['secrets', 'dependencies', 'infrastructure', 'fintech'] as const;
+export const RULE_PACKS = ['secrets', 'dependencies', 'infrastructure', 'mobile', 'fintech'] as const;
 export type RulePack = (typeof RULE_PACKS)[number];
 
 /** Running-app (DAST) testing with OWASP ZAP: none, passive baseline, or full active scan. */
@@ -38,7 +38,7 @@ export const PLANS: Record<PlanId, PlanLimits> = {
     monthlyPriceKobo: 0,
     maxProjects: 1,
     maxSeats: 1,
-    rulePacks: ['secrets', 'dependencies', 'infrastructure'],
+    rulePacks: ['secrets', 'dependencies', 'infrastructure', 'mobile'],
     dashboard: false,
     stagingChecks: false,
     dast: 'none',
@@ -53,7 +53,7 @@ export const PLANS: Record<PlanId, PlanLimits> = {
     monthlyPriceKobo: 450_000_00,
     maxProjects: 5,
     maxSeats: 10,
-    rulePacks: ['secrets', 'dependencies', 'infrastructure', 'fintech'],
+    rulePacks: ['secrets', 'dependencies', 'infrastructure', 'mobile', 'fintech'],
     dashboard: true,
     stagingChecks: false,
     dast: 'baseline',
@@ -68,7 +68,7 @@ export const PLANS: Record<PlanId, PlanLimits> = {
     monthlyPriceKobo: 750_000_00,
     maxProjects: 20,
     maxSeats: 40,
-    rulePacks: ['secrets', 'dependencies', 'infrastructure', 'fintech'],
+    rulePacks: ['secrets', 'dependencies', 'infrastructure', 'mobile', 'fintech'],
     dashboard: true,
     stagingChecks: true,
     dast: 'full',
@@ -83,7 +83,7 @@ export const PLANS: Record<PlanId, PlanLimits> = {
     monthlyPriceKobo: 1_000_000_00,
     maxProjects: null,
     maxSeats: null,
-    rulePacks: ['secrets', 'dependencies', 'infrastructure', 'fintech'],
+    rulePacks: ['secrets', 'dependencies', 'infrastructure', 'mobile', 'fintech'],
     dashboard: true,
     stagingChecks: true,
     dast: 'full',

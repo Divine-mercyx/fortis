@@ -21,6 +21,7 @@ import { apiUrl, VERSION } from './env';
 import { checkoutInfo, currentBranch, currentCommit, parsePushRefs, repoRoot, type PushedRef } from './git';
 import { installHook } from './hook';
 import { explain, printDastReport, printReport } from './report';
+import { scanAppArchive } from './app-archive';
 import { meetsThreshold, runScan } from './scan';
 import { verifySecrets } from './verify';
 import { configureNetwork } from './net';
@@ -28,7 +29,7 @@ import { osvCacheDir } from './rules/osv-cache';
 import { installKind, selfUpdate, UPDATE_HINT, updateCheckEnabled, updateNotice } from './update';
 import { c, err, log } from './ui';
 
-const FREE_PACKS: RulePack[] = ['secrets', 'dependencies', 'infrastructure'];
+const FREE_PACKS: RulePack[] = ['secrets', 'dependencies', 'infrastructure', 'mobile'];
 /** The packs a plan unlocks, plus the free ones: an API that predates a free pack still gets it run. */
 const withFree = (packs: RulePack[]): RulePack[] => [...new Set([...FREE_PACKS, ...packs])];
 
@@ -42,6 +43,7 @@ ${c.bold('Usage')}
   fortis logout [--api URL]                          remove the saved key
   fortis whoami                                      show the project and plan for your key
   fortis test --target <url> [options]               ZAP test of a running staging app
+  fortis mobile <app.apk|app.aab|app.ipa>            what a built app gives away (keys, plain-HTTP settings, a bundled .env)
   fortis access --target <url> [--writes]            can test user B read, change or delete test user A's records? (BOLA)
   fortis access init [--openapi|--postman|--har|--graphql <source>]  write ${ACCESS_CONFIG}, from your routes if given
   fortis baseline                                    accept today's findings so only new ones block
@@ -685,6 +687,35 @@ async function cmdAccess(args: string[], flags: Flags): Promise<number> {
 /** A standalone binary is a copy of Node with the CLI inside, named fortis. An npm install runs as a script under Node. */
 const runningAsBinary = () => /^fortis(\.exe)?$/i.test(basename(process.execPath));
 
+/** `fortis mobile <app.apk|app.aab|app.ipa>`: what a built app gives away to anyone who downloads it. */
+async function cmdMobile(args: string[], flags: Flags): Promise<number> {
+  const target = args[0];
+  if (!target) {
+    err(c.red('✖ Give the built app to check: fortis mobile app-release.apk (or .aab, .ipa)'));
+    return 2;
+  }
+  const failOn = (str(flags['fail-on']) ?? 'high') as Severity;
+  const started = Date.now();
+  let result: ReturnType<typeof scanAppArchive>;
+  try {
+    result = scanAppArchive(target);
+  } catch (e) {
+    err(c.red(`✖ Could not read ${target}: ${(e as Error).message}`));
+    return 2;
+  }
+  const blocking = result.detections.filter((d) => meetsThreshold(d.severity, failOn));
+  if (flags.json) {
+    log(JSON.stringify({ app: target, platform: result.kind, entries: result.entries, read: result.read, findings: result.detections.map((d) => ({ ...d, snippet: maskSnippet(d.snippet) })), notes: result.notes }, null, 2));
+    return blocking.length ? 1 : 0;
+  }
+  printReport(
+    { detections: result.detections, filesScanned: result.read, packagesChecked: 0, durationMs: Date.now() - started, notes: result.notes, incompleteChecks: [], partial: [] },
+    { failOn, prePush: false, packs: [`${result.kind} app`, 'secrets', 'mobile'] },
+  );
+  for (const n of result.notes) log(c.grey(`note: ${n}`));
+  return blocking.length ? 1 : 0;
+}
+
 async function cmdUpdate(args: string[]): Promise<number> {
   const kind = installKind({ execPath: process.execPath, isBinary: runningAsBinary() });
   if (kind !== 'binary') {
@@ -943,6 +974,8 @@ async function main(): Promise<number> {
     }
     case 'update':
       return cmdUpdate(args);
+    case 'mobile':
+      return cmdMobile(args, flags);
     case 'doctor':
       return cmdDoctor(flags);
     case 'explain':

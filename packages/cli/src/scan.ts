@@ -7,6 +7,7 @@ import { scanDependencies } from './rules/dependencies';
 import { GLOBAL_LIMIT } from './rules/auth';
 import { rulesFor } from './rules/index';
 import { terraformValues } from './rules/infrastructure';
+import { PINNING, PINNING_FILES } from './rules/mobile';
 import { findLockfiles } from './rules/lockfiles';
 import { JS_TS, PYTHON, TEST_PATH, type Detection, type ProjectContext, type SourceFile } from './rules/types';
 import { makeFilter, readSource } from './files';
@@ -97,6 +98,14 @@ export async function runScan(opts: ScanOptions): Promise<ScanResult> {
   // Terraform variables and locals, so a rule can judge `cidr_blocks = var.admin_cidrs`.
   const tfPaths = (opts.scope === 'full' ? candidates : everything().filter(keep)).filter((p) => /\.(?:tf|tfvars)$/i.test(p));
   if (tfPaths.length) ctx.terraform = terraformValues(tfPaths.map((p) => readSource(opts.root, p)).filter((f): f is SourceFile => f !== null));
+  // Whether the app pins certificates anywhere, so MOB-PIN-001 can judge the app as a whole.
+  if (rules.some((r) => r.id === 'MOB-PIN-001')) {
+    const pool = (opts.scope === 'full' ? candidates : everything().filter(keep)).filter((p) => PINNING_FILES.test(p) && !/node_modules\//.test(p));
+    ctx.pinning = pool.some((p) => {
+      const f = readSource(opts.root, p);
+      return f !== null && PINNING.test(f.text);
+    });
+  }
 
   // Only the grammars this repository needs, and only if the rules that use them are running.
   if (rules.some((r) => r.pack === 'fintech')) {
@@ -208,7 +217,8 @@ export function buildContext(files: SourceFile[]): ProjectContext {
     }
   }
   const tf = files.filter((f) => /\.(?:tf|tfvars)$/i.test(f.path));
-  return { idempotencyHelpers, rateLimitAll, ...(tf.length ? { terraform: terraformValues(tf) } : {}) };
+  const pinning = files.some((f) => PINNING_FILES.test(f.path) && PINNING.test(f.text));
+  return { idempotencyHelpers, rateLimitAll, pinning, ...(tf.length ? { terraform: terraformValues(tf) } : {}) };
 }
 
 export const meetsThreshold = (sev: Severity, failOn: Severity) => SEVERITY_RANK[sev] >= SEVERITY_RANK[failOn];

@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<plist version="1.0">
+<dict>
+    <key>CFBundleIdentifier</key> <!-- @hit -->
+    <string>com.nolt.noltpos</string>
+    <key>CFBundleExecutable</key>
+    <string>NoltPOS</string>
+    <key>LSRequiresIPhoneOS</key>
+    <true/>
+</dict>
+</plist>
