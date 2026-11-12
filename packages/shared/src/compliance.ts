@@ -18,8 +18,10 @@ export type FrameworkId = keyof typeof FRAMEWORKS;
 export type Control = { framework: FrameworkId; ref: string; title: string };
 
 const PCI = {
+  '1.3.1': 'Inbound traffic to the cardholder data environment is restricted to what is necessary',
   '3.3.1': 'Sensitive authentication data is not retained after authorisation',
   '3.5.1': 'The primary account number is rendered unreadable anywhere it is stored',
+  '4.2.1': 'Strong cryptography protects cardholder data during transmission over open, public networks',
   '6.2.3': 'Bespoke software is reviewed before release to find and correct vulnerabilities',
   '6.2.4': 'Software engineering techniques prevent common attacks (injection, access control, business logic, cryptography)',
   '6.3.1': 'Security vulnerabilities are identified and ranked',
@@ -71,6 +73,21 @@ const BY_RULE: Record<string, Control[]> = {
   'SUP-IMG-003': [pci('6.3.1'), pci('6.3.3'), cbn('vuln')],
   'SUP-GHA-001': [pci('6.2.3'), cbn('appsec'), cbn('crypto')],
   'SUP-GHA-002': [pci('6.2.4'), cbn('appsec'), cbn('access')],
+  'FX-RATE-001': [pci('6.2.4'), pci('8.3.1'), cbn('access'), cbn('appsec')],
+  'FX-JWT-001': [pci('6.2.4'), pci('8.3.1'), cbn('access'), cbn('crypto')],
+  'FX-RESET-001': [pci('6.2.4'), pci('8.3.1'), cbn('access'), ndpa('s.39')],
+  'MOB-KEY-001': [pci('8.6.2'), cbn('crypto'), cbn('appsec')],
+  'MOB-TLS-001': [pci('4.2.1'), cbn('crypto'), cbn('appsec')],
+  'MOB-PIN-001': [pci('4.2.1'), cbn('crypto')],
+  'EXP-PORT-001': [pci('1.3.1'), pci('11.3.1'), cbn('vapt'), cbn('access')],
+  'EXP-NOAUTH-001': [pci('1.3.1'), pci('8.3.1'), pci('11.3.1'), cbn('vapt'), cbn('access'), ndpa('s.39')],
+  'EXP-PANEL-001': [pci('6.4.1'), pci('11.3.1'), cbn('vapt'), cbn('access')],
+  'EXP-FILE-001': [pci('8.6.2'), pci('6.4.1'), cbn('vapt'), cbn('crypto'), ndpa('s.39')],
+  'INF-NET-001': [pci('1.3.1'), cbn('access'), cbn('vapt')],
+  'INF-NET-002': [pci('1.3.1'), cbn('access')],
+  'INF-STO-001': [pci('1.3.1'), cbn('data'), ndpa('s.39'), ndpa('s.40')],
+  'INF-DB-001': [pci('1.3.1'), cbn('access'), cbn('data'), ndpa('s.39')],
+  'INF-K8S-001': [pci('1.3.1'), cbn('access')],
 };
 
 /** ZAP alerts whose fix protects payment-page scripts (CSP, Subresource Integrity). */

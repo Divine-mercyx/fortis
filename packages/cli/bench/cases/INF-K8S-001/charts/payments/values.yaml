@@ -1,0 +1,25 @@
+replicaCount: 2
+
+postgresql:
+  enabled: true
+  primary:
+    service:
+      type: LoadBalancer # @hit
+
+redis:
+  master:
+    service:
+      type: NodePort # @hit
+      ports:
+        redis: 6379
+
+service:
+  type: LoadBalancer
+  port: 443
+
+cache:
+  service:
+    type: LoadBalancer
+    loadBalancerSourceRanges:
+      - 10.0.0.0/8
+    port: 6379

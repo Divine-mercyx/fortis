@@ -22,6 +22,13 @@
       "when": 1794228247879,
       "tag": "0002_secret_status",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1794494293671,
+      "tag": "0003_exposure_schedule",
+      "breakpoints": true
     }
   ]
 }

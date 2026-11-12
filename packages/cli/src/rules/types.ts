@@ -29,6 +29,12 @@ export type ProjectContext = {
   idempotencyHelpers: Set<string>;
   /** The repository's other files, for following calls into them. Without it, calls stop at the file. */
   project?: Project;
+  /** A rate limiter guards the whole app (app.use(limiter), DEFAULT_THROTTLE_CLASSES, ...). */
+  rateLimitAll?: boolean;
+  /** Literal values of Terraform variables and locals, by folder, so `var.x` can be judged. */
+  terraform?: Map<string, Map<string, string>>;
+  /** Some file in the project pins certificates (CertificatePinner, a pin-set, TrustKit, ...). */
+  pinning?: boolean;
 };
 
 export const emptyContext = (): ProjectContext => ({ idempotencyHelpers: new Set() });

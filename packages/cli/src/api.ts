@@ -2,7 +2,7 @@ import { createPublicKey, verify } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 
-import { maskSnippet, type CliFinding, type RulePack } from '@fortis/shared';
+import { maskSnippet, type CliFinding, type RulePack, type Severity } from '@fortis/shared';
 
 import { credentialsPath } from './config';
 import { VERSION } from './env';
@@ -20,6 +20,19 @@ export type WhoAmI = {
   plan: { id: string; name: string };
   entitlements: { rulePacks: RulePack[]; uploadFindings: boolean; releaseGates: boolean; blockOn: string; dast?: 'none' | 'baseline' | 'full' };
   rulesVersion: string;
+};
+
+export type ExposureResult = {
+  hostname: string;
+  url: string;
+  addresses: string[];
+  refused: string[];
+  checked: number;
+  pages: { url: string; what: string; severity: string }[];
+  open: { ip: string; port: number; service: string; noAuth: string | null; banner: string | null }[];
+  findings: { ruleId: string; severity: Severity; title: string; file: string; snippet: string; detail: string }[];
+  newCount: number;
+  fixedCount: number;
 };
 
 export type CliTarget = { id: string; url: string; environment: string; label: string | null; status: string; blocker: string | null };
@@ -53,6 +66,9 @@ export function client(api: string, key: string, fetchImpl: typeof fetch = fetch
       call<{ plan: { id: string; dast: string }; targets: CliTarget[] }>(
         `/v1/cli/targets?mode=${mode}${url ? `&url=${encodeURIComponent(url)}` : ''}`,
       ),
+    /** Runs an exposure check from Fortis's servers on a ready target of this project. */
+    exposure: (url?: string) =>
+      call<ExposureResult>('/v1/cli/exposure', { method: 'POST', body: url ? { url } : {} }),
     upload: (body: unknown) => call<{ scanId: string; newCount: number; fixedCount: number; reopenedCount: number; duplicate: boolean; dashboardUrl: string }>('/v1/cli/scans', { method: 'POST', body }),
     async rulePacks(): Promise<RulePack[]> {
       const pack = await call<{ keyId: string; payload: string; signature: string }>('/v1/cli/rules');

@@ -6,7 +6,10 @@ import { db } from '../db/client';
 import { findingEvents, findings, scans, targets } from '../db/schema';
 import { sha256 } from '../lib/crypto';
 import { maskSnippet, maskText } from '../lib/mask';
-import type { CliAuth } from '../plugins/auth';
+/** Who a scan belongs to. CLI uploads come with a key; server-side checks (exposure) have none. */
+export type IngestAuth = { orgId: string; projectId: string; tokenId: string | null };
+/** A scan to record: what the CLI uploads, or a server-side exposure check. */
+export type IngestInput = Omit<CliScanInput, 'kind' | 'trigger'> & { kind: CliScanInput['kind'] | 'exposure'; trigger: CliScanInput['trigger'] | 'schedule' };
 
 export type IngestResult = {
   scanId: string;
@@ -31,7 +34,7 @@ function fingerprintOf(ruleId: string, file: string, snippet: string | null, lin
  * New fingerprints become open findings; fixed ones that reappear are reopened. A "full" scan also
  * closes open findings it no longer sees. Everything is written as finding events for the evidence trail.
  */
-export async function ingestScan(auth: CliAuth, input: CliScanInput): Promise<IngestResult> {
+export async function ingestScan(auth: IngestAuth, input: IngestInput): Promise<IngestResult> {
   // Running-app results (ZAP and access checks) belong to a target; code results to the repo.
   const isDast = input.kind !== 'code';
   const targetId = isDast ? (input.targetId ?? null) : null;

@@ -7,7 +7,7 @@ export type FindingRow = {
   projectId: string;
   projectName: string;
   ruleId: string;
-  kind?: 'code' | 'dast' | 'access';
+  kind?: 'code' | 'dast' | 'access' | 'exposure';
   targetId?: string | null;
   severity: string;
   title: string;
@@ -26,7 +26,7 @@ export type ScanRow = {
   projectId: string;
   projectName: string;
   trigger: string;
-  kind?: 'code' | 'dast' | 'access';
+  kind?: 'code' | 'dast' | 'access' | 'exposure';
   dastMode?: 'baseline' | 'full' | null;
   scope: string;
   branch: string | null;

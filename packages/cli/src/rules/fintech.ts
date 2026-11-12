@@ -93,7 +93,7 @@ const SIGNATURE_CHECKED =
   /x-paystack-signature|HTTP_X_PAYSTACK_SIGNATURE|verif-hash|HTTP_VERIF_HASH|monnify-signature|HTTP_MONNIFY_SIGNATURE|createHmac|timingSafeEqual|compare_digest|hmac\.|verify_?\w*signature|validate_?\w*signature|is_valid_\w*signature|verify_webhook|verifyWebhook|webhook.*secret/i;
 
 /** Follows a route's handler and middleware, for a check that's in another file. */
-function reachable(ctx: ProjectContext, file: SourceFile, facts: FileFacts, route: RouteFact): { sources: string[]; names: Set<string> } {
+export function reachable(ctx: ProjectContext, file: SourceFile, facts: FileFacts, route: RouteFact): { sources: string[]; names: Set<string> } {
   const sources: string[] = [];
   const names = new Set<string>(route.refs);
   const follow = (located: Located | null) => {

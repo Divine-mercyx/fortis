@@ -1,0 +1,9 @@
+name: nolt_plugin
+dependencies:
+  flutter:
+    sdk: flutter
+flutter:
+  plugin:
+    platforms:
+      android:
+        package: com.nolt.plugin

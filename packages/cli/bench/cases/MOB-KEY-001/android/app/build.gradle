@@ -1,0 +1,10 @@
+android {
+    defaultConfig {
+        applicationId "com.nolt.app"
+        buildConfigField "String", "API_URL", "\"https://api.nolt.example\""
+        buildConfigField "String", "PAYSTACK_SECRET_KEY", "\"sk_test_example_value\"" // @hit
+        buildConfigField "String", "MONO_SECRET", "\"${project.findProperty('MONO_SECRET')}\""
+        resValue "string", "SENDGRID_API_SECRET", "example-value" // @hit
+        buildConfigField "String", "PAYSTACK_PUBLIC_KEY", "\"pk_test_example\""
+    }
+}

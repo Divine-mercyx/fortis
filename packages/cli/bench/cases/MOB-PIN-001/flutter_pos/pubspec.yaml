@@ -1,0 +1,7 @@
+name: nolt
+dependencies:
+  flutter:
+    sdk: flutter
+  http: ^1.2.0
+flutter: # @hit
+  uses-material-design: true

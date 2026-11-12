@@ -254,5 +254,141 @@
   "SUP-IMG-003": {
     "precision": 1,
     "recall": 1
+  },
+  "INF-DB-001": {
+    "precision": 1,
+    "recall": 1
+  },
+  "INF-K8S-001": {
+    "precision": 1,
+    "recall": 1
+  },
+  "INF-NET-001": {
+    "precision": 1,
+    "recall": 1
+  },
+  "INF-NET-002": {
+    "precision": 1,
+    "recall": 1
+  },
+  "INF-STO-001": {
+    "precision": 1,
+    "recall": 1
+  },
+  "FX-RATE-001": {
+    "precision": 1,
+    "recall": 1
+  },
+  "FX-RATE-001:py": {
+    "precision": 1,
+    "recall": 1
+  },
+  "FX-JWT-001": {
+    "precision": 1,
+    "recall": 1
+  },
+  "FX-JWT-001:py": {
+    "precision": 1,
+    "recall": 1
+  },
+  "FX-RESET-001": {
+    "precision": 1,
+    "recall": 1
+  },
+  "FX-RESET-001:py": {
+    "precision": 1,
+    "recall": 1
+  },
+  "INF-DB-001:py": {
+    "precision": 1,
+    "recall": 1
+  },
+  "INF-NET-001:py": {
+    "precision": 1,
+    "recall": 1
+  },
+  "INF-STO-001:py": {
+    "precision": 1,
+    "recall": 1
+  },
+  "MOB-KEY-001": {
+    "precision": 1,
+    "recall": 1
+  },
+  "MOB-PIN-001": {
+    "precision": 1,
+    "recall": 1
+  },
+  "MOB-TLS-001": {
+    "precision": 1,
+    "recall": 1
+  },
+  "MOB-TLS-001:kt": {
+    "precision": 1,
+    "recall": 1
+  },
+  "MOB-TLS-001:java": {
+    "precision": 1,
+    "recall": 1
+  },
+  "FX-RATE-001:go": {
+    "precision": 1,
+    "recall": 1
+  },
+  "FX-RATE-001:cs": {
+    "precision": 1,
+    "recall": 1
+  },
+  "FX-RATE-001:php": {
+    "precision": 1,
+    "recall": 1
+  },
+  "FX-RATE-001:java": {
+    "precision": 1,
+    "recall": 1
+  },
+  "FX-RATE-001:kt": {
+    "precision": 1,
+    "recall": 1
+  },
+  "FX-JWT-001:go": {
+    "precision": 1,
+    "recall": 1
+  },
+  "FX-JWT-001:cs": {
+    "precision": 1,
+    "recall": 1
+  },
+  "FX-JWT-001:php": {
+    "precision": 1,
+    "recall": 1
+  },
+  "FX-JWT-001:java": {
+    "precision": 1,
+    "recall": 1
+  },
+  "FX-JWT-001:kt": {
+    "precision": 1,
+    "recall": 1
+  },
+  "FX-RESET-001:go": {
+    "precision": 1,
+    "recall": 1
+  },
+  "FX-RESET-001:cs": {
+    "precision": 1,
+    "recall": 1
+  },
+  "FX-RESET-001:php": {
+    "precision": 1,
+    "recall": 1
+  },
+  "FX-RESET-001:java": {
+    "precision": 1,
+    "recall": 1
+  },
+  "FX-RESET-001:kt": {
+    "precision": 1,
+    "recall": 1
   }
 }

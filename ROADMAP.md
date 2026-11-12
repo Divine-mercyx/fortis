@@ -11,6 +11,7 @@ New in beta.13: Linux binaries, wheels and the Docker image run on glibc 2.28 ag
 - **Secrets:** checked in any file. Covers payment keys (Stripe, Paystack, Flutterwave, Monnify, SeerBit, OPay, Squad), cloud, SaaS and registry tokens, and passwords in database and broker URLs.
 - **Dependencies:** lockfiles for JavaScript, PHP, Python, Java, Kotlin, Scala, Go, .NET, Ruby, Rust, Dart, Swift, Elixir, Erlang, Haskell and R are checked against OSV. Findings show the fixed version and the upgrade command.
 - **Supply chain:** Docker base images and GitHub Actions.
+- **Infrastructure (unreleased):** its own free rule pack and dashboard tab. Terraform (AWS, Google Cloud, Azure), Kubernetes and Docker Compose files that open admin or database ports to the internet, make storage public, give a database a public address, or put a database on a public load balancer.
 - **Fintech code rules:** JavaScript, TypeScript and Python on syntax trees. The first six checks also run in Go, C#, PHP, Java and Kotlin.
 - **`fortis test` and `fortis access`:** test a running app. Access checks cover writes, GraphQL, and Postman or HAR imports. ZAP runs with or without Docker.
 - **Pre-push hook:** works with npm, pnpm, Yarn, Bun, pip, uv, Poetry, a global install, or no Node, in every Windows shell.
@@ -149,9 +150,23 @@ Microsoft reviews the first winget pull request by hand, so `winget install` wor
 
 These are limits of what was built, not missing setup.
 
+- **Exposure checks** connect only to the ports in the service list and to about twenty well-known admin and file paths on 443 and 80, on a ready target's own host name, at up to four public addresses. Private and reserved addresses are always refused. Scheduled runs need `CRON_SECRET` on the API and `FORTIS_CRON_SECRET` in the repository; without them the daily job does nothing.
+- **Auth checks in Go, C#, PHP, Java and Kotlin** are line patterns: a limiter, lockout or expiry check in a different file from the route isn't seen, so review those findings and mark them accepted with that reason.
+- **Rate-limit check (FX-RATE-001)** looks for a limiter on the route, in its handler, in the services it calls, or across the app. A limit enforced only by a gateway, a WAF or a load balancer outside the repository isn't visible, so mark those findings as accepted with that reason.
+- **Infrastructure checks read values written in the repository.** Terraform variables, locals and `.tfvars` are followed, but values passed in from a pipeline, a remote state or a custom module's internals aren't. Helm values are read, rendered chart templates aren't. CloudFormation `!Ref` and Pulumi values computed at run time aren't resolved.
 - **CocoaPods, Conan and vcpkg:** OSV has no advisories for them. The scan names the packages and says they weren't checked.
 - **Java, Kotlin, Scala and .NET without a lockfile:** only direct dependencies are covered. Transitive ones need an SBOM or a lockfile, and the scan says so.
 - **Fintech rules in Go, C#, PHP, Java and Kotlin** have the first six checks, on line patterns. The four newer checks (money as floating point, card data, predictable references, client amounts) and the syntax-tree engine cover JavaScript, TypeScript and Python only.
 - **Provider keys with no documented format** have no named pattern: Infobip, Termii, Smile ID, Prembly, VerifyMe, Youverify, Anchor, Sudo, Paga, Remita, Okra and Moniepoint. The generic checks still report them in a secret-looking assignment.
 - **`fortis scan --verify`** is tested against mocked providers only. No real key has been checked.
 - **macOS and Windows binaries are unsigned** until the certificates above exist, so Gatekeeper and SmartScreen warn on first run.
+
+## Next checks, not built yet
+
+Everything on the earlier list is built: the account-takeover checks in every supported language, the Mobile pack with `fortis mobile` (binary manifests and plists included), the extra infrastructure formats, and exposure checks with admin pages and secret files, on demand, on a schedule and from the CLI. Ideas for later:
+
+| What | Why it matters | Notes |
+|---|---|---|
+| Syntax trees for the Go, C#, PHP, Java and Kotlin auth checks | The line patterns follow a handler in the same file and annotations above it; a limiter or lockout two calls away in another file isn't seen | The JavaScript and Python versions follow calls across files already |
+| Exposure checks on other host names | Today only the target's own host is checked | Would need each extra host verified the same way |
+| HTTPS admin pages on non-standard ports | Pages are checked on 443 and 80 | 8080, 8443 and 9000 are common for admin tools |

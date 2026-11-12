@@ -4,7 +4,8 @@ import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:pat
 
 import { MAX_FINDINGS_PER_SCAN, RULE_CATALOG, maskSnippet, SEVERITIES, type RulePack, type Severity } from '@fortis/shared';
 
-import { ApiError, client, toUpload, type CliTarget, type WhoAmI } from './api';
+import { ApiError, client, toUpload, type CliTarget, type ExposureResult, type WhoAmI } from './api';
+import type { Detection } from './rules/types';
 import { ACCESS_CONFIG, hasWriteChecks, readAccessConfig, runAccessChecks, writeAccessTemplate, type AccessConfig } from './access';
 import { checksFromGraphqlSchema, INTROSPECTION_QUERY, schemaFrom } from './access-graphql';
 import { checksFromRoutes, routesFromHar, routesFromOpenApi, routesFromPostman, type Route } from './access-import';
@@ -21,6 +22,7 @@ import { apiUrl, VERSION } from './env';
 import { checkoutInfo, currentBranch, currentCommit, parsePushRefs, repoRoot, type PushedRef } from './git';
 import { installHook } from './hook';
 import { explain, printDastReport, printReport } from './report';
+import { scanAppArchive } from './app-archive';
 import { meetsThreshold, runScan } from './scan';
 import { verifySecrets } from './verify';
 import { configureNetwork } from './net';
@@ -28,7 +30,9 @@ import { osvCacheDir } from './rules/osv-cache';
 import { installKind, selfUpdate, UPDATE_HINT, updateCheckEnabled, updateNotice } from './update';
 import { c, err, log } from './ui';
 
-const FREE_PACKS: RulePack[] = ['secrets', 'dependencies'];
+const FREE_PACKS: RulePack[] = ['secrets', 'dependencies', 'infrastructure', 'mobile'];
+/** The packs a plan unlocks, plus the free ones: an API that predates a free pack still gets it run. */
+const withFree = (packs: RulePack[]): RulePack[] => [...new Set([...FREE_PACKS, ...packs])];
 
 const HELP = `
 ${c.bold('fortis')} ${c.grey(`v${VERSION}`)}  security checks on every push, for fintech teams
@@ -40,6 +44,8 @@ ${c.bold('Usage')}
   fortis logout [--api URL]                          remove the saved key
   fortis whoami                                      show the project and plan for your key
   fortis test --target <url> [options]               ZAP test of a running staging app
+  fortis mobile <app.apk|app.aab|app.ipa>            what a built app gives away (keys, plain-HTTP settings, a bundled .env)
+  fortis exposure [--target <url>]                   from Fortis's servers: open admin ports, admin pages and secret files on a verified target
   fortis access --target <url> [--writes]            can test user B read, change or delete test user A's records? (BOLA)
   fortis access init [--openapi|--postman|--har|--graphql <source>]  write ${ACCESS_CONFIG}, from your routes if given
   fortis baseline                                    accept today's findings so only new ones block
@@ -173,7 +179,7 @@ async function cmdScan(flags: Flags): Promise<number> {
   if (key) {
     const api$ = client(api, key);
     try {
-      [who, packs] = await Promise.all([api$.whoami(), api$.rulePacks()]);
+      [who, packs] = await Promise.all([api$.whoami(), api$.rulePacks().then(withFree)]);
     } catch (e) {
       const ae = e as ApiError;
       if (ae.status === 401) {
@@ -683,6 +689,70 @@ async function cmdAccess(args: string[], flags: Flags): Promise<number> {
 /** A standalone binary is a copy of Node with the CLI inside, named fortis. An npm install runs as a script under Node. */
 const runningAsBinary = () => /^fortis(\.exe)?$/i.test(basename(process.execPath));
 
+/** `fortis exposure [--target <url>]`: from Fortis's servers, what a verified target exposes to the internet. */
+async function cmdExposure(flags: Flags): Promise<number> {
+  const root = repoRoot(process.cwd()) ?? process.cwd();
+  const config = readProjectConfig(root);
+  const api = apiUrl(str(flags.api) ?? config.apiUrl);
+  const key = resolveKey(api);
+  if (!key) {
+    err(c.red('✖ No Fortis key found.'), c.grey('Exposure checks run from Fortis\'s servers against your verified targets. Run: fortis login <key>'));
+    return 2;
+  }
+  const failOn = (str(flags['fail-on']) ?? 'high') as Severity;
+  const started = Date.now();
+  let r: ExposureResult;
+  try {
+    r = await client(api, key).exposure(str(flags.target));
+  } catch (e) {
+    const ae = e as ApiError;
+    err(c.red(`✖ ${ae.message}`));
+    return 2;
+  }
+  const detections: Detection[] = r.findings.map((f) => ({ ruleId: f.ruleId, severity: f.severity, title: f.title, file: f.file, line: 0, snippet: f.snippet, fix: f.detail }));
+  const blocking = detections.filter((d) => meetsThreshold(d.severity, failOn));
+  if (flags.json) {
+    log(JSON.stringify({ ...r, findings: r.findings.map((f) => ({ ...f, snippet: maskSnippet(f.snippet) })), failOn, blocking: blocking.length }, null, 2));
+    return blocking.length ? 1 : 0;
+  }
+  printReport(
+    { detections, filesScanned: r.checked, packagesChecked: 0, durationMs: Date.now() - started, notes: [], incompleteChecks: [], partial: [] },
+    { failOn, prePush: false, packs: [`exposure of ${r.hostname}`, `${r.addresses.length} address${r.addresses.length === 1 ? '' : 'es'}`], kind: 'exposure' },
+  );
+  if (r.refused.length) log(c.grey(`note: skipped private or reserved addresses ${r.refused.join(', ')}`));
+  if (r.fixedCount) log(c.green(`${r.fixedCount} finding${r.fixedCount === 1 ? '' : 's'} closed since the last check.`));
+  return blocking.length ? 1 : 0;
+}
+
+/** `fortis mobile <app.apk|app.aab|app.ipa>`: what a built app gives away to anyone who downloads it. */
+async function cmdMobile(args: string[], flags: Flags): Promise<number> {
+  const target = args[0];
+  if (!target) {
+    err(c.red('✖ Give the built app to check: fortis mobile app-release.apk (or .aab, .ipa)'));
+    return 2;
+  }
+  const failOn = (str(flags['fail-on']) ?? 'high') as Severity;
+  const started = Date.now();
+  let result: ReturnType<typeof scanAppArchive>;
+  try {
+    result = scanAppArchive(target);
+  } catch (e) {
+    err(c.red(`✖ Could not read ${target}: ${(e as Error).message}`));
+    return 2;
+  }
+  const blocking = result.detections.filter((d) => meetsThreshold(d.severity, failOn));
+  if (flags.json) {
+    log(JSON.stringify({ app: target, platform: result.kind, entries: result.entries, read: result.read, findings: result.detections.map((d) => ({ ...d, snippet: maskSnippet(d.snippet) })), notes: result.notes }, null, 2));
+    return blocking.length ? 1 : 0;
+  }
+  printReport(
+    { detections: result.detections, filesScanned: result.read, packagesChecked: 0, durationMs: Date.now() - started, notes: result.notes, incompleteChecks: [], partial: [] },
+    { failOn, prePush: false, packs: [`${result.kind} app`, 'secrets and mobile checks'], kind: 'mobile' },
+  );
+  for (const n of result.notes) log(c.grey(`note: ${n}`));
+  return blocking.length ? 1 : 0;
+}
+
 async function cmdUpdate(args: string[]): Promise<number> {
   const kind = installKind({ execPath: process.execPath, isBinary: runningAsBinary() });
   if (kind !== 'binary') {
@@ -736,7 +806,7 @@ async function cmdDoctor(flags: Flags): Promise<number> {
 async function resolvePacks(api: string, key: string | undefined): Promise<RulePack[]> {
   if (!key) return FREE_PACKS;
   try {
-    return await client(api, key).rulePacks();
+    return withFree(await client(api, key).rulePacks());
   } catch {
     return FREE_PACKS;
   }
@@ -941,6 +1011,10 @@ async function main(): Promise<number> {
     }
     case 'update':
       return cmdUpdate(args);
+    case 'exposure':
+      return cmdExposure(flags);
+    case 'mobile':
+      return cmdMobile(args, flags);
     case 'doctor':
       return cmdDoctor(flags);
     case 'explain':

@@ -1,0 +1,8 @@
+{
+  "expo": { // @hit
+    "name": "Nolt",
+    "slug": "nolt",
+    "ios": { "bundleIdentifier": "com.nolt.app" },
+    "android": { "package": "com.nolt.app" }
+  }
+}

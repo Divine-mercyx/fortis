@@ -4,7 +4,11 @@ import { takeAnalysisFailures } from './analysis/facts';
 import { languageOf, loadGrammars, type Language } from './analysis/parser';
 import { createProject } from './analysis/project';
 import { scanDependencies } from './rules/dependencies';
+import { GLOBAL_LIMIT } from './rules/auth';
+import { GLOBAL_LIMIT_OTHER, OTHER_LANGUAGES } from './rules/auth-languages';
 import { rulesFor } from './rules/index';
+import { terraformValues } from './rules/infrastructure';
+import { PINNING, PINNING_FILES } from './rules/mobile';
 import { findLockfiles } from './rules/lockfiles';
 import { JS_TS, PYTHON, TEST_PATH, type Detection, type ProjectContext, type SourceFile } from './rules/types';
 import { makeFilter, readSource } from './files';
@@ -92,6 +96,25 @@ export async function runScan(opts: ScanOptions): Promise<ScanResult> {
   const ctxPaths = (opts.scope === 'full' ? candidates : everything().filter(keep)).filter((p) => (JS_TS.test(p) || PYTHON.test(p)) && !TEST_PATH.test(p));
   const ctx = buildContextFrom(opts.root, ctxPaths);
   ctx.project = createProject(ctxPaths, (p) => readSource(opts.root, p));
+  // Terraform variables and locals, so a rule can judge `cidr_blocks = var.admin_cidrs`.
+  const tfPaths = (opts.scope === 'full' ? candidates : everything().filter(keep)).filter((p) => /\.(?:tf|tfvars)$/i.test(p));
+  if (tfPaths.length) ctx.terraform = terraformValues(tfPaths.map((p) => readSource(opts.root, p)).filter((f): f is SourceFile => f !== null));
+  // Go, C#, PHP, Java and Kotlin apps can turn on a rate limit for everything in one file too.
+  if (!ctx.rateLimitAll && rules.some((r) => r.id === 'FX-RATE-001')) {
+    const pool = (opts.scope === 'full' ? candidates : everything().filter(keep)).filter((p) => OTHER_LANGUAGES.test(p) && !TEST_PATH.test(p));
+    ctx.rateLimitAll = pool.some((p) => {
+      const f = readSource(opts.root, p);
+      return f !== null && GLOBAL_LIMIT_OTHER.test(f.text);
+    });
+  }
+  // Whether the app pins certificates anywhere, so MOB-PIN-001 can judge the app as a whole.
+  if (rules.some((r) => r.id === 'MOB-PIN-001')) {
+    const pool = (opts.scope === 'full' ? candidates : everything().filter(keep)).filter((p) => PINNING_FILES.test(p) && !/node_modules\//.test(p));
+    ctx.pinning = pool.some((p) => {
+      const f = readSource(opts.root, p);
+      return f !== null && PINNING.test(f.text);
+    });
+  }
 
   // Only the grammars this repository needs, and only if the rules that use them are running.
   if (rules.some((r) => r.pack === 'fintech')) {
@@ -176,17 +199,23 @@ export async function runScan(opts: ScanOptions): Promise<ScanResult> {
 /** buildContext over files read one at a time. */
 function buildContextFrom(root: string, paths: string[]): ProjectContext {
   const idempotencyHelpers = new Set<string>();
+  let rateLimitAll = false;
   for (const p of paths) {
     const f = readSource(root, p);
-    if (f) for (const name of buildContext([f]).idempotencyHelpers) idempotencyHelpers.add(name);
+    if (!f) continue;
+    const one = buildContext([f]);
+    for (const name of one.idempotencyHelpers) idempotencyHelpers.add(name);
+    rateLimitAll ||= Boolean(one.rateLimitAll);
   }
-  return { idempotencyHelpers };
+  return { idempotencyHelpers, rateLimitAll };
 }
 
 /** Names exported from modules that implement idempotency keys, e.g. withPaymentGuard. */
 export function buildContext(files: SourceFile[]): ProjectContext {
   const idempotencyHelpers = new Set<string>();
+  let rateLimitAll = false;
   for (const f of files) {
+    if (!TEST_PATH.test(f.path) && (GLOBAL_LIMIT.test(f.text) || (OTHER_LANGUAGES.test(f.path) && GLOBAL_LIMIT_OTHER.test(f.text)))) rateLimitAll = true;
     if (TEST_PATH.test(f.path) || !/idempoten/i.test(f.text)) continue;
     if (PYTHON.test(f.path)) {
       for (const m of f.text.matchAll(/^(?:async\s+)?def\s+([A-Za-z_]\w*)/gm)) idempotencyHelpers.add(m[1]!);
@@ -196,7 +225,9 @@ export function buildContext(files: SourceFile[]): ProjectContext {
       }
     }
   }
-  return { idempotencyHelpers };
+  const tf = files.filter((f) => /\.(?:tf|tfvars)$/i.test(f.path));
+  const pinning = files.some((f) => PINNING_FILES.test(f.path) && PINNING.test(f.text));
+  return { idempotencyHelpers, rateLimitAll, pinning, ...(tf.length ? { terraform: terraformValues(tf) } : {}) };
 }
 
 export const meetsThreshold = (sev: Severity, failOn: Severity) => SEVERITY_RANK[sev] >= SEVERITY_RANK[failOn];

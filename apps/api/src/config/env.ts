@@ -21,6 +21,8 @@ const schema = z.object({
   RULES_SIGNING_PRIVATE_KEY: z.string().optional(),
   RULES_SIGNING_KEY_ID: z.string().default('dev'),
   LOG_LEVEL: z.string().default('info'),
+  /** Shared secret for scheduled jobs (POST /v1/internal/exposure/run-due). Unset turns the route off. */
+  CRON_SECRET: z.preprocess((v) => (v === '' ? undefined : v), z.string().min(32).optional()),
 });
 
 const parsed = schema.safeParse(process.env);

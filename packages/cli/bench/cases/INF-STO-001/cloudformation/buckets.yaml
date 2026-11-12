@@ -1,0 +1,38 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Resources:
+  KycDocs:
+    Type: AWS::S3::Bucket
+    Properties:
+      AccessControl: PublicRead # @hit
+  Statements:
+    Type: AWS::S3::Bucket
+    Properties:
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: false # @hit
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+  Logs:
+    Type: AWS::S3::Bucket
+    Properties:
+      AccessControl: LogDeliveryWrite
+  StatementsPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref Statements
+      PolicyDocument:
+        Statement:
+          - Effect: Allow
+            Principal: "*" # @hit
+            Action: s3:GetObject
+            Resource: !Sub "${Statements.Arn}/*"
+  CdnPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref KycDocs
+      PolicyDocument:
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: cloudfront.amazonaws.com
+            Action: s3:GetObject
