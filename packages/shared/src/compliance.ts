@@ -79,6 +79,8 @@ const BY_RULE: Record<string, Control[]> = {
   'MOB-KEY-001': [pci('8.6.2'), cbn('crypto'), cbn('appsec')],
   'MOB-TLS-001': [pci('4.2.1'), cbn('crypto'), cbn('appsec')],
   'MOB-PIN-001': [pci('4.2.1'), cbn('crypto')],
+  'EXP-PORT-001': [pci('1.3.1'), pci('11.3.1'), cbn('vapt'), cbn('access')],
+  'EXP-NOAUTH-001': [pci('1.3.1'), pci('8.3.1'), pci('11.3.1'), cbn('vapt'), cbn('access'), ndpa('s.39')],
   'INF-NET-001': [pci('1.3.1'), cbn('access'), cbn('vapt')],
   'INF-NET-002': [pci('1.3.1'), cbn('access')],
   'INF-STO-001': [pci('1.3.1'), cbn('data'), ndpa('s.39'), ndpa('s.40')],

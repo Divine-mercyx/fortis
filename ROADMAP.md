@@ -150,6 +150,8 @@ Microsoft reviews the first winget pull request by hand, so `winget install` wor
 
 These are limits of what was built, not missing setup.
 
+- **Exposure checks** connect only to the ports in the service list (admin, database, cache, queue, cluster and search ports) on a ready target's own host name, at up to four public addresses. Private and reserved addresses are always refused. They don't follow other host names, don't run on a schedule yet, and their read-only probes cover Redis, Elasticsearch, CouchDB, etcd, Consul, Memcached, the Docker API and kubelet.
+- **Rate-limit check (FX-RATE-001)** looks for a limiter on the route, in its handler, in the services it calls, or across the app. A limit enforced only by a gateway, a WAF or a load balancer outside the repository isn't visible, so mark those findings as accepted with that reason.
 - **Infrastructure checks read values written in the repository.** Terraform variables, locals and `.tfvars` are followed, but values passed in from a pipeline, a remote state or a custom module's internals aren't. Helm values are read, rendered chart templates aren't. CloudFormation `!Ref` and Pulumi values computed at run time aren't resolved.
 - **CocoaPods, Conan and vcpkg:** OSV has no advisories for them. The scan names the packages and says they weren't checked.
 - **Java, Kotlin, Scala and .NET without a lockfile:** only direct dependencies are covered. Transitive ones need an SBOM or a lockfile, and the scan says so.
@@ -160,12 +162,12 @@ These are limits of what was built, not missing setup.
 
 ## Next checks, not built yet
 
-Ideas agreed on but not started, so they aren't forgotten. Each would follow the same pattern as the existing rules: catalog text, a fix, a compliance mapping and 20+ benchmark cases.
+The account-takeover checks (rate limits, tokens and sessions, resets), the Mobile pack with `fortis mobile`, the extra infrastructure formats and the exposure check are built. What's left of those ideas:
 
 | What | Why it matters | Notes |
 |---|---|---|
-| Missing rate limits on login, OTP and PIN endpoints | Brute-forcing PINs and OTPs is a common way into fintech accounts | A code rule, like the fintech checks: a route that verifies an OTP, PIN or password with no rate limiter in front of it |
-| Weak JWT and session handling | Tokens that never expire, `alg: none`, short or hard-coded signing secrets | A code rule |
-| Insecure password and PIN reset | Reset codes that are guessable, reusable, or returned in the response | A code rule |
-| Mobile app checks | API keys and secrets shipped inside an APK or IPA, no certificate pinning | Needs a scan of the built app, not only the repository |
-| Scanning a company's internet-facing addresses | Finds exposed databases, admin panels and old services that aren't described in code | A different product shape: Fortis must first prove the customer owns the domains or IP ranges (for example with a DNS record), and it needs a server-side scanner, not just the CLI |
+| Scheduled exposure checks | A port opened next week should be caught without someone pressing the button | The check runs on demand from the dashboard today. A nightly run per ready target needs a job runner on the API (a cron worker or the Render cron) |
+| Exposure checks from the CLI | Teams that live in CI want `fortis exposure` | The route needs a session today; a project-key route that follows the same target safeguards would make it callable from CI |
+| HTTP admin panels in the exposure check | Exposed admin dashboards, phpMyAdmin, Adminer and the like on 80/443 | Needs path checks over HTTP, with the same read-only rules |
+| Auth checks in Go, C#, PHP, Java and Kotlin | The rate-limit, token and reset checks cover JavaScript, TypeScript and Python | Same pattern as the other fintech rules: line patterns first, syntax trees later |
+| Binary AndroidManifest and binary plists in `fortis mobile` | Cleartext and App Transport Security settings in a build are only judged in XML plists and network security config today | Needs small AXML and bplist readers; the source repository is checked by `fortis scan` already |

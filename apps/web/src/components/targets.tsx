@@ -5,7 +5,7 @@ import useSWR from 'swr';
 
 import { Check, Lock, Plus, Pulse, Shield, Target, Trash } from '@/components/icons';
 import { useSession } from '@/components/session';
-import { CodeLine, CopyButton, Empty, FormError, Modal, useToast } from '@/components/ui';
+import { CodeLine, CopyButton, Empty, FormError, Modal, SeverityPill, useToast } from '@/components/ui';
 import { InfoTip } from '@/components/widgets';
 import { api, fetcher } from '@/lib/api';
 import { CLI_COMMAND } from '@/lib/cli';
@@ -147,6 +147,75 @@ function Authorize({ base, t, text, onClose, onDone }: { base: string; t: Stagin
   );
 }
 
+type ExposureFinding = { id: string; ruleId: string; severity: string; title: string; file: string; detail: string | null; firstSeenAt: string };
+type ExposureResponse = {
+  hostname: string;
+  services: { port: number; name: string }[];
+  lastScan: { id: string; at: string; durationMs: number | null; findings: number; fixed: number } | null;
+  findings: ExposureFinding[];
+};
+
+/**
+ * Exposure check: from Fortis's servers, which admin and database ports this domain answers on.
+ * Only for ready targets (verified and authorised); the result lands in the findings list too.
+ */
+function Exposure({ t, base, canRun }: { t: StagingTarget; base: string; canRun: boolean }) {
+  const toast = useToast();
+  const url = `${base}/${t.id}/exposure`;
+  const { data, mutate } = useSWR<ExposureResponse>(url, fetcher);
+  const [running, setRunning] = useState(false);
+
+  async function run() {
+    setRunning(true);
+    try {
+      const r = await api<{ open: unknown[]; newCount: number; fixedCount: number; refused: string[] }>(url, { method: 'POST' });
+      const open = r.open.length;
+      toast(open ? `${open} port${open === 1 ? '' : 's'} open to the internet${r.fixedCount ? ` · ${r.fixedCount} closed since last check` : ''}` : `No admin or database ports open${r.fixedCount ? ` · ${r.fixedCount} closed since last check` : ''}`, open > 0);
+      await mutate();
+    } catch (err) {
+      toast((err as Error).message, true);
+    } finally {
+      setRunning(false);
+    }
+  }
+
+  const n = data?.services.length ?? 26;
+  return (
+    <div className="exposure">
+      <div className="exposure-head">
+        <div>
+          <b>Exposed ports</b>
+          <span className="small">
+            {data?.lastScan
+              ? `Checked ${timeAgo(data.lastScan.at)} · ${n} admin and database ports`
+              : `Checks ${n} admin and database ports (SSH, Remote Desktop, PostgreSQL, Redis, MongoDB, the Docker API…) from the internet`}
+          </span>
+        </div>
+        {canRun && t.status === 'ready' ? (
+          <button className="btn btn-outline btn-sm" disabled={running} onClick={run}>
+            {running ? <span className="spinner" /> : <Shield />} {data?.lastScan ? 'Check again' : 'Check exposed ports'}
+          </button>
+        ) : null}
+      </div>
+      {data?.findings.length ? (
+        <ul className="exposure-list">
+          {data.findings.map((f) => (
+            <li key={f.id}>
+              <SeverityPill severity={f.severity} />
+              <span>
+                <b>{f.title}</b>
+                {f.detail ? <span className="small">{f.detail}</span> : null}
+              </span>
+            </li>
+          ))}
+        </ul>
+      ) : data?.lastScan ? (
+        <p className="exposure-clear"><Check /> No admin or database ports answer from the internet.</p>
+      ) : null}
+    </div>
+  );
+}
+
 function TargetCard({ t, base, isAdmin, canPause, dast, onChange, onAuthorize }: {
   t: StagingTarget; base: string; isAdmin: boolean; canPause: boolean; dast: string; onChange: () => void; onAuthorize: () => void;
 }) {
@@ -218,6 +287,7 @@ function TargetCard({ t, base, isAdmin, canPause, dast, onChange, onAuthorize }:
             {t.lastRunAt ? <>Last test {timeAgo(t.lastRunAt)}. </> : 'No tests yet. '}
             {!t.allowsActiveScan ? 'Production: passive baseline only.' : dast === 'baseline' ? 'Your plan runs passive baseline tests; full active scans come with Fortis Plus.' : null}
           </p>
+          <Exposure t={t} base={base} canRun={canPause} />
         </div>
       ) : null}
 

@@ -78,8 +78,8 @@ function FindingDrawer({ id, onClose, onChanged }: { id: string; onClose: () => 
           <>
             <dl className="kv">
               <dt>Project</dt><dd>{f.projectName}</dd>
-              <dt>Source</dt><dd>{f.kind === 'dast' ? 'Running app · ZAP' : f.kind === 'access' ? 'Access check · two test users' : 'Code scan'}</dd>
-              <dt>{f.kind === 'dast' ? 'URL path' : f.kind === 'access' ? 'Endpoint' : 'Location'}</dt><dd className="mono">{f.file}{f.line ? `:${f.line}` : ''}</dd>
+              <dt>Source</dt><dd>{f.kind === 'dast' ? 'Running app · ZAP' : f.kind === 'access' ? 'Access check · two test users' : f.kind === 'exposure' ? 'Exposed ports check · from the internet' : 'Code scan'}</dd>
+              <dt>{f.kind === 'dast' ? 'URL path' : f.kind === 'access' ? 'Endpoint' : f.kind === 'exposure' ? 'Host and port' : 'Location'}</dt><dd className="mono">{f.file}{f.line ? `:${f.line}` : ''}</dd>
               <dt>First seen</dt><dd>{dateTime(f.firstSeenAt)}</dd>
               <dt>Last seen</dt><dd>{timeAgo(f.lastSeenAt)}</dd>
               {f.statusReason ? (<><dt>Reason</dt><dd>{f.statusReason}</dd></>) : null}
@@ -99,7 +99,7 @@ function FindingDrawer({ id, onClose, onChanged }: { id: string; onClose: () => 
               </div>
             ) : f.detail ? (
               <div className="rule-box">
-                <h4>{f.kind === 'access' ? 'What the access check found' : 'What ZAP found'}</h4>
+                <h4>{f.kind === 'access' ? 'What the access check found' : f.kind === 'exposure' ? 'What the exposure check found' : 'What ZAP found'}</h4>
                 <p className="detail-text">{f.detail}</p>
               </div>
             ) : null}

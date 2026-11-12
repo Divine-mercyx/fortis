@@ -220,6 +220,22 @@ export const RULE_CATALOG: readonly RuleMeta[] = [
     fix: "Pin your API's public key with a backup pin: OkHttp CertificatePinner or a network_security_config pin-set on Android, TrustKit or URLSession trust evaluation on iOS, react-native-ssl-public-key-pinning for React Native and Expo, or a pinning package for Flutter.",
   },
   {
+    id: 'EXP-PORT-001',
+    pack: 'infrastructure',
+    title: 'Admin or database port open to the internet',
+    severity: 'high',
+    summary: 'A verified domain accepted a connection from the internet on an admin, database, cache, queue or cluster port (SSH, Remote Desktop, PostgreSQL, MySQL, Redis, MongoDB, Elasticsearch, the Docker API and others). Found by an exposure check from Fortis\'s servers, so it covers infrastructure that isn\'t described in code.',
+    fix: 'Close the port to the internet: private networks for databases and caches, a VPN, bastion or cloud session manager for admin access, and a firewall or security group that allows only the addresses that need it.',
+  },
+  {
+    id: 'EXP-NOAUTH-001',
+    pack: 'infrastructure',
+    title: 'Service answers the internet without a password',
+    severity: 'critical',
+    summary: 'A service on a verified domain answered a harmless read-only request from the internet without asking for credentials: Redis replying to PING, Elasticsearch, CouchDB, etcd, Consul, Memcached, the Docker API or a kubelet. Anyone can read, and usually change, what it holds.',
+    fix: 'Take it off the internet now (firewall or security group), turn authentication on, and check its logs and data for access you don\'t recognise. Rotate any credentials or tokens it held.',
+  },
+  {
     id: 'INF-NET-001',
     pack: 'infrastructure',
     title: 'Firewall open to the internet on an admin or database port',

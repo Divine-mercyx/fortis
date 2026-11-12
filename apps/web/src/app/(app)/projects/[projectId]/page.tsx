@@ -242,7 +242,7 @@ export default function ProjectPage() {
                 <li key={s.id} className="row-in" style={{ ['--i' as string]: i }}>
                   <span className={`ic${s.newCount ? ' red' : ''}`}>{s.newCount ? <Alert /> : <Check />}</span>
                   <span>
-                    <strong style={{ color: 'var(--ink)' }}>{s.kind === 'access' ? 'Access checks' : s.kind === 'dast' ? `ZAP ${s.dastMode === 'full' ? 'full scan' : 'baseline'}` : `${s.trigger === 'pre-push' ? 'Pre-push' : s.trigger === 'ci' ? 'CI' : 'Manual'} · ${s.scope === 'full' ? 'full scan' : 'changed files'}`}</strong>
+                    <strong style={{ color: 'var(--ink)' }}>{s.kind === 'exposure' ? 'Exposed ports check' : s.kind === 'access' ? 'Access checks' : s.kind === 'dast' ? `ZAP ${s.dastMode === 'full' ? 'full scan' : 'baseline'}` : `${s.trigger === 'pre-push' ? 'Pre-push' : s.trigger === 'ci' ? 'CI' : 'Manual'} · ${s.scope === 'full' ? 'full scan' : 'changed files'}`}</strong>
                     <span className="small" style={{ display: 'block' }}>{s.branch ?? '—'}{s.commit ? ` · ${s.commit.slice(0, 7)}` : ''} · {s.newCount} new · {s.fixedCount} fixed</span>
                   </span>
                   <span className="meta">{timeAgo(s.createdAt)}</span>

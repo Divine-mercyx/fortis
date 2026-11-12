@@ -10,6 +10,7 @@ import { cliRoutes } from './modules/cli.routes';
 import { authRoutes } from './modules/auth.routes';
 import { findingsRoutes } from './modules/findings.routes';
 import { orgRoutes } from './modules/orgs.routes';
+import { exposureRoutes } from './modules/exposure.routes';
 import { targetRoutes } from './modules/targets.routes';
 import { authPlugin } from './plugins/auth';
 
@@ -53,5 +54,6 @@ export async function buildApp(opts: FastifyServerOptions = {}) {
   await app.register(cliRoutes);
   await app.register(findingsRoutes);
   await app.register(targetRoutes);
+  await app.register(exposureRoutes);
   return app;
 }
