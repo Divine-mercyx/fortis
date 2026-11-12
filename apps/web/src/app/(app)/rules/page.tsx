@@ -5,7 +5,7 @@ import useSWR from 'swr';
 
 import { PLANS, RULE_CATALOG, type RulePack } from '@fortis/shared';
 
-import { Bank, Chevron, Key, Layers, Search, Target } from '@/components/icons';
+import { Bank, Chevron, Globe, Key, Layers, Search, Target } from '@/components/icons';
 import { Words } from '@/components/motion';
 import { useSession } from '@/components/session';
 import { Empty, SeverityPill } from '@/components/ui';
@@ -31,7 +31,8 @@ type PackId = RulePack | 'zap';
 const PACKS: { id: PackId; name: string; short: string; icon: typeof Key; text: string }[] = [
   { id: 'fintech', name: 'Fintech rule pack', short: 'Money-moving code', icon: Bank, text: 'Checks written for money-moving code: transfers, wallets, webhooks, KYC data and OTPs.' },
   { id: 'secrets', name: 'Secrets', short: 'Keys and tokens', icon: Key, text: 'API keys, tokens and private keys committed to the repository, including Paystack, Flutterwave and Monnify secret keys.' },
-  { id: 'dependencies', name: 'Dependencies', short: 'Known vulnerabilities', icon: Layers, text: 'Known vulnerabilities in the open-source packages your project uses.' },
+  { id: 'dependencies', name: 'Dependencies', short: 'Known vulnerabilities', icon: Layers, text: 'Known vulnerabilities in the open-source packages your project uses, and the Docker images and GitHub Actions your build pulls in.' },
+  { id: 'infrastructure', name: 'Infrastructure', short: 'What faces the internet', icon: Globe, text: 'Terraform, Kubernetes and Docker Compose files that open a database, admin port or storage bucket to the whole internet.' },
   { id: 'zap', name: 'Running-app tests', short: 'OWASP ZAP', icon: Target, text: 'ZAP tests your deployed staging app from the outside. Findings show as ZAP-<id> with ZAP’s own advice.' },
 ];
 

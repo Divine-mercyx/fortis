@@ -248,7 +248,7 @@ function azureOpenings(block: HclBlock): Opening[] {
 /** INF-NET-001: a firewall rule that lets the whole internet reach an admin or database port. */
 export const openPortRule: FileRule = {
   id: 'INF-NET-001',
-  pack: 'dependencies',
+  pack: 'infrastructure',
   appliesTo: TERRAFORM,
   skipTests: true,
   run(file) {
@@ -269,7 +269,7 @@ const PUBLIC_MEMBER = /^(?:allUsers|allAuthenticatedUsers)$/;
 /** INF-STO-001: a storage bucket or container anyone on the internet can read. */
 export const publicStorageRule: FileRule = {
   id: 'INF-STO-001',
-  pack: 'dependencies',
+  pack: 'infrastructure',
   appliesTo: TERRAFORM,
   skipTests: true,
   run(file) {
@@ -309,7 +309,7 @@ export const publicStorageRule: FileRule = {
 /** INF-DB-001: a managed database given a public address. */
 export const publicDatabaseRule: FileRule = {
   id: 'INF-DB-001',
-  pack: 'dependencies',
+  pack: 'infrastructure',
   appliesTo: TERRAFORM,
   skipTests: true,
   run(file) {
@@ -349,7 +349,7 @@ export const publicDatabaseRule: FileRule = {
 /** INF-K8S-001: a Service that puts a database or cache on a public load balancer or node port. */
 export const k8sExposedServiceRule: FileRule = {
   id: 'INF-K8S-001',
-  pack: 'dependencies',
+  pack: 'infrastructure',
   appliesTo: K8S_YAML,
   skipTests: true,
   run(file) {
@@ -410,7 +410,7 @@ const LOOPBACK = /^(?:127\.\d+\.\d+\.\d+|::1|localhost)$/;
 /** INF-NET-002: a production Compose file publishes a database or cache port on every network interface. */
 export const composeDatabasePortRule: FileRule = {
   id: 'INF-NET-002',
-  pack: 'dependencies',
+  pack: 'infrastructure',
   appliesTo: COMPOSE,
   skipTests: true,
   run(file) {

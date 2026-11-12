@@ -28,7 +28,9 @@ import { osvCacheDir } from './rules/osv-cache';
 import { installKind, selfUpdate, UPDATE_HINT, updateCheckEnabled, updateNotice } from './update';
 import { c, err, log } from './ui';
 
-const FREE_PACKS: RulePack[] = ['secrets', 'dependencies'];
+const FREE_PACKS: RulePack[] = ['secrets', 'dependencies', 'infrastructure'];
+/** The packs a plan unlocks, plus the free ones: an API that predates a free pack still gets it run. */
+const withFree = (packs: RulePack[]): RulePack[] => [...new Set([...FREE_PACKS, ...packs])];
 
 const HELP = `
 ${c.bold('fortis')} ${c.grey(`v${VERSION}`)}  security checks on every push, for fintech teams
@@ -173,7 +175,7 @@ async function cmdScan(flags: Flags): Promise<number> {
   if (key) {
     const api$ = client(api, key);
     try {
-      [who, packs] = await Promise.all([api$.whoami(), api$.rulePacks()]);
+      [who, packs] = await Promise.all([api$.whoami(), api$.rulePacks().then(withFree)]);
     } catch (e) {
       const ae = e as ApiError;
       if (ae.status === 401) {
@@ -736,7 +738,7 @@ async function cmdDoctor(flags: Flags): Promise<number> {
 async function resolvePacks(api: string, key: string | undefined): Promise<RulePack[]> {
   if (!key) return FREE_PACKS;
   try {
-    return await client(api, key).rulePacks();
+    return withFree(await client(api, key).rulePacks());
   } catch {
     return FREE_PACKS;
   }

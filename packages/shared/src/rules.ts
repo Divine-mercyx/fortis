@@ -170,7 +170,7 @@ export const RULE_CATALOG: readonly RuleMeta[] = [
   },
   {
     id: 'INF-NET-001',
-    pack: 'dependencies',
+    pack: 'infrastructure',
     title: 'Firewall open to the internet on an admin or database port',
     severity: 'high',
     summary: 'A Terraform security group, firewall or network security rule lets any address on the internet (0.0.0.0/0) reach SSH, Remote Desktop, a database, a cache or a cluster API. Exposed admin and database ports are scanned within minutes of going live and are a common first step in breaches.',
@@ -178,7 +178,7 @@ export const RULE_CATALOG: readonly RuleMeta[] = [
   },
   {
     id: 'INF-NET-002',
-    pack: 'dependencies',
+    pack: 'infrastructure',
     title: 'Docker Compose publishes a database or cache port',
     severity: 'medium',
     summary: "A production Compose file publishes a database, cache or queue port (Postgres, MySQL, Redis, MongoDB and others) on every network interface. On a server that makes it reachable from the internet, and Docker's own firewall rules bypass ufw. Dev, test and override Compose files aren't checked.",
@@ -186,7 +186,7 @@ export const RULE_CATALOG: readonly RuleMeta[] = [
   },
   {
     id: 'INF-STO-001',
-    pack: 'dependencies',
+    pack: 'infrastructure',
     title: 'Public storage bucket',
     severity: 'high',
     summary: 'A Terraform file makes an S3 bucket, Cloud Storage bucket or Azure storage container readable by anyone: a public ACL, a public access block turned off, or allUsers access. Public buckets holding KYC documents, statements and backups are a leading cause of fintech data leaks.',
@@ -194,7 +194,7 @@ export const RULE_CATALOG: readonly RuleMeta[] = [
   },
   {
     id: 'INF-DB-001',
-    pack: 'dependencies',
+    pack: 'infrastructure',
     title: 'Database reachable from the internet',
     severity: 'high',
     summary: 'A managed database is given a public address: RDS or Redshift with publicly_accessible = true, Cloud SQL with 0.0.0.0/0 as an authorised network, or an Azure database firewall rule that allows every address. Its password is then the only thing between the internet and your customer records.',
@@ -202,7 +202,7 @@ export const RULE_CATALOG: readonly RuleMeta[] = [
   },
   {
     id: 'INF-K8S-001',
-    pack: 'dependencies',
+    pack: 'infrastructure',
     title: 'Kubernetes service exposes a database or cache',
     severity: 'high',
     summary: 'A Kubernetes Service of type LoadBalancer or NodePort puts a database, cache or queue port on an address outside the cluster, with no loadBalancerSourceRanges to limit who can connect. Internal load balancers are not flagged.',
