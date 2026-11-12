@@ -1,4 +1,4 @@
-import type { Detection, FileRule, SourceFile } from './types';
+import type { Detection, FileRule, ProjectContext, SourceFile } from './types';
 import { isIgnored } from './types';
 
 /*
@@ -20,7 +20,7 @@ const NOT_K8S = /(?:^|\/)\.github\/|(?:^|\/)(?:docker-)?compose(?:[.-][\w.-]+)?\
 
 /** Ports nothing on the internet should reach directly: remote admin, databases, caches, queues, cluster control. */
 export const SENSITIVE_PORTS: ReadonlyMap<number, string> = new Map([
-  [22, 'SSH'], [23, 'Telnet'], [3389, 'Remote Desktop'], [5900, 'VNC'],
+  [22, 'SSH'], [23, 'Telnet'], [3389, 'Remote Desktop'], [5900, 'VNC'], [5985, 'WinRM'], [5986, 'WinRM'],
   [3306, 'MySQL'], [5432, 'PostgreSQL'], [1433, 'SQL Server'], [1521, 'Oracle'], [27017, 'MongoDB'], [27018, 'MongoDB'],
   [6379, 'Redis'], [11211, 'Memcached'], [9200, 'Elasticsearch'], [9300, 'Elasticsearch'], [5601, 'Kibana'],
   [5984, 'CouchDB'], [9042, 'Cassandra'], [8086, 'InfluxDB'], [7474, 'Neo4j'],
@@ -245,16 +245,150 @@ function azureOpenings(block: HclBlock): Opening[] {
   return out;
 }
 
+/* ------------------------------------------------- Terraform variables, locals and modules */
+
+/** The directory of a path, as the key for a Terraform module's variables. */
+const dirOf = (path: string) => (path.includes('/') ? path.slice(0, path.lastIndexOf('/')) : '');
+export const TFVARS = /\.tfvars$/i;
+
+/** A literal HCL value on one line: a string, number, bool or flat list of those. */
+const LITERAL = /^(?:"[^"\n$]*"|-?\d+(?:\.\d+)?|true|false|\[\s*(?:(?:"[^"\n$]*"|-?\d+)\s*,?\s*)*\])$/;
+
+/**
+ * Literal values of variables (their defaults, then .tfvars), and locals, for every Terraform folder.
+ * A rule can then judge `cidr_blocks = var.admin_cidrs` when the value is written down somewhere.
+ */
+export function terraformValues(files: SourceFile[]): Map<string, Map<string, string>> {
+  const out = new Map<string, Map<string, string>>();
+  const of = (dir: string) => out.get(dir) ?? out.set(dir, new Map()).get(dir)!;
+  const tfvars: SourceFile[] = [];
+  for (const f of files) {
+    if (TFVARS.test(f.path)) { tfvars.push(f); continue; }
+    if (!TERRAFORM.test(f.path)) continue;
+    const vars = of(dirOf(f.path));
+    for (const b of hclBlocks(f.text)) {
+      if (b.kind === 'variable' && b.labels[0]) {
+        const d = rawAttr(b, 'default');
+        if (d && LITERAL.test(d)) vars.set(`var.${b.labels[0]}`, d);
+      } else if (b.kind === 'locals') {
+        for (const m of flatBody(b).matchAll(/(?:^|\n)[ \t]*([A-Za-z_][\w-]*)[ \t]*=[ \t]*([^\n]+)/g)) {
+          const v = m[2]!.trim();
+          if (LITERAL.test(v)) vars.set(`local.${m[1]}`, v);
+        }
+      }
+    }
+  }
+  // terraform.tfvars and *.auto.tfvars win over defaults.
+  for (const f of tfvars) {
+    const vars = of(dirOf(f.path));
+    for (const m of stripHclComments(f.text).matchAll(/(?:^|\n)[ \t]*([A-Za-z_][\w-]*)[ \t]*=[ \t]*([^\n]+)/g)) {
+      const v = m[2]!.trim();
+      if (LITERAL.test(v)) vars.set(`var.${m[1]}`, v);
+    }
+  }
+  return out;
+}
+
+/** A block body with its nested blocks blanked out, keeping line breaks. */
+function flatBody(block: HclBlock): string {
+  let flat = '';
+  let depth = 0;
+  for (const ch of block.body) {
+    if (ch === '{') depth++;
+    flat += depth > 0 && ch !== '\n' ? ' ' : ch;
+    if (ch === '}') depth--;
+  }
+  return flat;
+}
+
+/** The raw text of a one-line attribute value. */
+function rawAttr(block: HclBlock, name: string): string | null {
+  const m = new RegExp(`(?:^|\\n)[ \\t]*${name}[ \\t]*=[ \\t]*([^\\n]+)`).exec(flatBody(block));
+  return m ? m[1]!.trim() : null;
+}
+
+/** The file's text with var.x and local.x replaced by their literal values, line for line. */
+export function resolveTerraform(file: SourceFile, ctx?: ProjectContext): string {
+  const own = terraformValues([file]).get(dirOf(file.path));
+  const shared = ctx?.terraform?.get(dirOf(file.path));
+  if (!own?.size && !shared?.size) return file.text;
+  const lookup = (k: string) => shared?.get(k) ?? own?.get(k);
+  return file.text.replace(/(=\s*|\[\s*|,\s*)((?:var|local)\.[A-Za-z_][\w-]*)(?![\w.\[])/g, (m, pre: string, ref: string) => {
+    const v = lookup(ref);
+    return v ? pre + v : m;
+  });
+}
+
+/** terraform-aws-modules/security-group rule names, by port. */
+const MODULE_RULE_PORT: Record<string, number> = {
+  'ssh-tcp': 22, 'rdp-tcp': 3389, 'rdp-udp': 3389, 'postgresql-tcp': 5432, 'mysql-tcp': 3306, 'mssql-tcp': 1433, 'oracle-db-tcp': 1521,
+  'redis-tcp': 6379, 'memcached-tcp': 11211, 'elasticsearch-rest-tcp': 9200, 'elasticsearch-java-tcp': 9300, 'kibana-tcp': 5601,
+  'kafka-broker-tcp': 9092, 'kubernetes-api-tcp': 6443, 'etcd-client-tcp': 2379, 'cassandra-clients-tcp': 9042,
+  'winrm-http-tcp': 5985, 'winrm-https-tcp': 5986, 'docker-swarm-mngmt-tcp': 2377, 'vnc-tcp': 5900,
+};
+
+/** Literal objects inside a list attribute: `ingress_with_cidr_blocks = [ { ... }, { ... } ]`. */
+function listObjects(block: HclBlock, name: string): { text: string; line: number }[] {
+  const flat = block.body;
+  const m = new RegExp(`(?:^|\\n)[ \\t]*${name}[ \\t]*=[ \\t]*\\[`).exec(flat);
+  if (!m) return [];
+  const out: { text: string; line: number }[] = [];
+  let i = m.index + m[0].length;
+  let depth = 1;
+  let objStart = -1;
+  for (; i < flat.length && depth > 0; i++) {
+    const ch = flat[i]!;
+    if (ch === '[' || ch === '{') { if (ch === '{' && depth === 1) objStart = i; depth++; }
+    else if (ch === ']' || ch === '}') {
+      depth--;
+      if (ch === '}' && depth === 1 && objStart !== -1) {
+        out.push({ text: flat.slice(objStart, i + 1), line: block.bodyLine + lineAt(flat, objStart) - 1 });
+        objStart = -1;
+      }
+    }
+  }
+  return out;
+}
+
+/** Security-group modules (terraform-aws-modules/security-group and the like). */
+function moduleOpenings(block: HclBlock): Opening[] {
+  if (block.kind !== 'module') return [];
+  const out: Opening[] = [];
+  const cidrs = attr(block, 'ingress_cidr_blocks') ?? attr(block, 'ingress_ipv6_cidr_blocks');
+  if (cidrs && list(cidrs).some((c) => OPEN_CIDR.test(c))) {
+    const names: string[] = [];
+    for (const r of list(attr(block, 'ingress_rules'))) {
+      const found = r === 'all-all' || r === 'all-tcp' ? sensitiveIn(0, 65535) : MODULE_RULE_PORT[r] ? sensitiveIn(MODULE_RULE_PORT[r]!, MODULE_RULE_PORT[r]!) : [];
+      for (const n of found) if (!names.includes(n)) names.push(n);
+    }
+    if (names.length) out.push({ line: cidrs.line, names });
+  }
+  for (const key of ['ingress_with_cidr_blocks', 'ingress_with_ipv6_cidr_blocks']) {
+    for (const o of listObjects(block, key)) {
+      const cidr = /(?:cidr_blocks|ipv6_cidr_blocks)\s*=\s*"([^"]*)"/.exec(o.text);
+      if (!cidr || !cidr[1]!.split(',').some((c) => OPEN_CIDR.test(c.trim()))) continue;
+      const rule = /\brule\s*=\s*"([^"]+)"/.exec(o.text)?.[1];
+      const from = Number(/from_port\s*=\s*(-?\d+)/.exec(o.text)?.[1] ?? NaN);
+      const to = Number(/to_port\s*=\s*(-?\d+)/.exec(o.text)?.[1] ?? NaN);
+      const names = rule ? (rule === 'all-all' || rule === 'all-tcp' ? sensitiveIn(0, 65535) : MODULE_RULE_PORT[rule] ? sensitiveIn(MODULE_RULE_PORT[rule]!, MODULE_RULE_PORT[rule]!) : []) : /protocol\s*=\s*"-1"/.test(o.text) ? sensitiveIn(0, 65535) : sensitiveIn(from, to);
+      if (names.length) out.push({ line: o.line + lineAt(o.text, cidr.index) - 1, names });
+    }
+  }
+  return out;
+}
+
+const tfBlocks = (file: SourceFile, ctx?: ProjectContext) => hclBlocks(resolveTerraform(file, ctx));
+
 /** INF-NET-001: a firewall rule that lets the whole internet reach an admin or database port. */
 export const openPortRule: FileRule = {
   id: 'INF-NET-001',
   pack: 'infrastructure',
   appliesTo: TERRAFORM,
   skipTests: true,
-  run(file) {
+  run(file, ctx) {
     const out: Detection[] = [];
-    for (const block of hclBlocks(file.text).filter((b) => b.kind === 'resource')) {
-      for (const o of [...awsOpenings(block), ...gcpOpenings(block), ...azureOpenings(block)]) {
+    for (const block of tfBlocks(file, ctx).filter((b) => b.kind === 'resource' || b.kind === 'module')) {
+      for (const o of [...awsOpenings(block), ...gcpOpenings(block), ...azureOpenings(block), ...moduleOpenings(block)]) {
         if (isIgnored(file, o.line)) continue;
         out.push(hit(file, o.line, 'INF-NET-001', 'high', `Firewall open to the internet on ${describe(o.names)}`, OPEN_PORT_FIX));
       }
@@ -272,15 +406,23 @@ export const publicStorageRule: FileRule = {
   pack: 'infrastructure',
   appliesTo: TERRAFORM,
   skipTests: true,
-  run(file) {
+  run(file, ctx) {
     const out: Detection[] = [];
     const flag = (line: number, what: string, fix: string) => {
       if (!isIgnored(file, line)) out.push(hit(file, line, 'INF-STO-001', 'high', what, fix));
     };
     const S3_FIX = 'Keep the bucket private: remove the public ACL, set all four aws_s3_bucket_public_access_block settings to true, and share files with presigned URLs or through CloudFront with origin access control.';
-    for (const b of hclBlocks(file.text).filter((x) => x.kind === 'resource')) {
-      const type = b.labels[0];
-      if (type === 'aws_s3_bucket' || type === 'aws_s3_bucket_acl' || type === 'aws_s3_object') {
+    for (const b of tfBlocks(file, ctx).filter((x) => x.kind === 'resource' || x.kind === 'module')) {
+      // Bucket modules (terraform-aws-modules/s3-bucket) take the same settings as the resources.
+      const type = b.kind === 'module' ? (/s3-bucket|s3_bucket|\bs3\b/i.test(str(attr(b, 'source')) ?? '') ? 'aws_s3_module' : '') : b.labels[0];
+      if (type === 'aws_s3_module') {
+        const acl = attr(b, 'acl');
+        if (acl && PUBLIC_ACL.test(str(acl) ?? '')) flag(acl.line, `S3 bucket is public (${str(acl)})`, S3_FIX);
+        for (const key of ['block_public_acls', 'block_public_policy', 'ignore_public_acls', 'restrict_public_buckets']) {
+          const a = attr(b, key);
+          if (a && str(a) === 'false') { flag(a.line, `S3 public access block turned off (${key} = false)`, S3_FIX); break; }
+        }
+      } else if (type === 'aws_s3_bucket' || type === 'aws_s3_bucket_acl' || type === 'aws_s3_object') {
         const acl = attr(b, 'acl');
         if (acl && PUBLIC_ACL.test(str(acl) ?? '')) flag(acl.line, `S3 ${type === 'aws_s3_object' ? 'object' : 'bucket'} is public (${str(acl)})`, S3_FIX);
       } else if (type === 'aws_s3_bucket_public_access_block' || type === 'aws_s3_account_public_access_block') {
@@ -312,11 +454,17 @@ export const publicDatabaseRule: FileRule = {
   pack: 'infrastructure',
   appliesTo: TERRAFORM,
   skipTests: true,
-  run(file) {
+  run(file, ctx) {
     const out: Detection[] = [];
-    for (const b of hclBlocks(file.text).filter((x) => x.kind === 'resource')) {
-      const type = b.labels[0];
-      if (/^aws_(?:db_instance|rds_cluster_instance|redshift_cluster|dms_replication_instance)$/.test(type ?? '')) {
+    for (const b of tfBlocks(file, ctx).filter((x) => x.kind === 'resource' || x.kind === 'module')) {
+      const type = b.kind === 'module' ? 'module' : b.labels[0];
+      if (type === 'module') {
+        // RDS, Aurora and Redshift modules pass publicly_accessible straight through.
+        const a = attr(b, 'publicly_accessible');
+        if (a && str(a) === 'true' && !isIgnored(file, a.line)) {
+          out.push(hit(file, a.line, 'INF-DB-001', 'high', 'Database has a public address (publicly_accessible = true)', 'Set publicly_accessible = false, keep the database in private subnets, and reach it from your app servers or through a bastion or VPN.'));
+        }
+      } else if (/^aws_(?:db_instance|rds_cluster_instance|redshift_cluster|dms_replication_instance)$/.test(type ?? '')) {
         const a = attr(b, 'publicly_accessible');
         if (a && str(a) === 'true' && !isIgnored(file, a.line)) {
           out.push(hit(file, a.line, 'INF-DB-001', 'high', 'Database has a public address (publicly_accessible = true)', 'Set publicly_accessible = false, keep the database in private subnets, and reach it from your app servers or through a bastion or VPN.'));

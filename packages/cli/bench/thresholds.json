@@ -298,5 +298,17 @@
   "FX-RESET-001:py": {
     "precision": 1,
     "recall": 1
+  },
+  "INF-DB-001:py": {
+    "precision": 1,
+    "recall": 1
+  },
+  "INF-NET-001:py": {
+    "precision": 1,
+    "recall": 1
+  },
+  "INF-STO-001:py": {
+    "precision": 1,
+    "recall": 1
   }
 }

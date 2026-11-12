@@ -6,6 +6,7 @@ import { createProject } from './analysis/project';
 import { scanDependencies } from './rules/dependencies';
 import { GLOBAL_LIMIT } from './rules/auth';
 import { rulesFor } from './rules/index';
+import { terraformValues } from './rules/infrastructure';
 import { findLockfiles } from './rules/lockfiles';
 import { JS_TS, PYTHON, TEST_PATH, type Detection, type ProjectContext, type SourceFile } from './rules/types';
 import { makeFilter, readSource } from './files';
@@ -93,6 +94,9 @@ export async function runScan(opts: ScanOptions): Promise<ScanResult> {
   const ctxPaths = (opts.scope === 'full' ? candidates : everything().filter(keep)).filter((p) => (JS_TS.test(p) || PYTHON.test(p)) && !TEST_PATH.test(p));
   const ctx = buildContextFrom(opts.root, ctxPaths);
   ctx.project = createProject(ctxPaths, (p) => readSource(opts.root, p));
+  // Terraform variables and locals, so a rule can judge `cidr_blocks = var.admin_cidrs`.
+  const tfPaths = (opts.scope === 'full' ? candidates : everything().filter(keep)).filter((p) => /\.(?:tf|tfvars)$/i.test(p));
+  if (tfPaths.length) ctx.terraform = terraformValues(tfPaths.map((p) => readSource(opts.root, p)).filter((f): f is SourceFile => f !== null));
 
   // Only the grammars this repository needs, and only if the rules that use them are running.
   if (rules.some((r) => r.pack === 'fintech')) {
@@ -203,7 +207,8 @@ export function buildContext(files: SourceFile[]): ProjectContext {
       }
     }
   }
-  return { idempotencyHelpers, rateLimitAll };
+  const tf = files.filter((f) => /\.(?:tf|tfvars)$/i.test(f.path));
+  return { idempotencyHelpers, rateLimitAll, ...(tf.length ? { terraform: terraformValues(tf) } : {}) };
 }
 
 export const meetsThreshold = (sev: Severity, failOn: Severity) => SEVERITY_RANK[sev] >= SEVERITY_RANK[failOn];

@@ -31,6 +31,8 @@ export type ProjectContext = {
   project?: Project;
   /** A rate limiter guards the whole app (app.use(limiter), DEFAULT_THROTTLE_CLASSES, ...). */
   rateLimitAll?: boolean;
+  /** Literal values of Terraform variables and locals, by folder, so `var.x` can be judged. */
+  terraform?: Map<string, Map<string, string>>;
 };
 
 export const emptyContext = (): ProjectContext => ({ idempotencyHelpers: new Set() });

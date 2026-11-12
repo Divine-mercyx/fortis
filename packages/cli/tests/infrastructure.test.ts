@@ -35,7 +35,7 @@ describe('reading Terraform', () => {
   it('names the sensitive ports inside a range', () => {
     expect(sensitiveIn(22, 22)).toEqual(['SSH']);
     expect(sensitiveIn(80, 443)).toEqual([]);
-    expect(sensitiveIn(5000, 6500)).toEqual(['VNC', 'PostgreSQL', 'Redis', 'Kibana', 'CouchDB', 'RabbitMQ', 'Kubernetes API']);
+    expect(sensitiveIn(5000, 6500)).toEqual(['VNC', 'WinRM', 'PostgreSQL', 'Redis', 'Kibana', 'CouchDB', 'RabbitMQ', 'Kubernetes API']);
   });
 });
 

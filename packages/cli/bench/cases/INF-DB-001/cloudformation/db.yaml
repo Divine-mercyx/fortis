@@ -1,0 +1,18 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Resources:
+  Core:
+    Type: AWS::RDS::DBInstance
+    Properties:
+      Engine: postgres
+      DBInstanceClass: db.t4g.medium
+      PubliclyAccessible: true # @hit
+  Warehouse:
+    Type: AWS::Redshift::Cluster
+    Properties:
+      NodeType: ra3.xlplus
+      PubliclyAccessible: "true" # @hit
+  Replica:
+    Type: AWS::RDS::DBInstance
+    Properties:
+      Engine: postgres
+      PubliclyAccessible: false

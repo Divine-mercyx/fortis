@@ -150,7 +150,7 @@ Microsoft reviews the first winget pull request by hand, so `winget install` wor
 
 These are limits of what was built, not missing setup.
 
-- **Infrastructure checks read literal values only.** A CIDR, port or flag that comes from a variable, a module, a `locals` block or a Helm value isn't resolved, so it isn't judged. CloudFormation, Pulumi, Bicep/ARM and rendered Helm charts aren't read yet.
+- **Infrastructure checks read values written in the repository.** Terraform variables, locals and `.tfvars` are followed, but values passed in from a pipeline, a remote state or a custom module's internals aren't. Helm values are read, rendered chart templates aren't. CloudFormation `!Ref` and Pulumi values computed at run time aren't resolved.
 - **CocoaPods, Conan and vcpkg:** OSV has no advisories for them. The scan names the packages and says they weren't checked.
 - **Java, Kotlin, Scala and .NET without a lockfile:** only direct dependencies are covered. Transitive ones need an SBOM or a lockfile, and the scan says so.
 - **Fintech rules in Go, C#, PHP, Java and Kotlin** have the first six checks, on line patterns. The four newer checks (money as floating point, card data, predictable references, client amounts) and the syntax-tree engine cover JavaScript, TypeScript and Python only.
@@ -169,4 +169,3 @@ Ideas agreed on but not started, so they aren't forgotten. Each would follow the
 | Insecure password and PIN reset | Reset codes that are guessable, reusable, or returned in the response | A code rule |
 | Mobile app checks | API keys and secrets shipped inside an APK or IPA, no certificate pinning | Needs a scan of the built app, not only the repository |
 | Scanning a company's internet-facing addresses | Finds exposed databases, admin panels and old services that aren't described in code | A different product shape: Fortis must first prove the customer owns the domains or IP ranges (for example with a DNS record), and it needs a server-side scanner, not just the CLI |
-| More infrastructure formats | CloudFormation, Pulumi, Bicep/ARM, rendered Helm charts, Terraform variables and modules | Extends the Infrastructure pack |
