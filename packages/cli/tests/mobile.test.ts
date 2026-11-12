@@ -1,11 +1,10 @@
-import { deflateRawSync } from 'node:zlib';
-
 import { describe, expect, it } from 'vitest';
 
 import { dexStrings, printableStrings, scanAppArchive, zipEntries, zipRead } from '../src/app-archive';
 import { appEntry, isSecretName, MOBILE_RULES, mobileKeyRule, mobilePinningRule, mobileTlsRule, tlsFindings } from '../src/rules/mobile';
 import { buildContext } from '../src/scan';
 import { emptyContext, type FileRule, type SourceFile } from '../src/rules/types';
+import { zipFor } from './zip-helper';
 
 const file = (path: string, text: string): SourceFile => ({ path, text, lines: text.split('\n') });
 const titles = (rule: FileRule, path: string, text: string, ctx = emptyContext()) => rule.run(file(path, text), ctx).map((d) => `${d.line}:${d.severity}:${d.title}`);
@@ -14,41 +13,7 @@ const lines = (rule: FileRule, path: string, text: string, ctx = emptyContext())
 // Built at runtime, so this repository never contains a key-shaped string.
 const LIVE_KEY = ['sk', 'live', 'a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0'].join('_');
 
-/** A ZIP file, with deflated or stored entries, like an APK or IPA. */
-function zip(files: Record<string, string | Buffer>, store = false): Buffer {
-  const locals: Buffer[] = [];
-  const central: Buffer[] = [];
-  let offset = 0;
-  for (const [name, content] of Object.entries(files)) {
-    const data = Buffer.isBuffer(content) ? content : Buffer.from(content);
-    const packed = store ? data : deflateRawSync(data);
-    const nameBuf = Buffer.from(name);
-    const local = Buffer.alloc(30);
-    local.writeUInt32LE(0x04034b50, 0);
-    local.writeUInt16LE(store ? 0 : 8, 8);
-    local.writeUInt32LE(packed.length, 18);
-    local.writeUInt32LE(data.length, 22);
-    local.writeUInt16LE(nameBuf.length, 26);
-    locals.push(local, nameBuf, packed);
-    const cd = Buffer.alloc(46);
-    cd.writeUInt32LE(0x02014b50, 0);
-    cd.writeUInt16LE(store ? 0 : 8, 10);
-    cd.writeUInt32LE(packed.length, 20);
-    cd.writeUInt32LE(data.length, 24);
-    cd.writeUInt16LE(nameBuf.length, 28);
-    cd.writeUInt32LE(offset, 42);
-    central.push(cd, nameBuf);
-    offset += 30 + nameBuf.length + packed.length;
-  }
-  const cdBuf = Buffer.concat(central);
-  const eocd = Buffer.alloc(22);
-  eocd.writeUInt32LE(0x06054b50, 0);
-  eocd.writeUInt16LE(Object.keys(files).length, 8);
-  eocd.writeUInt16LE(Object.keys(files).length, 10);
-  eocd.writeUInt32LE(cdBuf.length, 12);
-  eocd.writeUInt32LE(offset, 16);
-  return Buffer.concat([...locals, cdBuf, eocd]);
-}
+const zip = zipFor;
 
 /** A .dex file with just a header and a string table. */
 function dex(strings: string[]): Buffer {
@@ -246,9 +211,9 @@ describe('fortis mobile: built apps', () => {
     expect(r.detections.map((d) => `${d.ruleId}:${d.line}`).sort()).toEqual(['FX-SEC-001:1', 'MOB-TLS-001:2']);
   });
 
-  it('notes what it could not judge', () => {
+  it('keeps going on a binary plist it can make nothing of', () => {
     const r = scanAppArchive('x.ipa', zip({ 'Payload/X.app/Info.plist': Buffer.concat([Buffer.from('bplist00'), Buffer.alloc(40)]) }));
-    expect(r.notes.join(' ')).toMatch(/binary plist/);
+    expect(r.detections).toEqual([]);
   });
 });
 

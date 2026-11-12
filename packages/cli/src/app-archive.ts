@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import { basename } from 'node:path';
 import { inflateRawSync } from 'node:zlib';
 
+import { decodeAxml, decodeBplist, isAxml, isBplist, plistToXml } from './binary-xml';
 import { genericSecretRule, paymentKeyRule } from './rules/secrets';
 import { tlsFindings } from './rules/mobile';
 import { emptyContext, type Detection, type SourceFile } from './rules/types';
@@ -176,20 +177,27 @@ export function scanAppArchive(path: string, data: Buffer = readFileSync(path)):
       runSecrets({ path: `${where}.txt`, text, lines: text.split('\n') }, true);
       continue;
     }
-    // Binary plists start with bplist00: read their strings instead.
-    const raw = bytes.toString('latin1', 0, 8) === 'bplist00' ? printableStrings(bytes, 4).join('\n') : bytes.toString('utf8');
+    // Binary XML (manifests, res/xml) and binary plists are decoded to the text they were built from.
+    let raw: string;
+    let decoded = false;
+    try {
+      if (isAxml(bytes)) { raw = decodeAxml(bytes); decoded = true; }
+      else if (isBplist(bytes)) { raw = plistToXml(decodeBplist(bytes)); decoded = true; }
+      else raw = bytes.toString('utf8');
+    } catch (err) {
+      notes.push(`${e.name} couldn't be decoded (${(err as Error).message}); only its readable strings were checked.`);
+      raw = printableStrings(bytes, 4).join('\n');
+    }
     const file: SourceFile = { path: where, text: raw, lines: raw.split(/\r?\n/) };
-    runSecrets(file, false);
-    if (/Info\.plist$/.test(e.name)) {
-      if (bytes.toString('latin1', 0, 8) === 'bplist00') notes.push(`${e.name} is a binary plist; its App Transport Security settings weren't judged. \`fortis scan\` checks them in the source.`);
-      else for (const f of tlsFindings({ ...file, path: e.name })) push({ ruleId: 'MOB-TLS-001', severity: f.severity, title: f.title, file: where, line: f.line, snippet: (file.lines[f.line - 1] ?? '').trim(), fix: f.fix });
+    runSecrets(file, decoded);
+    // The TLS checks judge manifests, network security config (whatever a shrinker renamed it to) and Info.plist.
+    const judge = /(?:^|\/)AndroidManifest\.xml$|Info\.plist$/.test(e.name) ? e.name : /<network-security-config/.test(raw) ? 'res/xml/network_security_config.xml' : null;
+    if (judge) {
+      for (const f of tlsFindings({ ...file, path: judge })) {
+        // Decoded files have no source lines, so point at the setting instead.
+        push({ ruleId: 'MOB-TLS-001', severity: f.severity, title: f.title, file: where, line: decoded ? 0 : f.line, snippet: (file.lines[f.line - 1] ?? '').trim(), fix: f.fix });
+      }
     }
-    if (/network_security_config[\w-]*\.xml$/.test(e.name) && /<network-security-config/.test(raw)) {
-      for (const f of tlsFindings({ ...file, path: e.name })) push({ ruleId: 'MOB-TLS-001', severity: f.severity, title: f.title, file: where, line: f.line, snippet: (file.lines[f.line - 1] ?? '').trim(), fix: f.fix });
-    }
-  }
-  if (kind === 'Android' && entries.some((e) => e.name === 'AndroidManifest.xml')) {
-    notes.push('AndroidManifest.xml in a build is binary XML; cleartext and network-security settings are checked in the source repository by `fortis scan`.');
   }
   return { detections, entries: entries.length, read, kind, notes };
 }
