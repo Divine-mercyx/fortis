@@ -1,0 +1,82 @@
+services:
+  db:
+    image: postgres:16
+    ports:
+      - 0.0.0.0:5432:5432 # @hit
+  queue:
+    image: rabbitmq:3
+    ports:
+      - 0.0.0.0:5672:5672 # @hit
+  kafka:
+    image: bitnami/kafka:3.8
+    ports:
+      - 0.0.0.0:9092:9092 # @hit
+  memcached:
+    image: memcached:1.6
+    ports:
+      - 0.0.0.0:11211:11211 # @hit
+  couch:
+    image: couchdb:3
+    ports:
+      - 0.0.0.0:5984:5984 # @hit
+  zk:
+    image: zookeeper:3.9
+    ports:
+      - 0.0.0.0:2181:2181 # @hit
+  influx:
+    image: influxdb:2.7
+    ports:
+      - 0.0.0.0:8086:8086 # @hit
+  db2:
+    image: postgres:16
+    ports:
+      - target: 5432 # @hit
+        published: 5432
+        protocol: tcp
+  redis2:
+    image: redis:7
+    ports:
+      - target: 6379 # @hit
+        published: 6379
+        protocol: tcp
+  mongo2:
+    image: mongo:7
+    ports:
+      - target: 27017 # @hit
+        published: 27017
+        protocol: tcp
+  neo:
+    image: neo4j:5
+    ports:
+      - target: 7474 # @hit
+        published: 7474
+        protocol: tcp
+  mssql:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    ports:
+      - target: 1433 # @hit
+        published: 1433
+        protocol: tcp
+  es:
+    image: elasticsearch:8.15.0
+    ports:
+      - target: 9300 # @hit
+        published: 9300
+        protocol: tcp
+  etcd:
+    image: quay.io/coreos/etcd:v3.5.15
+    ports:
+      - target: 2379 # @hit
+        published: 2379
+        protocol: tcp
+  pg-local:
+    image: postgres:16
+    ports:
+      - target: 5432
+        published: 15432
+        host_ip: 127.0.0.1
+  web:
+    image: nginx:1.27
+    ports:
+      - "80:80"
+      - "443:443"

@@ -68,6 +68,7 @@ Once a day, Fortis checks GitHub for a newer release and prints a notice if ther
 | Secrets | Paystack / Flutterwave / Monnify / Korapay / BudPay / SeerBit / OPay / Squad secret keys; Mono and Dojah secret keys and Africa's Talking API keys; private keys, AWS, GitHub, Slack, Google and Fortis keys; database passwords, SaaS and registry tokens (SendGrid, Slack, OpenAI, Anthropic, npm, PyPI…) in connection URLs, JDBC URLs and .NET connection strings; random-looking hard-coded secrets, including unquoted values in `.env`, `.properties` and YAML files. Also read: Jupyter notebook cells and their outputs, PEM keys on one line inside JSON, base64-encoded keys, and the values of Kubernetes `Secret` manifests | Any | Free |
 | Dependencies | Known vulnerabilities, from [OSV](https://osv.dev) | See below | Free |
 | Dependencies (supply chain) | Docker base images with no tag or `latest`, not pinned by digest, or end-of-life; third-party GitHub Actions not pinned to a commit; `pull_request_target` workflows that run the pull request's code | Dockerfiles and GitHub Actions workflows | Free |
+| Dependencies (infrastructure) | Firewall rules that open SSH, Remote Desktop, databases, caches or cluster APIs to the whole internet; public storage buckets; databases with a public address; Kubernetes services that put a database on a public load balancer or node port; Compose files that publish a database port on every interface | Terraform (AWS, Google Cloud, Azure), Kubernetes manifests, Docker Compose | Free |
 | Fintech | Money records read without an ownership check; webhooks without a signature check; balance updates outside a transaction; BVN/NIN in logs; weak or leaked OTPs; transfers without an idempotency key; money as floating point; card data in logs, analytics or plain text; predictable transaction references; charge amounts taken from the request | JavaScript, TypeScript and Python (Django, Django REST, Flask, FastAPI); the first six checks also in Go (net/http, Gin, Echo, Fiber), C# (ASP.NET Core), PHP (Laravel), and Java and Kotlin (Spring Boot) | Core and above |
 
 `fortis test` and `fortis access` test a running app over HTTP, so they work whatever the backend is written in.
@@ -563,6 +564,9 @@ This checks each of these, and prints the fix for anything wrong:
 It exits 1 if something stops Fortis doing its job. Things that are only worth knowing, such as a newer version, no key on the free plan, or no Docker, are shown without failing. `--strict` fails on those too, `--json` prints the results as data, and `--offline` skips the network checks.
 
 ## Changelog
+
+**Unreleased**
+- New infrastructure checks, free on every plan: firewall rules open to the internet on admin and database ports (INF-NET-001), Compose files publishing a database port (INF-NET-002), public storage buckets (INF-STO-001), databases with a public address (INF-DB-001) and Kubernetes services exposing a database (INF-K8S-001). They read Terraform for AWS, Google Cloud and Azure, Kubernetes manifests and Docker Compose files.
 
 **0.1.0-beta.13** (2026-11-10)
 - The Linux binaries, the Linux wheels and the Docker image run on glibc 2.28 again: Debian 12, Ubuntu 22.04 and RHEL 8 and newer. beta.12's needed glibc 2.38.

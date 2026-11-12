@@ -254,5 +254,25 @@
   "SUP-IMG-003": {
     "precision": 1,
     "recall": 1
+  },
+  "INF-DB-001": {
+    "precision": 1,
+    "recall": 1
+  },
+  "INF-K8S-001": {
+    "precision": 1,
+    "recall": 1
+  },
+  "INF-NET-001": {
+    "precision": 1,
+    "recall": 1
+  },
+  "INF-NET-002": {
+    "precision": 1,
+    "recall": 1
+  },
+  "INF-STO-001": {
+    "precision": 1,
+    "recall": 1
   }
 }

@@ -1,0 +1,99 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: pg-primary
+spec:
+  type: "LoadBalancer" # @hit
+  ports:
+  - port: 5432
+    protocol: TCP
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: redis-cache
+spec:
+  type: "LoadBalancer" # @hit
+  ports:
+  - port: 6379
+    protocol: TCP
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mongo-rs
+spec:
+  type: "NodePort" # @hit
+  ports:
+  - port: 27017
+    protocol: TCP
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: zk
+spec:
+  type: "NodePort" # @hit
+  ports:
+  - port: 2181
+    protocol: TCP
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: etcd
+spec:
+  type: "LoadBalancer" # @hit
+  ports:
+  - port: 2379
+    protocol: TCP
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: influx
+spec:
+  type: "LoadBalancer" # @hit
+  ports:
+  - port: 8086
+    protocol: TCP
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: neo4j
+spec:
+  type: "NodePort" # @hit
+  ports:
+  - port: 7474
+    protocol: TCP
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mq
+spec:
+  type: "LoadBalancer" # @hit
+  ports:
+  - port: 5672
+    protocol: TCP
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: es-transport
+spec:
+  type: "NodePort" # @hit
+  ports:
+  - port: 9300
+    protocol: TCP
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mssql
+spec:
+  type: "LoadBalancer" # @hit
+  ports:
+  - port: 1433
+    protocol: TCP

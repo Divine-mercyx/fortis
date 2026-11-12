@@ -18,6 +18,7 @@ export type FrameworkId = keyof typeof FRAMEWORKS;
 export type Control = { framework: FrameworkId; ref: string; title: string };
 
 const PCI = {
+  '1.3.1': 'Inbound traffic to the cardholder data environment is restricted to what is necessary',
   '3.3.1': 'Sensitive authentication data is not retained after authorisation',
   '3.5.1': 'The primary account number is rendered unreadable anywhere it is stored',
   '6.2.3': 'Bespoke software is reviewed before release to find and correct vulnerabilities',
@@ -71,6 +72,11 @@ const BY_RULE: Record<string, Control[]> = {
   'SUP-IMG-003': [pci('6.3.1'), pci('6.3.3'), cbn('vuln')],
   'SUP-GHA-001': [pci('6.2.3'), cbn('appsec'), cbn('crypto')],
   'SUP-GHA-002': [pci('6.2.4'), cbn('appsec'), cbn('access')],
+  'INF-NET-001': [pci('1.3.1'), cbn('access'), cbn('vapt')],
+  'INF-NET-002': [pci('1.3.1'), cbn('access')],
+  'INF-STO-001': [pci('1.3.1'), cbn('data'), ndpa('s.39'), ndpa('s.40')],
+  'INF-DB-001': [pci('1.3.1'), cbn('access'), cbn('data'), ndpa('s.39')],
+  'INF-K8S-001': [pci('1.3.1'), cbn('access')],
 };
 
 /** ZAP alerts whose fix protects payment-page scripts (CSP, Subresource Integrity). */
