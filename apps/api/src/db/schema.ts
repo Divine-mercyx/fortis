@@ -142,6 +142,10 @@ export const targets = pgTable(
     /** Kill switch: while set, no tests may run or upload. */
     pausedAt: timestamp('paused_at', { withTimezone: true }),
     lastRunAt: timestamp('last_run_at', { withTimezone: true }),
+    /** Exposure checks on a schedule: off, daily or weekly. Runs only while the target is ready. */
+    exposureSchedule: text('exposure_schedule').notNull().default('off'),
+    /** When the last exposure check ran, scheduled or by hand. */
+    exposureCheckedAt: timestamp('exposure_checked_at', { withTimezone: true }),
     createdBy: uuid('created_by').references(() => users.id, { onDelete: 'set null' }),
     createdAt: createdAt(),
   },

@@ -4,7 +4,8 @@ import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:pat
 
 import { MAX_FINDINGS_PER_SCAN, RULE_CATALOG, maskSnippet, SEVERITIES, type RulePack, type Severity } from '@fortis/shared';
 
-import { ApiError, client, toUpload, type CliTarget, type WhoAmI } from './api';
+import { ApiError, client, toUpload, type CliTarget, type ExposureResult, type WhoAmI } from './api';
+import type { Detection } from './rules/types';
 import { ACCESS_CONFIG, hasWriteChecks, readAccessConfig, runAccessChecks, writeAccessTemplate, type AccessConfig } from './access';
 import { checksFromGraphqlSchema, INTROSPECTION_QUERY, schemaFrom } from './access-graphql';
 import { checksFromRoutes, routesFromHar, routesFromOpenApi, routesFromPostman, type Route } from './access-import';
@@ -44,6 +45,7 @@ ${c.bold('Usage')}
   fortis whoami                                      show the project and plan for your key
   fortis test --target <url> [options]               ZAP test of a running staging app
   fortis mobile <app.apk|app.aab|app.ipa>            what a built app gives away (keys, plain-HTTP settings, a bundled .env)
+  fortis exposure [--target <url>]                   from Fortis's servers: open admin ports, admin pages and secret files on a verified target
   fortis access --target <url> [--writes]            can test user B read, change or delete test user A's records? (BOLA)
   fortis access init [--openapi|--postman|--har|--graphql <source>]  write ${ACCESS_CONFIG}, from your routes if given
   fortis baseline                                    accept today's findings so only new ones block
@@ -687,6 +689,41 @@ async function cmdAccess(args: string[], flags: Flags): Promise<number> {
 /** A standalone binary is a copy of Node with the CLI inside, named fortis. An npm install runs as a script under Node. */
 const runningAsBinary = () => /^fortis(\.exe)?$/i.test(basename(process.execPath));
 
+/** `fortis exposure [--target <url>]`: from Fortis's servers, what a verified target exposes to the internet. */
+async function cmdExposure(flags: Flags): Promise<number> {
+  const root = repoRoot(process.cwd()) ?? process.cwd();
+  const config = readProjectConfig(root);
+  const api = apiUrl(str(flags.api) ?? config.apiUrl);
+  const key = resolveKey(api);
+  if (!key) {
+    err(c.red('✖ No Fortis key found.'), c.grey('Exposure checks run from Fortis\'s servers against your verified targets. Run: fortis login <key>'));
+    return 2;
+  }
+  const failOn = (str(flags['fail-on']) ?? 'high') as Severity;
+  const started = Date.now();
+  let r: ExposureResult;
+  try {
+    r = await client(api, key).exposure(str(flags.target));
+  } catch (e) {
+    const ae = e as ApiError;
+    err(c.red(`✖ ${ae.message}`));
+    return 2;
+  }
+  const detections: Detection[] = r.findings.map((f) => ({ ruleId: f.ruleId, severity: f.severity, title: f.title, file: f.file, line: 0, snippet: f.snippet, fix: f.detail }));
+  const blocking = detections.filter((d) => meetsThreshold(d.severity, failOn));
+  if (flags.json) {
+    log(JSON.stringify({ ...r, findings: r.findings.map((f) => ({ ...f, snippet: maskSnippet(f.snippet) })), failOn, blocking: blocking.length }, null, 2));
+    return blocking.length ? 1 : 0;
+  }
+  printReport(
+    { detections, filesScanned: r.checked, packagesChecked: 0, durationMs: Date.now() - started, notes: [], incompleteChecks: [], partial: [] },
+    { failOn, prePush: false, packs: [`exposure of ${r.hostname}`, `${r.addresses.length} address${r.addresses.length === 1 ? '' : 'es'}`], kind: 'exposure' },
+  );
+  if (r.refused.length) log(c.grey(`note: skipped private or reserved addresses ${r.refused.join(', ')}`));
+  if (r.fixedCount) log(c.green(`${r.fixedCount} finding${r.fixedCount === 1 ? '' : 's'} closed since the last check.`));
+  return blocking.length ? 1 : 0;
+}
+
 /** `fortis mobile <app.apk|app.aab|app.ipa>`: what a built app gives away to anyone who downloads it. */
 async function cmdMobile(args: string[], flags: Flags): Promise<number> {
   const target = args[0];
@@ -710,7 +747,7 @@ async function cmdMobile(args: string[], flags: Flags): Promise<number> {
   }
   printReport(
     { detections: result.detections, filesScanned: result.read, packagesChecked: 0, durationMs: Date.now() - started, notes: result.notes, incompleteChecks: [], partial: [] },
-    { failOn, prePush: false, packs: [`${result.kind} app`, 'secrets', 'mobile'] },
+    { failOn, prePush: false, packs: [`${result.kind} app`, 'secrets and mobile checks'], kind: 'mobile' },
   );
   for (const n of result.notes) log(c.grey(`note: ${n}`));
   return blocking.length ? 1 : 0;
@@ -974,6 +1011,8 @@ async function main(): Promise<number> {
     }
     case 'update':
       return cmdUpdate(args);
+    case 'exposure':
+      return cmdExposure(flags);
     case 'mobile':
       return cmdMobile(args, flags);
     case 'doctor':

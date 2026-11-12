@@ -9,7 +9,7 @@ import { maskSnippet, maskText } from '../lib/mask';
 /** Who a scan belongs to. CLI uploads come with a key; server-side checks (exposure) have none. */
 export type IngestAuth = { orgId: string; projectId: string; tokenId: string | null };
 /** A scan to record: what the CLI uploads, or a server-side exposure check. */
-export type IngestInput = Omit<CliScanInput, 'kind'> & { kind: CliScanInput['kind'] | 'exposure' };
+export type IngestInput = Omit<CliScanInput, 'kind' | 'trigger'> & { kind: CliScanInput['kind'] | 'exposure'; trigger: CliScanInput['trigger'] | 'schedule' };
 
 export type IngestResult = {
   scanId: string;

@@ -216,8 +216,8 @@ afterEach(() => {
 async function setup(plan = 'core') {
   const c = await signup(app);
   await setPlan(c.orgId, plan);
-  const { projectId } = await projectWithKey(c);
-  return { c, projectId, base: `/v1/orgs/${c.orgId}/projects/${projectId}/targets` };
+  const { projectId, key } = await projectWithKey(c);
+  return { c, projectId, key, base: `/v1/orgs/${c.orgId}/projects/${projectId}/targets` };
 }
 
 async function target(c: Client, base: string, { verify = true, authorize = true } = {}) {
@@ -299,3 +299,83 @@ describe('exposure routes', () => {
     expect(res.statusCode).toBe(402);
   });
 });
+
+const CRON = 'test-cron-secret-that-is-at-least-32-characters';
+
+describe('scheduled exposure checks', () => {
+  async function readyWithSsh() {
+    const env = await setup();
+    const id = await target(env.c, env.base);
+    const ssh = await fake(() => null, 'SSH-2.0-OpenSSH_9.6\r\n');
+    setExposureProbeOptions({ resolve: async () => ['127.0.0.1'], allowPrivate: true, pages: [], services: [svc(22)], dialPort: () => ssh, timeoutMs: 800 });
+    return { ...env, id };
+  }
+  const runDue = (secret: string | null = CRON) => app.inject({ method: 'POST', url: '/v1/internal/exposure/run-due', headers: secret ? { 'x-fortis-cron': secret } : {} });
+
+  it('needs the cron secret', async () => {
+    expect((await runDue(null)).statusCode).toBe(401);
+    expect((await runDue('wrong-secret-wrong-secret-wrong-secret!!')).statusCode).toBe(401);
+  });
+
+  it('runs targets whose schedule is on and due, and not the others', async () => {
+    const { c, base, id } = await readyWithSsh();
+    expect((await runDue()).json()).toMatchObject({ due: 0, ran: [] });
+
+    const set = await c.req({ method: 'PUT', url: `${base}/${id}/exposure/schedule`, payload: { schedule: 'daily' } });
+    expect(set.json()).toEqual({ schedule: 'daily' });
+    expect((await c.req({ method: 'GET', url: `${base}/${id}/exposure` })).json().schedule).toBe('daily');
+
+    const first = (await runDue()).json();
+    expect(first.ran).toEqual([expect.objectContaining({ targetId: id, findings: 1, newCount: 1 })]);
+    // Just checked: not due again until tomorrow.
+    expect((await runDue()).json()).toMatchObject({ due: 0, ran: [] });
+    const shown = (await c.req({ method: 'GET', url: `${base}/${id}/exposure` })).json();
+    expect(shown.lastScan.trigger).toBe('schedule');
+
+    // A day later it is due again; a weekly schedule isn't.
+    await pool.query("update targets set exposure_checked_at = now() - interval '21 hours' where id = $1", [id]);
+    expect((await runDue()).json().ran).toHaveLength(1);
+    await c.req({ method: 'PUT', url: `${base}/${id}/exposure/schedule`, payload: { schedule: 'weekly' } });
+    await pool.query("update targets set exposure_checked_at = now() - interval '2 days' where id = $1", [id]);
+    expect((await runDue()).json()).toMatchObject({ due: 0 });
+    await pool.query("update targets set exposure_checked_at = now() - interval '7 days' where id = $1", [id]);
+    expect((await runDue()).json().ran).toHaveLength(1);
+  });
+
+  it('skips paused targets and targets on a plan without running-app tests', async () => {
+    const { c, base, id } = await readyWithSsh();
+    await c.req({ method: 'PUT', url: `${base}/${id}/exposure/schedule`, payload: { schedule: 'daily' } });
+    await c.req({ method: 'POST', url: `${base}/${id}/pause` });
+    expect((await runDue()).json()).toMatchObject({ due: 0, ran: [] });
+    await c.req({ method: 'POST', url: `${base}/${id}/resume` });
+    await setPlan(c.orgId, 'free');
+    expect((await runDue()).json()).toMatchObject({ ran: [], skipped: [{ targetId: id, reason: 'PLAN_EXPOSURE' }] });
+  });
+
+  it('only lets admins change the schedule, and checks the value', async () => {
+    const { c, base, id } = await readyWithSsh();
+    expect((await c.req({ method: 'PUT', url: `${base}/${id}/exposure/schedule`, payload: { schedule: 'hourly' } })).statusCode).toBe(400);
+  });
+});
+
+describe('fortis exposure (CLI route)', () => {
+  const cli = (key: string, body: object = {}) => app.inject({ method: 'POST', url: '/v1/cli/exposure', headers: { authorization: `Bearer ${key}` }, payload: body });
+
+  it('runs on the project\'s only ready target, or the one named, with the same safeguards', async () => {
+    const { c, base, key } = await setup();
+    expect((await cli(key)).json().error.code).toBe('TARGET_REQUIRED');
+    const id = await target(c, base);
+    const redis = await fake((d) => (/PING/.test(d) ? '+PONG\r\n' : null));
+    setExposureProbeOptions({ resolve: async () => ['127.0.0.1'], allowPrivate: true, pages: [], services: [svc(6379)], dialPort: () => redis, timeoutMs: 800 });
+    const res = await cli(key);
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toMatchObject({ url: 'https://staging.paywave.example', newCount: 1 });
+    expect(res.json().findings[0].ruleId).toBe('EXP-NOAUTH-001');
+    expect((await cli(key, { url: 'https://staging.paywave.example/any/path' })).statusCode).toBe(200);
+    expect((await cli(key, { url: 'https://other.example' })).statusCode).toBe(404);
+    await c.req({ method: 'POST', url: `${base}/${id}/pause` });
+    expect((await cli(key, { url: 'https://staging.paywave.example' })).json().error.code).toBe('TARGET_NOT_READY');
+    expect((await cli('fts_not_a_real_key')).statusCode).toBe(401);
+  });
+});
+

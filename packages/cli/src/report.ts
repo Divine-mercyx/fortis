@@ -7,13 +7,18 @@ import { c, log, sevColour } from './ui';
 
 const LABEL: Record<Severity, string> = { critical: 'CRITICAL', high: 'HIGH', medium: 'MEDIUM', low: 'LOW', info: 'INFO' };
 
-export function printReport(result: ScanResult, opts: { failOn: Severity; prePush: boolean; packs: readonly string[] }) {
+/** What the report is about: a code scan (the default), a built app, or a host's exposure. */
+type ReportKind = 'scan' | 'mobile' | 'exposure';
+
+export function printReport(result: ScanResult, opts: { failOn: Severity; prePush: boolean; packs: readonly string[]; kind?: ReportKind }) {
+  const kind = opts.kind ?? 'scan';
   const { detections } = result;
   const counts = { critical: 0, high: 0, medium: 0, low: 0, info: 0 } as Record<Severity, number>;
   for (const d of detections) counts[d.severity]++;
   const blocking = detections.filter((d) => meetsThreshold(d.severity, opts.failOn));
 
-  log(c.grey(`fortis ▸ ${opts.packs.join(' · ')} rules · ${result.filesScanned} file${result.filesScanned === 1 ? '' : 's'}${result.packagesChecked ? ` · ${result.packagesChecked} packages` : ''} · ${result.durationMs} ms`));
+  const counted = kind === 'exposure' ? `${result.filesScanned} ports, plus admin pages and files, checked` : kind === 'mobile' ? `${result.filesScanned} file${result.filesScanned === 1 ? '' : 's'} read from the app` : `${result.filesScanned} file${result.filesScanned === 1 ? '' : 's'}`;
+  log(c.grey(`fortis ▸ ${opts.packs.join(' · ')}${kind === 'scan' ? ' rules' : ''} · ${counted}${result.packagesChecked ? ` · ${result.packagesChecked} packages` : ''} · ${result.durationMs} ms`));
   log('');
 
   if (!detections.length) {
@@ -33,7 +38,9 @@ export function printReport(result: ScanResult, opts: { failOn: Severity; prePus
   if (detections.length > 50) log(c.grey(`  …and ${detections.length - 50} more. Use --json for the full list.`));
 
   log('');
-  if (blocking.length) {
+  if (blocking.length && kind !== 'scan') {
+    log(c.grey(kind === 'exposure' ? 'Fix the issues above, then run fortis exposure again: closed ports and removed pages are marked fixed.' : 'Fix the issues above, rebuild the app, and check the new build.'));
+  } else if (blocking.length) {
     log(c.grey('Fix the issues above and push again.'));
     const comment = detections.every((d) => /\.py$/i.test(d.file)) ? '# fortis-ignore' : detections.some((d) => /\.py$/i.test(d.file)) ? '// fortis-ignore (# in Python)' : '// fortis-ignore';
     log(c.grey(`Reviewed and safe? Add  ${comment}  to the line. Emergency only: git push --no-verify`));

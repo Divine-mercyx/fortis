@@ -1,0 +1,42 @@
+# Runs the exposure checks customers have scheduled (daily or weekly) on their verified targets.
+# The API decides what is due and checks every safeguard again (verified domain, signed
+# authorisation, not paused, plan); this job only knocks. One run a day, so it costs almost nothing.
+#
+# Needs the repository secret FORTIS_CRON_SECRET, equal to CRON_SECRET on the API service.
+name: Scheduled exposure checks
+
+on:
+  schedule:
+    # 02:13 UTC = 03:13 in Lagos, outside working hours.
+    - cron: '13 2 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  run-due:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Run the checks that are due
+        env:
+          API_URL: ${{ vars.FORTIS_API_URL || 'https://fortis-api-prqr.onrender.com' }}
+          CRON_SECRET: ${{ secrets.FORTIS_CRON_SECRET }}
+        run: |
+          if [ -z "$CRON_SECRET" ]; then
+            echo "::notice::FORTIS_CRON_SECRET isn't set, so scheduled exposure checks are off."
+            exit 0
+          fi
+          # A free Render service may be asleep: wake it first.
+          for i in 1 2 3 4 5 6; do
+            code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 90 "$API_URL/health" || true)
+            [ "$code" = "200" ] && break
+            sleep 20
+          done
+          # Each call runs up to 25 due targets; keep calling until none remain (at most 8 rounds).
+          for round in 1 2 3 4 5 6 7 8; do
+            out=$(curl -sS --fail-with-body --max-time 900 -X POST "$API_URL/v1/internal/exposure/run-due" -H "x-fortis-cron: $CRON_SECRET")
+            echo "$out" | jq -c '{due, ran: (.ran | length), skipped: (.skipped | length), remaining}'
+            [ "$(echo "$out" | jq '.remaining')" = "0" ] && break
+          done

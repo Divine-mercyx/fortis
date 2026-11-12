@@ -794,8 +794,12 @@ h1, h2, h3, h4 { color: var(--ink); margin: 0; font-weight: 800; letter-spacing:
 .target-body { padding: 14px 18px; border-top: 1px solid var(--line); background: var(--tint-blue); }
 .exposure { margin-top: 14px; padding-top: 14px; border-top: 1px dashed var(--line-2, var(--line)); }
 .exposure-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
-.exposure-head > div { display: grid; gap: 2px; min-width: 0; }
+.exposure-head > div:first-child { display: grid; gap: 2px; min-width: 0; }
 .exposure-head b { font-size: 14px; }
+.exposure-actions { display: flex; align-items: center; gap: 10px; flex: none; }
+.exposure-actions .small { white-space: nowrap; }
+.exposure-schedule { display: inline-flex; align-items: center; gap: 8px; }
+.exposure-schedule .input { width: auto; height: 34px; padding: 0 10px; font-size: 13px; }
 .exposure-list { list-style: none; margin: 12px 0 0; padding: 0; display: grid; gap: 8px; }
 .exposure-list li { display: flex; align-items: flex-start; gap: 10px; padding: 10px 12px; border-radius: 12px; background: var(--surface); border: 1px solid var(--line); }
 .exposure-list li > span:last-child { display: grid; gap: 3px; min-width: 0; }

@@ -14,6 +14,7 @@ export default defineConfig({
       WEB_ORIGINS: 'http://localhost:3000',
       WEB_URL: 'http://localhost:3000',
       AUTH_RATE_LIMIT_PER_MIN: '1000',
+      CRON_SECRET: 'test-cron-secret-that-is-at-least-32-characters',
     },
   },
 });
