@@ -8,12 +8,13 @@ import { PLANS, PLAN_IDS } from '@fortis/shared';
 import { Check, Plus, Users } from '@/components/icons';
 import { Words } from '@/components/motion';
 import { useSession } from '@/components/session';
+import { TwoFactorCard } from '@/components/two-factor';
 import { Empty, FormError, Modal, Skeleton, useToast } from '@/components/ui';
 import { api, fetcher } from '@/lib/api';
 import { dateTime, initials, naira, timeAgo } from '@/lib/format';
 
 type OrgInfo = { org: { id: string; name: string; plan: string }; role: string; plan: { id: string; name: string; maxProjects: number | null; maxSeats: number | null }; usage: { projects: number; seats: number } };
-type Member = { userId: string; name: string; email: string; role: string; joinedAt: string };
+type Member = { userId: string; name: string; email: string; role: string; joinedAt: string; twoFactorEnabled?: boolean };
 type AuditEntry = { id: number; action: string; targetType: string | null; meta: Record<string, unknown> | null; ip: string | null; createdAt: string; actor: string | null };
 
 const ROLE_TEXT: Record<string, string> = {
@@ -69,7 +70,7 @@ export default function SettingsPage() {
   const isAdmin = org.role === 'owner' || org.role === 'admin';
   const { data: info, mutate: refreshInfo } = useSWR<OrgInfo>(`/v1/orgs/${org.id}`, fetcher);
   const { data: members, mutate: refreshMembers } = useSWR<{ members: Member[] }>(`/v1/orgs/${org.id}/members`, fetcher);
-  const { data: auditLog } = useSWR<{ entries: AuditEntry[] }>(isAdmin ? `/v1/orgs/${org.id}/audit` : null, fetcher);
+  const { data: auditLog, mutate: refreshAudit } = useSWR<{ entries: AuditEntry[] }>(isAdmin ? `/v1/orgs/${org.id}/audit` : null, fetcher);
   const [adding, setAdding] = useState(false);
   const [name, setName] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -179,6 +180,8 @@ export default function SettingsPage() {
         </div>
       </section>
 
+      <TwoFactorCard onChange={() => { void refresh(); void refreshMembers(); void refreshAudit(); }} />
+
       <section className="card reveal" style={{ ['--d' as string]: '160ms' }}>
         <div className="card-head">
           <h3>Team</h3>
@@ -193,9 +196,10 @@ export default function SettingsPage() {
                 <span className="ic" style={{ borderRadius: '50%', background: 'var(--navy)', color: '#fff', fontWeight: 800, fontSize: 12 }}>{initials(m.name)}</span>
                 <span style={{ minWidth: 0 }}>
                   <strong style={{ color: 'var(--ink)' }}>{m.name}{m.userId === user.id ? ' (you)' : ''}</strong>
-                  <span className="small" style={{ display: 'block' }}>{m.email}</span>
+                  <span className="small" style={{ display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={m.email}>{m.email}</span>
                 </span>
                 <span className="meta" style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
+                  {m.twoFactorEnabled ? <span className="pill p-ok" title="Signs in with an authenticator app">2FA</span> : isAdmin ? <span className="pill p-mute" title="Signs in with a password only">No 2FA</span> : null}
                   <span className="pill p-mute">{m.role}</span>
                   {isAdmin && m.userId !== user.id ? <button className="btn btn-danger btn-sm" onClick={() => remove(m)}>Remove</button> : null}
                 </span>

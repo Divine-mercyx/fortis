@@ -2,6 +2,18 @@ import { keepAliveFromEnv, startKeepAlive } from '@fortis/shared';
 
 import { buildApp } from './app';
 import { env } from './config/env';
+import { runMigrations } from './db/migrate';
+
+// Apply pending migrations before serving, so a deploy never runs code against an older schema.
+// Set MIGRATE_ON_START=false to run `pnpm db:migrate` yourself instead.
+if (env.MIGRATE_ON_START) {
+  try {
+    await runMigrations();
+  } catch (err) {
+    console.error('Database migrations failed; not starting.', err);
+    process.exit(1);
+  }
+}
 
 const app = await buildApp();
 try {

@@ -27,6 +27,22 @@ export const loginSchema = z.object({
   password: z.string().min(1).max(200),
 });
 
+/* ---------- Two-factor authentication ---------- */
+
+/** A six-digit authenticator code, or a recovery code (xxxx-xxxx). Spaces are ignored. */
+export const twoFactorCode = z.string().trim().min(6).max(20);
+
+/** The second step of a sign-in: the challenge the password step returned, and a code. */
+export const loginTwoFactorSchema = z.object({
+  challenge: z.string().min(20).max(200),
+  code: twoFactorCode,
+});
+
+export const twoFactorConfirmSchema = z.object({ code: twoFactorCode });
+
+/** Turning 2FA off needs the password and a current code, so a borrowed session can't do it. */
+export const twoFactorDisableSchema = z.object({ password: z.string().min(1).max(200), code: twoFactorCode });
+
 /* ---------- Projects and tokens ---------- */
 
 export const createProjectSchema = z.object({

@@ -979,3 +979,18 @@ h1, h2, h3, h4 { color: var(--ink); margin: 0; font-weight: 800; letter-spacing:
 .status-note { margin-top: 16px !important; font-size: 13.5px; color: #93A0B8; }
 .net-bar { position: fixed; left: 50%; bottom: 20px; z-index: 140; transform: translateX(-50%); display: flex; align-items: center; gap: 10px; max-width: calc(100vw - 32px); padding: 12px 18px; border-radius: 999px; background: var(--navy); color: #fff; font-size: 14px; font-weight: 700; box-shadow: 0 14px 40px rgba(7, 22, 50, .35); }
 .net-bar::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: #F2C46D; flex: none; }
+
+/* ---------- Two-factor authentication ---------- */
+.code-input { font-family: var(--mono, ui-monospace, SFMono-Regular, Menlo, monospace); font-size: 22px; letter-spacing: .35em; text-align: center; height: 56px; }
+.code-input.recovery { font-size: 18px; letter-spacing: .12em; }
+.two-factor { display: flex; gap: 16px; align-items: flex-start; }
+.two-factor > .ic { flex: none; width: 40px; height: 40px; border-radius: 11px; display: grid; place-items: center; background: var(--green-tint); color: var(--green); }
+.two-factor > .ic svg { width: 20px; height: 20px; }
+.steps-2fa { list-style: none; counter-reset: s; padding: 0; margin: 4px 0 0; display: grid; gap: 18px; }
+.steps-2fa > li { counter-increment: s; display: grid; gap: 10px; }
+.steps-2fa > li > strong::before { content: counter(s) '. '; color: var(--green); }
+.qr-box { display: grid; place-items: center; padding: 12px; border: 1px solid var(--line); border-radius: 14px; background: #fff; width: max-content; }
+.qr-box img { display: block; image-rendering: pixelated; }
+.recovery-grid { list-style: none; padding: 14px; margin: 0; display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px 18px; border: 1px dashed var(--line-2); border-radius: 12px; background: var(--surface-2); font-size: 15px; }
+.recovery-actions { display: flex; gap: 10px; align-items: center; margin-top: 10px; }
+@media (max-width: 420px) { .recovery-grid { grid-template-columns: 1fr; } .two-factor { flex-direction: column; } }

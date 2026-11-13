@@ -1,5 +1,5 @@
 export type Org = { id: string; name: string; slug: string; plan: string; planName: string; role: string };
-export type User = { id: string; email: string; name: string };
+export type User = { id: string; email: string; name: string; twoFactorEnabled?: boolean };
 export type Me = { user: User; orgs: Org[] };
 
 export type FindingRow = {
