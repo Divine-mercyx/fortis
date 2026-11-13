@@ -45,6 +45,7 @@ Tests drop and recreate the schema of the database in `TEST_DATABASE_URL`
 | Area | Endpoints |
 |---|---|
 | Accounts | `POST /v1/auth/signup`, `POST /v1/auth/login`, `POST /v1/auth/logout`, `GET /v1/auth/me` |
+| Two-factor | `POST /v1/auth/login/2fa`, `GET /v1/auth/2fa`, `POST /v1/auth/2fa/setup`, `…/enable`, `…/recovery-codes`, `…/disable` |
 | Organisation | `GET/PATCH /v1/orgs/:orgId`, members: `GET/POST /v1/orgs/:orgId/members`, `DELETE …/members/:userId` |
 | Projects | `GET/POST /v1/orgs/:orgId/projects`, `GET/DELETE …/projects/:projectId` |
 | CLI keys | `GET/POST …/projects/:projectId/tokens`, `DELETE …/tokens/:tokenId` |
@@ -59,6 +60,7 @@ The CLI authenticates with `Authorization: Bearer fts_…`. The dashboard uses a
 - **Roles:** owner > admin > developer > viewer. Admins manage projects, keys and members; developers change finding status; viewers read.
 - **Keys and sessions** are random secrets stored only as SHA-256 hashes. A CLI key is shown once.
 - **Passwords** use argon2id. Login errors don't reveal whether an email exists.
+- **Two-factor sign-in:** any user can turn on an authenticator app (Google Authenticator, Microsoft Authenticator, 1Password, Authy) in Settings. The password then only earns a five-minute challenge with five tries; the session cookie comes after a six-digit code (RFC 6238) or one of ten single-use recovery codes. Each code works once. Secrets are encrypted with AES-256-GCM (`TWO_FACTOR_KEY`), recovery codes are stored as hashes, and turning it off needs the password and a code. Admins see who has it on in the Team list, and turning it on or off, or using a recovery code, goes in the audit log.
 - **CSRF:** cookie-authenticated writes must come from an allowed origin, and only JSON bodies are accepted.
 - **No source code:** findings carry a masked line of at most 300 characters. The API masks secrets and BVN/NIN again on arrival.
 - **Rule packs** are signed with Ed25519 (`RULES_SIGNING_PRIVATE_KEY`); the CLI verifies them with the published public key.
@@ -101,7 +103,8 @@ The CLI package name shown in the dashboard is set in `apps/web/src/lib/cli.ts`.
 1. Create the database and set `DATABASE_URL` (and `DATABASE_SSL=true` for DigitalOcean managed Postgres).
 2. Generate a rule-signing key with `pnpm --filter @fortis/api keys:rules` and store the private key as `RULES_SIGNING_PRIVATE_KEY`.
 3. Set `WEB_ORIGINS` and `WEB_URL` to the dashboard address, and `NODE_ENV=production`.
-4. Run `pnpm db:migrate`, then `pnpm --filter @fortis/api start`.
+4. Set `TWO_FACTOR_KEY` to a random value of at least 32 characters (`openssl rand -base64 32`). It encrypts authenticator secrets; without it a key is derived from the rule-signing key.
+5. Start it with `pnpm --filter @fortis/api start`. Pending migrations run first; set `MIGRATE_ON_START=false` to run `pnpm db:migrate` yourself.
 
 ### Keeping free Render services awake
 

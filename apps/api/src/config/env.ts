@@ -23,6 +23,10 @@ const schema = z.object({
   LOG_LEVEL: z.string().default('info'),
   /** Shared secret for scheduled jobs (POST /v1/internal/exposure/run-due). Unset turns the route off. */
   CRON_SECRET: z.preprocess((v) => (v === '' ? undefined : v), z.string().min(32).optional()),
+  /** Apply pending database migrations when the server starts. */
+  MIGRATE_ON_START: z.enum(['true', 'false']).default('true').transform((v) => v === 'true'),
+  /** Encrypts authenticator secrets. Unset, a key is derived from RULES_SIGNING_PRIVATE_KEY. */
+  TWO_FACTOR_KEY: z.preprocess((v) => (v === '' ? undefined : v), z.string().min(32).optional()),
 });
 
 const parsed = schema.safeParse(process.env);

@@ -1,5 +1,6 @@
 import { sql } from 'drizzle-orm';
 import {
+  bigint,
   bigserial,
   index,
   integer,
@@ -25,9 +26,47 @@ export const users = pgTable(
     name: text('name').notNull(),
     passwordHash: text('password_hash').notNull(),
     emailVerifiedAt: timestamp('email_verified_at', { withTimezone: true }),
+    /** Authenticator secret, sealed (lib/secret-box). Set once 2FA is turned on. */
+    twoFactorSecret: text('two_factor_secret'),
+    /** A secret being set up: replaced by twoFactorSecret once the first code is confirmed. */
+    twoFactorPendingSecret: text('two_factor_pending_secret'),
+    twoFactorEnabledAt: timestamp('two_factor_enabled_at', { withTimezone: true }),
+    /** The time step of the last code accepted, so a code can't be used twice. */
+    twoFactorLastStep: bigint('two_factor_last_step', { mode: 'number' }),
     createdAt: createdAt(),
   },
   (t) => [uniqueIndex('users_email_key').on(sql`lower(${t.email})`)],
+);
+
+/** One-time recovery codes for when the phone with the authenticator is lost. Only hashes are kept. */
+export const recoveryCodes = pgTable(
+  'recovery_codes',
+  {
+    id: id(),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    codeHash: text('code_hash').notNull(),
+    usedAt: timestamp('used_at', { withTimezone: true }),
+    createdAt: createdAt(),
+  },
+  (t) => [index('recovery_codes_user_idx').on(t.userId)],
+);
+
+/** A password that was right, waiting for its authenticator code. Five minutes and five tries. */
+export const loginChallenges = pgTable(
+  'login_challenges',
+  {
+    id: id(),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    tokenHash: text('token_hash').notNull(),
+    attempts: integer('attempts').notNull().default(0),
+    expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [uniqueIndex('login_challenges_token_hash_key').on(t.tokenHash)],
 );
 
 export const sessions = pgTable(

@@ -12,6 +12,7 @@ import { dummyHash, hashPassword, verifyPassword } from '../lib/password';
 import { slugWithSuffix } from '../lib/slug';
 import { parse } from '../lib/validate';
 import { requireUser, SESSION_COOKIE, startSession } from '../plugins/auth';
+import { startLoginChallenge } from './two-factor.routes';
 
 const authRateLimit = { rateLimit: { max: env.AUTH_RATE_LIMIT_PER_MIN, timeWindow: '1 minute' } };
 
@@ -43,7 +44,7 @@ export async function authRoutes(app: FastifyInstance) {
 
     await startSession(req, reply, result.user.id);
     return reply.code(201).send({
-      user: { id: result.user.id, email: result.user.email, name: result.user.name },
+      user: { id: result.user.id, email: result.user.email, name: result.user.name, twoFactorEnabled: false },
       orgs: await listUserOrgs(result.user.id),
     });
   });
@@ -53,8 +54,10 @@ export async function authRoutes(app: FastifyInstance) {
     const [user] = await db.select().from(users).where(sql`lower(${users.email}) = ${input.email}`).limit(1);
     const ok = await verifyPassword(user?.passwordHash ?? (await dummyHash()), input.password);
     if (!user || !ok) throw unauthorized('Email or password is incorrect.', 'INVALID_CREDENTIALS');
+    // With 2FA on, the password only earns a challenge; the session comes from POST /v1/auth/login/2fa.
+    if (user.twoFactorEnabledAt) return { twoFactorRequired: true, challenge: await startLoginChallenge(user.id) };
     await startSession(req, reply, user.id);
-    return { user: { id: user.id, email: user.email, name: user.name }, orgs: await listUserOrgs(user.id) };
+    return { user: { id: user.id, email: user.email, name: user.name, twoFactorEnabled: false }, orgs: await listUserOrgs(user.id) };
   });
 
   app.post('/v1/auth/logout', async (req, reply) => {
@@ -65,6 +68,7 @@ export async function authRoutes(app: FastifyInstance) {
 
   app.get('/v1/auth/me', async (req) => {
     const user = requireUser(req);
-    return { user, orgs: await listUserOrgs(user.id) };
+    const [row] = await db.select({ on: users.twoFactorEnabledAt }).from(users).where(eq(users.id, user.id)).limit(1);
+    return { user: { ...user, twoFactorEnabled: Boolean(row?.on) }, orgs: await listUserOrgs(user.id) };
   });
 }

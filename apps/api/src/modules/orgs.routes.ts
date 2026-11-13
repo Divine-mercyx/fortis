@@ -60,12 +60,13 @@ export async function orgRoutes(app: FastifyInstance) {
     const { orgId } = parse(orgParams, req.params);
     await requireOrgRole(req, orgId, 'viewer');
     const members = await db
-      .select({ userId: users.id, name: users.name, email: users.email, role: memberships.role, joinedAt: memberships.createdAt })
+      .select({ userId: users.id, name: users.name, email: users.email, role: memberships.role, joinedAt: memberships.createdAt, twoFactorAt: users.twoFactorEnabledAt })
       .from(memberships)
       .innerJoin(users, eq(users.id, memberships.userId))
       .where(eq(memberships.orgId, orgId))
       .orderBy(memberships.createdAt);
-    return { members };
+    // Whether each member signs in with an authenticator app, so admins can see who still uses only a password.
+    return { members: members.map(({ twoFactorAt, ...m }) => ({ ...m, twoFactorEnabled: Boolean(twoFactorAt) })) };
   });
 
   app.post('/v1/orgs/:orgId/members', async (req, reply) => {
