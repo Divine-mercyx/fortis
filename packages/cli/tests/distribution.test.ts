@@ -7,7 +7,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 
 // @ts-expect-error a plain script with no type declarations
 import { homebrewFormula, parseSums, scoopManifest, wingetManifests, writeManifests } from '../scripts/package-manifests.mjs';
-import { assetName, expectedHash, installKind, latestVersion, replaceBinary, selfUpdate, UPDATE_HINT, updateCheckEnabled, updateNotice } from '../src/update';
+import { assetName, expectedHash, installKind, latestVersion, removeLeftovers, replaceBinary, retryLocked, selfUpdate, UPDATE_HINT, updateCheckEnabled, updateNotice } from '../src/update';
 
 const dirs: string[] = [];
 const temp = () => {
@@ -99,6 +99,40 @@ describe('replacing the binary', () => {
     writeFileSync(join(d, 'new'), 'fresh');
     replaceBinary(join(d, 'fortis.exe'), join(d, 'new'), 'win32');
     expect(readFileSync(join(d, 'fortis.exe'), 'utf8')).toBe('fresh');
+  });
+
+  it('waits out a file Windows still holds, then gives up on other errors', () => {
+    const locked = (code: string) => Object.assign(new Error(code), { code });
+    const waits: number[] = [];
+    let calls = 0;
+    const flaky = () => {
+      if (++calls < 3) throw locked('EBUSY');
+      return 'moved';
+    };
+    expect(retryLocked(flaky, 'win32', (ms) => waits.push(ms))).toBe('moved');
+    expect(waits).toEqual([100, 200]);
+    // Another error, or another system, fails at once.
+    expect(() => retryLocked(() => { throw locked('ENOENT'); }, 'win32', () => waits.push(-1))).toThrow('ENOENT');
+    expect(() => retryLocked(() => { throw locked('EBUSY'); }, 'linux', () => waits.push(-1))).toThrow('EBUSY');
+    expect(waits).toEqual([100, 200]);
+    // A file that stays locked fails after about six seconds, not forever.
+    const spent: number[] = [];
+    expect(() => retryLocked(() => { throw locked('EPERM'); }, 'win32', (ms) => spent.push(ms))).toThrow('EPERM');
+    expect(spent.length).toBe(11);
+    expect(spent.reduce((a, b) => a + b, 0)).toBeLessThanOrEqual(6000);
+  });
+
+  it('clears work folders an earlier update could not delete, and nothing else', () => {
+    const d = temp();
+    mkdirSync(join(d, '.fortis-update-abc123'));
+    writeFileSync(join(d, '.fortis-update-abc123', 'fortis.exe'), 'stale');
+    writeFileSync(join(d, 'fortis.exe'), 'current');
+    writeFileSync(join(d, 'other-tool.exe'), 'keep');
+    removeLeftovers(d);
+    expect(existsSync(join(d, '.fortis-update-abc123'))).toBe(false);
+    expect(readFileSync(join(d, 'fortis.exe'), 'utf8')).toBe('current');
+    expect(existsSync(join(d, 'other-tool.exe'))).toBe(true);
+    removeLeftovers(join(d, 'missing'));
   });
 
   it('puts the old one back on Windows if the new one can not move', () => {

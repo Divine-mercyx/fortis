@@ -95,7 +95,9 @@ export async function runScan(opts: ScanOptions): Promise<ScanResult> {
   // Repository-wide facts (e.g. idempotency middleware defined elsewhere), even for pre-push scans.
   const ctxPaths = (opts.scope === 'full' ? candidates : everything().filter(keep)).filter((p) => (JS_TS.test(p) || PYTHON.test(p)) && !TEST_PATH.test(p));
   const ctx = buildContextFrom(opts.root, ctxPaths);
-  ctx.project = createProject(ctxPaths, (p) => readSource(opts.root, p));
+  // Go, C#, PHP, Java and Kotlin files join the project too, so a route can be followed into its controller.
+  const otherPaths = (opts.scope === 'full' ? candidates : everything().filter(keep)).filter((p) => OTHER_LANGUAGES.test(p) && !TEST_PATH.test(p));
+  ctx.project = createProject([...ctxPaths, ...otherPaths], (p) => readSource(opts.root, p));
   // Terraform variables and locals, so a rule can judge `cidr_blocks = var.admin_cidrs`.
   const tfPaths = (opts.scope === 'full' ? candidates : everything().filter(keep)).filter((p) => /\.(?:tf|tfvars)$/i.test(p));
   if (tfPaths.length) ctx.terraform = terraformValues(tfPaths.map((p) => readSource(opts.root, p)).filter((f): f is SourceFile => f !== null));

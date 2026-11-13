@@ -113,16 +113,33 @@ function routeAnnotationLine(file: SourceFile, fn: Fn): number | null {
   return null;
 }
 
+/**
+ * The annotation or attribute lines above a declaration. An attribute can wrap:
+ * `[Authorize(Policy = …,` then `AuthenticationSchemes = …)]` on the next line.
+ */
+function attributeLines(lines: string[], decl: number): string[] {
+  const out: string[] = [];
+  for (let k = decl - 1; k >= Math.max(0, decl - 10); k--) {
+    const a = lines[k]!;
+    if (!a.trim() || /[;{}]\s*$/.test(a) || /^\s*(?:\/\/|\*|\/\*)/.test(a)) break;
+    if (!/^\s*[@[#]/.test(a) && !/[,(]\s*$/.test(lines[k - 1] ?? '') && !/^\s*[\w.]+\s*=/.test(a) && !/\)\s*\]?\s*$/.test(a)) break;
+    out.push(a);
+  }
+  // Back in source order, so a wrapped attribute reads as written.
+  return out.reverse();
+}
+
 /** The class an annotation-routed method is in: its prefix and its own attributes (rate limits, throttles). */
-function classPrefix(file: SourceFile, fn: Fn): { prefix: string; attrs: string } {
+function classPrefix(file: SourceFile, fn: Fn): { prefix: string; attrs: string; partialClass?: string } {
   let attrs = '';
   let prefix = '';
+  let partialClass: string | undefined;
   for (let i = fn.start - 2; i >= 0; i--) {
     const l = file.lines[i]!;
-    if (/^\s*(?:public\s+|internal\s+|abstract\s+|open\s+|final\s+)*(?:class|object)\s+\w+/.test(l)) {
-      for (let k = i - 1; k >= Math.max(0, i - 8); k--) {
-        const a = file.lines[k]!;
-        if (!/^\s*[@[#]/.test(a)) break;
+    const decl = /^\s*(?:(?:public|internal|private|protected|abstract|open|final|sealed|partial|static|data)\s+)*(?:class|object)\s+(\w+)/.exec(l);
+    if (decl) {
+      if (/\bpartial\s+class\b/.test(l)) partialClass = decl[1];
+      for (const a of attributeLines(file.lines, i)) {
         attrs += `${a}\n`;
         const p = /@RequestMapping\s*\(\s*(?:(?:value|path)\s*=\s*)?["']([^"']*)["']|\[Route\s*\(\s*"([^"]*)"|#\[Route\s*\(\s*['"]([^'"]+)['"]/.exec(a);
         if (p) prefix = (p[1] ?? p[2] ?? p[3] ?? '').replace(/\[controller\]/i, '');
@@ -130,7 +147,32 @@ function classPrefix(file: SourceFile, fn: Fn): { prefix: string; attrs: string 
       break;
     }
   }
-  return { prefix, attrs };
+  return { prefix, attrs, ...(partialClass ? { partialClass } : {}) };
+}
+
+/**
+ * The attributes on the other parts of a C# partial class. They apply to every part, so
+ * `[Authorize(Policy = …)]` on UIServerController.cs covers the methods in UIServerController.Users.cs.
+ */
+function partialClassAttrs(file: SourceFile, name: string, ctx: ProjectContext): string {
+  if (!ctx.project) return '';
+  const dir = file.path.slice(0, file.path.lastIndexOf('/') + 1);
+  let out = '';
+  for (const path of ctx.project.paths) {
+    if (path === file.path || !path.startsWith(dir) || path.slice(dir.length).includes('/')) continue;
+    if (!new RegExp(`^${name}(?:\\.[\\w-]+)?\\.cs$`).test(path.slice(dir.length))) continue;
+    const other = ctx.project.read(path);
+    if (!other) continue;
+    const i = other.lines.findIndex((l) => new RegExp(`\\bpartial\\s+class\\s+${name}\\b`).test(l));
+    if (i > 0) out += attributeLines(other.lines, i).join('\n');
+  }
+  return out;
+}
+
+/** The class's own attributes, plus those on its other partial parts. */
+function classAttrs(file: SourceFile, fn: Fn, ctx: ProjectContext): string {
+  const c = classPrefix(file, fn);
+  return c.partialClass ? `${c.attrs}${partialClassAttrs(file, c.partialClass, ctx)}` : c.attrs;
 }
 
 /* ------------------------------------------------- routes */
@@ -154,24 +196,83 @@ function registeredRoutes(file: SourceFile, lang: Lang): Route[] {
     // The whole statement, which may chain ->middleware(...) or ->RequireRateLimiting(...) on later lines.
     let text = stripComment(raw, lang);
     for (let k = i + 1; k < Math.min(file.lines.length, i + 6) && !/;\s*$|\)\s*$|\{\s*$/.test(text.trim()); k++) text += `\n${stripComment(file.lines[k]!, lang)}`;
-    const handler = /(\w+)\s*\)?\s*$/.exec((m[2] ?? '').replace(/::class\s*,\s*['"](\w+)['"]\s*\]?/, ' $1').trim())?.[1];
+    const args = m[2] ?? '';
+    // Laravel names the method as 'login', [X::class, 'login'] or 'X@login', and may chain ->name(...) after it.
+    const handler =
+      lang === 'php'
+        ? (/::class\s*,\s*['"](\w+)['"]/.exec(args) ?? /^\s*['"](?:[\w\\]+@)?(\w+)['"]/.exec(args))?.[1]
+        : /(\w+)\s*\)?\s*$/.exec(args.trim())?.[1];
     out.push({ line: i + 1, path: m[1]!, handler, text });
   });
   return out;
 }
 
-/** Inside a Laravel `Route::middleware('throttle:…')->group(function () { … })`, or a Go group with a limiter. */
-function insideLimitedGroup(file: SourceFile, line: number): boolean {
+/** The lines that open each group a line sits in, innermost first: `Route::middleware(…)->group(function () {`. */
+function enclosingGroups(file: SourceFile, line: number): string[] {
+  const out: string[] = [];
   let depth = 0;
   for (let i = line - 2; i >= 0 && i > line - 200; i--) {
     const l = file.lines[i]!;
     depth += (l.match(/\}/g) ?? []).length - (l.match(/\{/g) ?? []).length;
     if (depth < 0) {
-      if (LIMITED.test(l) || /throttle/i.test(l)) return true;
+      out.push(l);
       depth = 0;
     }
   }
-  return false;
+  return out;
+}
+
+/** The path prefixes of the Laravel groups a route sits in, outermost first: `prefix('otp')`, `['prefix' => 'api']`. */
+function groupPrefix(file: SourceFile, line: number): string {
+  return enclosingGroups(file, line)
+    .map((l) => /prefix\s*\(\s*['"]([^'"]*)['"]|['"]prefix['"]\s*=>\s*['"]([^'"]*)['"]/.exec(l))
+    .map((m) => (m ? (m[1] ?? m[2] ?? '') : ''))
+    .filter(Boolean)
+    .reverse()
+    .join('/');
+}
+
+/** Inside a Laravel `Route::middleware('throttle:…')->group(function () { … })`, or a Go group with a limiter. */
+const insideLimitedGroup = (file: SourceFile, line: number) => enclosingGroups(file, line).some((l) => LIMITED.test(l) || /throttle/i.test(l));
+
+/**
+ * Routes only staff reach: a role or policy on the route or its class, or an admin path. Staff resetting a
+ * customer's password or unlocking a PIN are actions on someone else's account, not guesses an outsider can make.
+ */
+export const PRIVILEGED =
+  /\[Authorize\s*\([^\]]*\b(?:Roles|Policy)\s*=|@PreAuthorize\s*\(|@Secured\s*\(|@RolesAllowed\s*\(|#\[IsGranted\s*\(|(?:->|::)middleware\s*\([^)]*['"](?:admin|auth:admin|can:[^'"]*|role:[^'"]*|permission:[^'"]*)['"]/i;
+const ADMIN_PATH = /(?:^|\/)(?:admin|backoffice|back-office)(?:\/|$)/i;
+const insidePrivilegedGroup = (file: SourceFile, line: number) => enclosingGroups(file, line).some((l) => PRIVILEGED.test(l) || /prefix\s*\(\s*['"]\/?admin\b/i.test(l));
+
+/** Whether an annotation-routed method needs a staff role: on the method, or on its class unless the method opts out. */
+function privilegedMethod(above: string, classAttrs: string): boolean {
+  if (/\[AllowAnonymous\]|@PermitAll\b/.test(above)) return false;
+  return PRIVILEGED.test(above) || PRIVILEGED.test(classAttrs);
+}
+
+/**
+ * A Laravel route whose handler is a method on a controller in another file:
+ * `Route::post('login', [CustomerController::class, 'login'])`, or `Route::post('login', 'login')` inside
+ * `Route::controller(CustomerController::class)->group(…)`. Returns that method and its whole controller, if found.
+ */
+function laravelHandler(file: SourceFile, route: Route, ctx: ProjectContext): { method: string; controller: string } | null {
+  if (!ctx.project || !route.handler) return null;
+  const cls =
+    /\[\s*\\?(?:[\w\\]+\\)?(\w+)::class\s*,/.exec(route.text)?.[1] ??
+    enclosingGroups(file, route.line).map((l) => /Route::controller\s*\(\s*\\?(?:[\w\\]+\\)?(\w+)::class/.exec(l)?.[1]).find(Boolean);
+  if (!cls) return null;
+  // Prefer the file the `use` statement names; otherwise the only file with that name.
+  const used = new RegExp(`^\\s*use\\s+\\\\?([\\w\\\\]+\\\\${cls})\\s*;`, 'm').exec(file.text)?.[1];
+  const candidates = ctx.project.byName.get(`${cls}.php`) ?? [];
+  // Namespaces don't map to folders one to one (PSR-4 drops `src/`), so take the longest namespace tail a path ends with.
+  const segs = used ? used.split('\\') : [];
+  let path: string | undefined;
+  for (let k = 0; k < segs.length - 1 && !path; k++) path = candidates.find((p) => p.endsWith(`/${segs.slice(k).join('/')}.php`));
+  path ??= candidates.length === 1 ? candidates[0] : undefined;
+  const controller = path ? ctx.project.read(path) : null;
+  if (!controller) return null;
+  const fn = functionsOf(controller, 'php').find((f) => f.name === route.handler);
+  return fn ? { method: fn.text, controller: controller.text } : null;
 }
 
 /** Limits that cover the whole app, in these languages' frameworks. Feeds ProjectContext.rateLimitAll. */
@@ -210,6 +311,7 @@ export const otherRateLimitRule: FileRule = {
       const kind = credentialKind(`${prefix}/${fn.route}`, fn.name);
       if (!kind) continue;
       const above = annotationsAbove(file, fn).join('\n');
+      if (privilegedMethod(above, classAttrs(file, fn, ctx)) || ADMIN_PATH.test(`${prefix}/${fn.route}`)) continue;
       if (LIMITED.test(above) || LIMITED.test(attrs) || LIMITED.test(fn.text) || /EnableRateLimiting|RateLimiter\s*\(|@Throttle|Bucket|tryConsume/.test(`${above}\n${attrs}\n${fn.text}`)) continue;
       if (/\[DisableRateLimiting\]/.test(above)) { report(fn.start, kind); continue; }
       report(routeAnnotationLine(file, fn) ?? fn.start, kind);
@@ -217,12 +319,19 @@ export const otherRateLimitRule: FileRule = {
     // Registered routes: Go routers, minimal APIs, Laravel, Ktor.
     for (const route of registeredRoutes(file, lang)) {
       const handlerFn = route.handler ? fns.find((f) => f.name === route.handler) : undefined;
-      const kind = credentialKind(route.path, route.handler ?? '');
+      const path = lang === 'php' ? `${groupPrefix(file, route.line)}/${route.path}` : route.path;
+      const kind = credentialKind(path, route.handler ?? '');
       if (!kind || /^group$/i.test(route.handler ?? '')) continue;
       // The handler's own body when it's in this file; an inline closure; otherwise just the statement.
       const inline = /function\s*\(|func\s*\(|=>\s*\{|\)\s*\{\s*$/.test(route.text) ? file.lines.slice(route.line - 1, closeBrace(file.lines, route.line - 1) + 1).join('\n') : '';
       const body = handlerFn?.text ?? (inline || route.text);
       if (LIMITED.test(route.text) || /throttle|RequireRateLimiting/i.test(route.text) || LIMITED.test(body) || insideLimitedGroup(file, route.line)) continue;
+      if (PRIVILEGED.test(route.text) || ADMIN_PATH.test(path) || insidePrivilegedGroup(file, route.line)) continue;
+      // A Laravel controller in another file: its method, or the whole controller (ThrottlesLogins, a throttle in the constructor).
+      if (lang === 'php' && !handlerFn) {
+        const found = laravelHandler(file, route, ctx);
+        if (found && (LIMITED.test(found.method) || /\buse\s+ThrottlesLogins\b|middleware\s*\(\s*['"]throttle/.test(found.controller))) continue;
+      }
       report(route.line, kind);
     }
     return out;
@@ -364,7 +473,7 @@ const SINGLE_USE = /\.Delete|\.delete|delete\(|Delete\(|->delete\s*\(|Remove\(|r
 const LOOKUP_BY_CONTACT = /(?:Where|First|Find|Single|Any|filter|where|first|find)\w*\s*\([^)\n]*\b(?:Email|Phone|Username|email|phone|username)\b|(?:Email|email|Phone|phone|Username|username)\b[^\n]{0,40}(?:Where|where|find|Find|First|first|get|Get|By)|(?:findBy|FindBy|find_by|where)\w*\(?\s*['"]?(?:email|phone|username)/i;
 const NOT_FOUND = /http\.StatusNotFound|StatusNotFound|NotFound\s*\(|abort\s*\(\s*404|HttpStatus\.NOT_FOUND|ResponseEntity\.notFound|status\(\s*404|UserNotFound|ModelNotFoundException|not\s+found|does\s*n[o']t\s+exist|not\s+registered/i;
 
-export function otherResetFindings(file: SourceFile): Finding[] {
+export function otherResetFindings(file: SourceFile, ctx: ProjectContext = { idempotencyHelpers: new Set() }): Finding[] {
   const lang = langOf(file.path);
   if (!lang) return [];
   const out: Finding[] = [];
@@ -380,6 +489,8 @@ export function otherResetFindings(file: SourceFile): Finding[] {
   for (const fn of fns) {
     const label = `${fn.name} ${fn.route ?? ''} ${routes.find((r) => r.handler === fn.name)?.path ?? ''}`;
     if (!/reset|forgot|recover/i.test(words(label).join(' '))) continue;
+    // Staff setting a customer's password: the customer isn't proving anything, so none of these apply.
+    if (fn.route !== undefined && (privilegedMethod(annotationsAbove(file, fn).join('\n'), classAttrs(file, fn, ctx)) || ADMIN_PATH.test(fn.route))) continue;
     if (!/password|passwd|\bpin\b|Pin\b|passcode|credential|account|login/i.test(`${label}\n${fn.text}`)) continue;
     const kind = /\bpin\b|Pin\b|passcode/.test(`${label} ${fn.text}`) && !/password/i.test(label) ? 'PIN' : 'Password';
     fn.text.split('\n').forEach((l, k) => {
@@ -408,9 +519,9 @@ export const otherResetRule: FileRule = {
   pack: 'fintech',
   appliesTo: OTHER_LANGUAGES,
   skipTests: true,
-  run(file) {
+  run(file, ctx) {
     if (!/reset|forgot|recover/i.test(file.text)) return [];
-    return otherResetFindings(file).filter((f) => !isIgnored(file, f.line)).map((f) => hit(file, f, 'FX-RESET-001'));
+    return otherResetFindings(file, ctx).filter((f) => !isIgnored(file, f.line)).map((f) => hit(file, f, 'FX-RESET-001'));
   },
 };
 

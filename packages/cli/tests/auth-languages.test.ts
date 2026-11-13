@@ -336,3 +336,124 @@ describe('FX-RESET-001 in Go, C#, PHP, Java and Kotlin', () => {
     expect(lines(otherResetRule, 'ui/form.go', 'package ui\nimport "math/rand"\nfunc ResetForm(f *Form) {\n\tf.Seed = rand.Intn(10)\n}')).toEqual([]);
   });
 });
+
+describe('staff-only routes and controllers in other files (the corpus findings of 2026-11-13)', () => {
+  it('C#: a reset on a class that needs an admin policy is a staff action, even on a partial class', () => {
+    const text = [
+      '[Authorize(Policy = Policies.CanModifyServerSettings, AuthenticationSchemes = AuthenticationSchemes.Cookie)]',
+      'public partial class UIServerController : Controller',
+      '{',
+      '    [HttpPost("server/users/{userId}/reset-password")]',
+      '    public async Task<IActionResult> ResetUserPassword(string userId, ResetUserPasswordFromAdmin model)',
+      '    {',
+      '        var user = await _UserManager.FindByEmailAsync(model.Email);',
+      '        if (user == null || user.Id != userId)',
+      '            return NotFound();',
+      '        await _UserManager.ResetPasswordAsync(user, await _UserManager.GeneratePasswordResetTokenAsync(user), model.Password);',
+      '        return RedirectToAction(nameof(ListUsers));',
+      '    }',
+      '',
+      '    [AllowAnonymous]',
+      '    [HttpPost("server/login")]',
+      '    public IActionResult Login(LoginModel model) => Ok(_signIn.Login(model));',
+      '}',
+    ].join('\n');
+    expect(lines(otherRateLimitRule, 'Controllers/UIServerController.Users.cs', text)).toEqual([15]);
+    expect(lines(otherResetRule, 'Controllers/UIServerController.Users.cs', text)).toEqual([]);
+  });
+
+  it('Java and PHP: roles and admin groups count as staff-only', () => {
+    expect(lines(otherRateLimitRule, 'AdminController.java', [
+      '@RestController',
+      'public class AdminController {',
+      '    @PreAuthorize("hasRole(\'ADMIN\')")',
+      '    @PostMapping("/customers/{id}/password/reset")',
+      '    public ResponseEntity<Void> reset(@PathVariable Long id) { return ok(); }',
+      '}',
+    ].join('\n'))).toEqual([]);
+    expect(lines(otherRateLimitRule, 'routes/web.php', [
+      "Route::middleware(['auth', 'admin'])->group(function () {",
+      "    Route::post('customers/{id}/password/reset', [CustomerController::class, 'sendReset']);",
+      '});',
+      "Route::post('admin/customers/{id}/pin/reset', [PinController::class, 'reset']);",
+    ].join('\n'))).toEqual([]);
+  });
+
+  it('Laravel: follows a route into its controller in another file, with group prefixes', async () => {
+    const { createProject } = await import('../src/analysis/project');
+    const routes = file('packages/Webkul/Shop/src/Routes/api.php', [
+      '<?php',
+      'use Webkul\\Shop\\Http\\Controllers\\API\\CustomerController;',
+      'use Webkul\\Shop\\Http\\Controllers\\API\\OtpController;',
+      "Route::group(['prefix' => 'api'], function () {",
+      "    Route::controller(CustomerController::class)->prefix('customer')->group(function () {",
+      "        Route::post('login', 'login')->name('shop.api.customers.session.create');",
+      '    });',
+      "    Route::controller(OtpController::class)->prefix('otp')->group(function () {",
+      "        Route::post('verify', 'verify');",
+      '    });',
+      '});',
+    ].join('\n'));
+    const customer = file('packages/Webkul/Shop/src/Http/Controllers/API/CustomerController.php', [
+      '<?php',
+      'class CustomerController extends APIController',
+      '{',
+      '    public function login(LoginRequest $request)',
+      '    {',
+      '        if ($this->hasTooManyLoginAttempts($request)) {',
+      '            return $this->sendLockoutResponse($request);',
+      '        }',
+      '        return response()->json([]);',
+      '    }',
+      '}',
+    ].join('\n'));
+    const otp = file('packages/Webkul/Shop/src/Http/Controllers/API/OtpController.php', '<?php\nclass OtpController\n{\n    public function verify(Request $request)\n    {\n        return response()->json([]);\n    }\n}');
+    const ctx = emptyContext();
+    ctx.project = createProject([routes, customer, otp].map((f) => f.path), (p) => [routes, customer, otp].find((f) => f.path === p) ?? null);
+    expect(titles(otherRateLimitRule, routes.path, routes.text, ctx)).toEqual(['9:high:OTP check without a rate limit']);
+    // Without the controller, the login can't be judged, so it's reported.
+    expect(lines(otherRateLimitRule, routes.path, routes.text)).toEqual([6, 9]);
+  });
+});
+
+describe('C# partial classes', () => {
+  it('takes a wrapped admin policy from another part of the class', async () => {
+    const { createProject } = await import('../src/analysis/project');
+    const main = file('BTCPayServer/Controllers/UIServerController.cs', [
+      'namespace BTCPayServer.Controllers',
+      '{',
+      '    [Authorize(Policy = Policies.CanModifyServerSettings,',
+      '               AuthenticationSchemes = AuthenticationSchemes.Cookie)]',
+      '    public partial class UIServerController : Controller',
+      '    {',
+      '    }',
+      '}',
+    ].join('\n'));
+    const users = file('BTCPayServer/Controllers/UIServerController.Users.cs', [
+      'namespace BTCPayServer.Controllers',
+      '{',
+      '    public partial class UIServerController',
+      '    {',
+      '        [HttpPost("server/users/{userId}/reset-password")]',
+      '        public async Task<IActionResult> ResetUserPassword(string userId, ResetUserPasswordFromAdmin model)',
+      '        {',
+      '            var user = await _UserManager.FindByEmailAsync(model.Email);',
+      '            if (user == null || user.Id != userId)',
+      '                return NotFound();',
+      '            return RedirectToAction(nameof(ListUsers));',
+      '        }',
+      '    }',
+      '}',
+    ].join('\n'));
+    // A same-named partial class in another folder is a different class.
+    const elsewhere = file('Plugins/UIServerController.cs', 'public partial class UIServerController\n{\n}');
+    const ctx = emptyContext();
+    const all = [main, users, elsewhere];
+    ctx.project = createProject(all.map((f) => f.path), (p) => all.find((f) => f.path === p) ?? null);
+    expect(lines(otherRateLimitRule, users.path, users.text, ctx)).toEqual([]);
+    expect(lines(otherResetRule, users.path, users.text, ctx)).toEqual([]);
+    // Without the other part, the policy can't be seen.
+    expect(lines(otherRateLimitRule, users.path, users.text)).toEqual([5]);
+    expect(lines(otherResetRule, users.path, users.text)).toEqual([10]);
+  });
+});
