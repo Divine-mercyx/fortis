@@ -375,3 +375,43 @@ describe('the auth rules', () => {
     }
   });
 });
+
+describe('staff dashboards and sign-in values that aren\'t credentials (the corpus findings of 2026-11-13)', () => {
+  it('FX-RATE-001: a password reset in a staff dashboard is a staff action; a login there still counts', () => {
+    const text = [
+      'class PasswordResetView(SingleObjectMixin, FormView):',
+      '    form_class = PasswordResetForm',
+      '    http_method_names = ["post"]',
+      '',
+      '    def post(self, request, *args, **kwargs):',
+      '        return super().post(request, *args, **kwargs)',
+      '',
+      'class StaffLoginView(APIView):',
+      '    def post(self, request):',
+      '        return Response(auth.login(request.data))',
+    ].join('\n');
+    expect(run(rateLimitRule, 'src/oscar/apps/dashboard/users/views.py', text).map((d) => d.line)).toEqual([9]);
+    expect(run(rateLimitRule, 'src/oscar/apps/customer/views.py', text).map((d) => d.line)).toEqual([5, 9]);
+  });
+
+  it('FX-RATE-001: permission mixins and staff decorators make a view staff-only', () => {
+    const text = [
+      'class CustomerPasswordResetView(PermissionRequiredMixin, APIView):',
+      '    permission_required = "accounts.change_customer"',
+      '',
+      '    def post(self, request, pk):',
+      '        return Response(accounts.send_reset(pk))',
+    ].join('\n');
+    expect(run(rateLimitRule, 'accounts/views.py', text)).toEqual([]);
+  });
+
+  it('FX-JWT-001: an OAuth state, PKCE verifier or redirect under an auth key is not a token', () => {
+    const text = [
+      "localStorage.setItem('enablebanking_auth_state', state);",
+      "sessionStorage.setItem('auth_code_verifier', verifier);",
+      "localStorage.setItem('auth_redirect', path);",
+      "localStorage.setItem('auth_token', token);",
+    ].join('\n');
+    expect(run(tokenRule, 'src/enablebanking.ts', text).map((d) => d.line)).toEqual([4]);
+  });
+});

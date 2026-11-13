@@ -113,6 +113,11 @@ export function credentialKind(path: string, names: string): string | null {
   return null;
 }
 
+/** Decorators, mixins and guards that only let staff in. */
+const STAFF_ONLY = /\b(?:staff_member_required|permission_required|PermissionRequiredMixin|UserPassesTestMixin|user_passes_test|IsAdminUser|admin_required|superuser_required)\b|@Roles\s*\(\s*['"](?:admin|staff)|Role\.(?:Admin|ADMIN|Staff|STAFF)\b/;
+/** Folders that hold a staff dashboard or back office. */
+const STAFF_AREA = /(?:^|\/)(?:dashboard|admin|backoffice|back-office|back_office)\//i;
+
 const RATE_FIX = 'Limit attempts per account and per IP on this route: express-rate-limit or @nestjs/throttler in Node, slowapi or Flask-Limiter in Python, Django REST throttle_classes. Lock the account or PIN after a few failures, and answer every failure the same way.';
 
 export const rateLimitRule: FileRule = {
@@ -136,6 +141,10 @@ export const rateLimitRule: FileRule = {
       if (!kind) continue;
       // Staff actions on a customer's account (send them a password, unlock a PIN) aren't guesses.
       if (route.refs.some((r) => /admin|staff|superuser|back-?office/i.test(r)) || /(?:^|\/)admin(?:\/|$)/i.test(route.path)) continue;
+      if (STAFF_ONLY.test(text)) continue;
+      // A password action in a staff dashboard (Django Oscar's dashboard, a back office) is staff acting on a customer.
+      // Logins stay checked there: a staff login page is exactly what gets guessed at.
+      if (/^Password/.test(kind) && STAFF_AREA.test(file.path)) continue;
       if (route.refs.some((r) => LIMITED.test(r)) || LIMITED.test(text)) continue;
       // A lockout can live in the service the handler calls.
       if (reachable(ctx, file, facts, route).sources.some((src) => LIMITED.test(src))) continue;
@@ -178,6 +187,9 @@ const FIX = {
   cookie: 'Set session and token cookies with httpOnly: true, secure: true and sameSite: "lax" or "strict" (SESSION_COOKIE_SECURE = True and SESSION_COOKIE_HTTPONLY = True in Django and Flask).',
   storage: 'Keep tokens out of localStorage, where any script on the page can read them: use an httpOnly, secure cookie, or memory plus a refresh cookie. In a mobile app use the Keychain or Keystore (expo-secure-store).',
 };
+
+/** Storage keys that name something about a sign-in, not the credential itself. */
+const NOT_A_CREDENTIAL_KEY = /(?:state|nonce|verifier|challenge|redirect|return_?to|returnUrl|callback|provider|method|step|flow|mode|type|status|error|expir\w*|attempts?)$/i;
 
 /** Every weak-token pattern in a file. Exposed for tests. */
 export function tokenFindings(file: SourceFile): Finding[] {
@@ -251,7 +263,8 @@ export function tokenFindings(file: SourceFile): Finding[] {
 
     // Tokens in localStorage.
     const ls = /\b(?:localStorage|sessionStorage)\s*\.\s*setItem\s*\(\s*(['"`])([^'"`]+)\1/.exec(line) ?? /\b(?:localStorage|sessionStorage)\s*\[\s*(['"`])([^'"`]+)\1\s*\]\s*=/.exec(line);
-    if (ls && /token|jwt|auth|session|bearer/i.test(ls[2]!) && !/csrf|theme|lang|locale/i.test(ls[2]!)) add(n, 'medium', 'Access token stored in localStorage', FIX.storage);
+    // An OAuth `state`, a nonce or where to go next isn't a credential, even under an `auth_…` key.
+    if (ls && /token|jwt|auth|session|bearer/i.test(ls[2]!) && !/csrf|theme|lang|locale/i.test(ls[2]!) && !NOT_A_CREDENTIAL_KEY.test(ls[2]!)) add(n, 'medium', 'Access token stored in localStorage', FIX.storage);
   });
   return out;
 }
