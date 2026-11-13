@@ -1,6 +1,6 @@
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 
@@ -76,22 +76,43 @@ export function expectedHash(sums: string, asset: string): string | null {
   return null;
 }
 
+/** Errors Windows gives for a file another process has open for a moment. */
+const LOCKED = new Set(['EBUSY', 'EPERM', 'EACCES']);
+const sleepSync = (ms: number) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+
+/**
+ * Runs a file operation, retrying for about six seconds while Windows reports the file as locked.
+ * Windows holds a program it has just written or run (antivirus scans it), so moving it straight
+ * after can fail with EBUSY or EPERM. Other errors, and other systems, fail at once.
+ */
+export function retryLocked<T>(op: () => T, platform: string = process.platform, wait: (ms: number) => void = sleepSync): T {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return op();
+    } catch (e) {
+      const code = (e as NodeJS.ErrnoException).code ?? '';
+      if (platform !== 'win32' || !LOCKED.has(code) || attempt >= 12) throw e;
+      wait(Math.min(100 * attempt, 800));
+    }
+  }
+}
+
 /**
  * Puts a new binary in place. Unix can rename over a running file. Windows can't, but it can rename
  * the running file out of the way, so that's done first and undone if the second step fails.
  */
-export function replaceBinary(target: string, fresh: string, platform: string = process.platform) {
+export function replaceBinary(target: string, fresh: string, platform: string = process.platform, wait?: (ms: number) => void) {
   if (platform !== 'win32') {
     renameSync(fresh, target);
     return;
   }
   const old = `${target}.old`;
   rmSync(old, { force: true });
-  renameSync(target, old);
+  retryLocked(() => renameSync(target, old), platform, wait);
   try {
-    renameSync(fresh, target);
+    retryLocked(() => renameSync(fresh, target), platform, wait);
   } catch (e) {
-    renameSync(old, target);
+    retryLocked(() => renameSync(old, target), platform, wait);
     throw e;
   }
   // Still running, so it can't be deleted yet. The next update removes it.
@@ -143,6 +164,7 @@ export async function selfUpdate(opts: {
   if (createHash('sha256').update(archive).digest('hex') !== expected) throw new Error(`Checksum mismatch for ${asset}. Not installing it.`);
 
   const dir = dirname(opts.target);
+  removeLeftovers(dir);
   const work = mkdtempSync(join(dir, '.fortis-update-'));
   try {
     const file = join(work, asset);
@@ -157,7 +179,30 @@ export async function selfUpdate(opts: {
     replaceBinary(opts.target, fresh, platform);
     return { status: 'updated', from: current, to: reported || to };
   } finally {
-    rmSync(work, { recursive: true, force: true });
+    // A file Windows still holds can't be deleted yet. Never let that hide the real result: the next update clears it.
+    try {
+      rmSync(work, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
+    } catch {
+      /* left for the next update */
+    }
+  }
+}
+
+/** Work folders an earlier update couldn't delete, because Windows still held a file in them. */
+export function removeLeftovers(dir: string) {
+  let names: string[] = [];
+  try {
+    names = readdirSync(dir);
+  } catch {
+    return;
+  }
+  for (const name of names) {
+    if (!name.startsWith('.fortis-update-')) continue;
+    try {
+      rmSync(join(dir, name), { recursive: true, force: true });
+    } catch {
+      /* still held; try again next time */
+    }
   }
 }
 

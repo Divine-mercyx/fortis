@@ -567,6 +567,7 @@ It exits 1 if something stops Fortis doing its job. Things that are only worth k
 ## Changelog
 
 **Unreleased**
+- `fortis update` on Windows waits out a new `fortis.exe` that Windows still holds for a moment (antivirus scans a program it has just written or run) instead of failing with EBUSY, and a folder it can't delete yet no longer hides the real result. The next update clears it.
 - `fortis exposure [--target <url>]`: from Fortis's servers, the admin and database ports, admin pages (phpMyAdmin, Actuator, debug pages) and secret files (.env, .git, dumps) a verified, authorised target exposes to the internet. Needs a key and a plan with running-app tests; exits 1 on high findings, like `fortis test`. Exposure checks can also run daily or weekly from the dashboard.
 - A Mobile rule pack, free: server secrets that end up in the app (MOB-KEY-001), weakened TLS (MOB-TLS-001) and apps with no certificate pinning (MOB-PIN-001), for Android, iOS, Expo and React Native, and Flutter. New command `fortis mobile <app.apk|app.aab|app.ipa>` reads a built app and reports the keys inside it, a bundled .env, and plain-HTTP and App Transport Security settings, decoding the compiled AndroidManifest.xml, res/xml files and binary Info.plist.
 - The infrastructure checks read more formats: CloudFormation and SAM templates, Pulumi programs in TypeScript, JavaScript and Python, Bicep and ARM templates, and Helm values files. In Terraform they now follow variables, locals and `.tfvars` files, and read the security-group, S3 and RDS modules from terraform-aws-modules.
