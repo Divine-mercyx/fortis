@@ -217,6 +217,10 @@ export const scans = pgTable(
     rulesVersion: text('rules_version'),
     durationMs: integer('duration_ms'),
     filesScanned: integer('files_scanned'),
+    /** Release gate verdict for this scan: passed, failed or excepted. Null when no gate applied. */
+    gateStatus: text('gate_status'),
+    /** What the gate decided on: the blocking findings and any approved exception. */
+    gateDetail: jsonb('gate_detail'),
     findingsCount: integer('findings_count').notNull().default(0),
     newCount: integer('new_count').notNull().default(0),
     reopenedCount: integer('reopened_count').notNull().default(0),
@@ -323,3 +327,43 @@ export const alertSettings = pgTable('alert_settings', {
   lastError: text('last_error'),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 });
+
+/** A project's release gate: what stops a CI run on Plus and Enterprise. No row means no gate. */
+export const releaseGates = pgTable('release_gates', {
+  projectId: uuid('project_id')
+    .primaryKey()
+    .references(() => projects.id, { onDelete: 'cascade' }),
+  orgId: uuid('org_id')
+    .notNull()
+    .references(() => organizations.id, { onDelete: 'cascade' }),
+  enabled: boolean('enabled').notNull().default(false),
+  /** 'critical', 'high' (and above) or 'medium' (and above). */
+  minSeverity: text('min_severity').notNull().default('critical'),
+  /** A leaked key that `fortis scan --verify` found still working blocks whatever its severity. */
+  blockLiveSecrets: boolean('block_live_secrets').notNull().default(true),
+  /** Comma-separated branch patterns (`main, release/*`). Empty: every branch. */
+  branches: text('branches').notNull().default(''),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
+/** An admin's approval to release through a failing gate: a reason, an expiry and optionally one commit. */
+export const gateExceptions = pgTable(
+  'gate_exceptions',
+  {
+    id: id(),
+    orgId: uuid('org_id')
+      .notNull()
+      .references(() => organizations.id, { onDelete: 'cascade' }),
+    projectId: uuid('project_id')
+      .notNull()
+      .references(() => projects.id, { onDelete: 'cascade' }),
+    commit: text('commit'),
+    reason: text('reason').notNull(),
+    createdBy: uuid('created_by').references(() => users.id, { onDelete: 'set null' }),
+    createdAt: createdAt(),
+    expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+    revokedAt: timestamp('revoked_at', { withTimezone: true }),
+    lastUsedAt: timestamp('last_used_at', { withTimezone: true }),
+  },
+  (t) => [index('gate_exceptions_project_idx').on(t.projectId, t.expiresAt)],
+);

@@ -43,6 +43,13 @@
       "when": 1794774967996,
       "tag": "0005_alerts",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1794775740544,
+      "tag": "0006_release_gates",
+      "breakpoints": true
     }
   ]
 }

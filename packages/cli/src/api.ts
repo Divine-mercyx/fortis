@@ -7,6 +7,7 @@ import { maskSnippet, type CliFinding, type RulePack, type Severity } from '@for
 import { credentialsPath } from './config';
 import { VERSION } from './env';
 import type { Detection } from './rules/types';
+import type { GateVerdict } from './gate';
 
 export class ApiError extends Error {
   constructor(public status: number, public code: string, message: string) {
@@ -69,7 +70,7 @@ export function client(api: string, key: string, fetchImpl: typeof fetch = fetch
     /** Runs an exposure check from Fortis's servers on a ready target of this project. */
     exposure: (url?: string) =>
       call<ExposureResult>('/v1/cli/exposure', { method: 'POST', body: url ? { url } : {} }),
-    upload: (body: unknown) => call<{ scanId: string; newCount: number; fixedCount: number; reopenedCount: number; duplicate: boolean; dashboardUrl: string }>('/v1/cli/scans', { method: 'POST', body }),
+    upload: (body: unknown) => call<{ scanId: string; newCount: number; fixedCount: number; reopenedCount: number; duplicate: boolean; dashboardUrl: string; gate?: GateVerdict }>('/v1/cli/scans', { method: 'POST', body }),
     async rulePacks(): Promise<RulePack[]> {
       const pack = await call<{ keyId: string; payload: string; signature: string }>('/v1/cli/rules');
       const pem = await trustedKey(api, pack.keyId, () => call<{ publicKey: string }>('/v1/cli/rules/public-key').then((r) => r.publicKey));

@@ -236,7 +236,7 @@ export async function findingsRoutes(app: FastifyInstance) {
     const ps = q.projectId ? sql`and s.project_id = ${q.projectId}` : sql``;
     const full = limits.evidencePack === 'full';
 
-    const [scansBy, open, detected, fixed, fixTimes, list, decisions] = await Promise.all([
+    const [scansBy, open, detected, fixed, fixTimes, list, decisions, gates] = await Promise.all([
       db.execute(sql`select s.kind, s.trigger, count(*)::int as n from scans s where s.org_id = ${orgId} ${ps} and s.created_at between ${from} and ${to} group by 1, 2 order by 1, 2`),
       db.execute(sql`select f.severity, count(*)::int as n from findings f where f.org_id = ${orgId} ${p} and f.status = 'open' group by 1`),
       db.execute(sql`select count(*)::int as n from findings f where f.org_id = ${orgId} ${p} and f.first_seen_at between ${from} and ${to}`),
@@ -253,6 +253,13 @@ export async function findingsRoutes(app: FastifyInstance) {
         from finding_events e join findings f on f.id = e.finding_id left join users u on u.id = e.actor_user_id
         where e.org_id = ${orgId} ${p} and e.to_status in ('accepted_risk', 'false_positive') and e.created_at between ${from} and ${to}
         order by e.created_at`),
+      // Release gate verdicts: every CI run a gate judged, and who let a failing one through and why.
+      db.execute(sql`select s.created_at as "at", pr.name as "projectName", s.branch, s."commit", s.gate_status as "status",
+          coalesce((s.gate_detail->>'blockingCount')::int, 0) as "blocking",
+          s.gate_detail->'exception'->>'reason' as "exceptionReason", s.gate_detail->'exception'->>'by' as "approvedBy"
+        from scans s join projects pr on pr.id = s.project_id
+        where s.org_id = ${orgId} ${ps} and s.gate_status is not null and s.created_at between ${from} and ${to}
+        order by s.created_at limit 2000`),
     ]);
 
     let trail: unknown[] = [];
@@ -291,7 +298,13 @@ export async function findingsRoutes(app: FastifyInstance) {
         detected: (detected.rows[0] as { n: number }).n,
         fixed: (fixed.rows[0] as { n: number }).n,
         medianFixSeconds: fixTimes.rows,
+        releaseGates: (() => {
+          const rows = gates.rows as { status: string }[];
+          return { passed: rows.filter((r) => r.status === 'passed').length, failed: rows.filter((r) => r.status === 'failed').length, excepted: rows.filter((r) => r.status === 'excepted').length };
+        })(),
       },
+      // The full pack lists every gated run; the basic one keeps the counts above.
+      releaseGateRuns: full ? gates.rows : [],
       findings: list.rows,
       decisions: decisions.rows,
       trail,

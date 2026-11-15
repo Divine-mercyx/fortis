@@ -46,6 +46,7 @@ Tests drop and recreate the schema of the database in `TEST_DATABASE_URL`
 |---|---|
 | Accounts | `POST /v1/auth/signup`, `POST /v1/auth/login`, `POST /v1/auth/logout`, `GET /v1/auth/me` |
 | Alerts | `GET/PUT /v1/orgs/:orgId/alerts`, `POST …/alerts/test` |
+| Release gates | `GET/PUT /v1/orgs/:orgId/projects/:projectId/gate`, `POST …/gate/exceptions`, `DELETE …/gate/exceptions/:exceptionId` |
 | Two-factor | `POST /v1/auth/login/2fa`, `GET /v1/auth/2fa`, `POST /v1/auth/2fa/setup`, `…/enable`, `…/recovery-codes`, `…/disable` |
 | Organisation | `GET/PATCH /v1/orgs/:orgId`, members: `GET/POST /v1/orgs/:orgId/members`, `DELETE …/members/:userId` |
 | Projects | `GET/POST /v1/orgs/:orgId/projects`, `GET/DELETE …/projects/:projectId` |
@@ -62,6 +63,7 @@ The CLI authenticates with `Authorization: Bearer fts_…`. The dashboard uses a
 - **Keys and sessions** are random secrets stored only as SHA-256 hashes. A CLI key is shown once.
 - **Passwords** use argon2id. Login errors don't reveal whether an email exists.
 - **Alerts:** when a scan (CLI upload, staging test or exposure check) finds new or reopened critical or high findings, Fortis sends one email and one Slack message for the scan, never one per finding, and never twice for a finding that stays open. Alerts carry the masked line, never a secret. Slack accepts only `https://hooks.slack.com/` webhook URLs, stored encrypted and shown masked. Owners and admins choose the severity, who gets email and the Slack channel in Settings, and changes are audited.
+- **Release gates (Plus and Enterprise):** an admin sets a project's gate on its page: the severity that blocks (critical, high or medium), whether a leaked key that still works always blocks, and the branches it covers. When `fortis scan --ci` uploads, the API judges the scan against the policy and the CLI exits with that verdict, so changing the policy changes what passes CI without touching the repository. Only open findings block; accepted risks and false positives don't. An admin can approve a release through the gate for 1 to 72 hours, for one commit or any, with a written reason; approvals can be withdrawn, and every verdict, approval and withdrawal goes in the audit log and the evidence pack.
 - **Two-factor sign-in:** any user can turn on an authenticator app (Google Authenticator, Microsoft Authenticator, 1Password, Authy) in Settings. The password then only earns a five-minute challenge with five tries; the session cookie comes after a six-digit code (RFC 6238) or one of ten single-use recovery codes. Each code works once. Secrets are encrypted with AES-256-GCM (`TWO_FACTOR_KEY`), recovery codes are stored as hashes, and turning it off needs the password and a code. Admins see who has it on in the Team list, and turning it on or off, or using a recovery code, goes in the audit log.
 - **CSRF:** cookie-authenticated writes must come from an allowed origin, and only JSON bodies are accepted.
 - **No source code:** findings carry a masked line of at most 300 characters. The API masks secrets and BVN/NIN again on arrival.
