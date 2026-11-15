@@ -139,7 +139,8 @@ export async function ssoRoutes(app: FastifyInstance) {
 
     if (!c) {
       if (!input.domain) throw badRequest('Start with your email domain.', 'SSO_DOMAIN_REQUIRED');
-      [c] = await db.insert(ssoConnections).values({ orgId, domain: input.domain, verificationToken: randomBase62(32) }).returning();
+      const [created] = await db.insert(ssoConnections).values({ orgId, domain: input.domain, verificationToken: randomBase62(32) }).returning();
+      c = created ?? null;
       await audit(db, req, { orgId, action: 'sso.created', targetType: 'organization', targetId: orgId, meta: { domain: input.domain } });
     }
     const conn = c!;
