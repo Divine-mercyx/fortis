@@ -46,6 +46,7 @@ Tests drop and recreate the schema of the database in `TEST_DATABASE_URL`
 |---|---|
 | Accounts | `POST /v1/auth/signup`, `POST /v1/auth/login`, `POST /v1/auth/logout`, `GET /v1/auth/me` |
 | Alerts | `GET/PUT /v1/orgs/:orgId/alerts`, `POST …/alerts/test` |
+| Billing | `GET /v1/orgs/:orgId/billing`, `POST …/billing/change`, `POST …/billing/verify`, `POST /v1/billing/paystack/webhook` |
 | Release gates | `GET/PUT /v1/orgs/:orgId/projects/:projectId/gate`, `POST …/gate/exceptions`, `DELETE …/gate/exceptions/:exceptionId` |
 | Two-factor | `POST /v1/auth/login/2fa`, `GET /v1/auth/2fa`, `POST /v1/auth/2fa/setup`, `…/enable`, `…/recovery-codes`, `…/disable` |
 | Organisation | `GET/PATCH /v1/orgs/:orgId`, members: `GET/POST /v1/orgs/:orgId/members`, `DELETE …/members/:userId` |
@@ -63,6 +64,7 @@ The CLI authenticates with `Authorization: Bearer fts_…`. The dashboard uses a
 - **Keys and sessions** are random secrets stored only as SHA-256 hashes. A CLI key is shown once.
 - **Passwords** use argon2id. Login errors don't reveal whether an email exists.
 - **Alerts:** when a scan (CLI upload, staging test or exposure check) finds new or reopened critical or high findings, Fortis sends one email and one Slack message for the scan, never one per finding, and never twice for a finding that stays open. Alerts carry the masked line, never a secret. Slack accepts only `https://hooks.slack.com/` webhook URLs, stored encrypted and shown masked. Owners and admins choose the severity, who gets email and the Slack channel in Settings, and changes are audited.
+- **Billing:** an owner pays for Core or Plus in naira on Paystack's page (card, bank transfer, USSD or bank); Enterprise is a conversation. Prices exclude VAT, which is added at checkout (`BILLING_VAT_PERCENT`, 7.5% by default). A plan changes only when Paystack confirms a payment Fortis started, for the exact amount in naira: by webhook (HMAC-SHA512 signature checked against the raw body, each event handled once) or when the owner comes back from checkout. Upgrades start at once with credit for the unused days; a cheaper plan or Free starts at renewal and can be undone until then. Saved cards are charged monthly; Fortis keeps only Paystack's authorization code, encrypted like authenticator secrets, and shows the brand and last four digits. If a renewal fails the plan stays on for `BILLING_GRACE_DAYS` (7) while the card is retried daily, then the workspace moves to Free with every finding and scan kept. Workspaces that paid by transfer get a reminder three days before renewal. Owners get a receipt for every payment, and every payment, plan change and step down is in the audit log.
 - **Release gates (Plus and Enterprise):** an admin sets a project's gate on its page: the severity that blocks (critical, high or medium), whether a leaked key that still works always blocks, and the branches it covers. When `fortis scan --ci` uploads, the API judges the scan against the policy and the CLI exits with that verdict, so changing the policy changes what passes CI without touching the repository. Only open findings block; accepted risks and false positives don't. An admin can approve a release through the gate for 1 to 72 hours, for one commit or any, with a written reason; approvals can be withdrawn, and every verdict, approval and withdrawal goes in the audit log and the evidence pack.
 - **Two-factor sign-in:** any user can turn on an authenticator app (Google Authenticator, Microsoft Authenticator, 1Password, Authy) in Settings. The password then only earns a five-minute challenge with five tries; the session cookie comes after a six-digit code (RFC 6238) or one of ten single-use recovery codes. Each code works once. Secrets are encrypted with AES-256-GCM (`TWO_FACTOR_KEY`), recovery codes are stored as hashes, and turning it off needs the password and a code. Admins see who has it on in the Team list, and turning it on or off, or using a recovery code, goes in the audit log.
 - **CSRF:** cookie-authenticated writes must come from an allowed origin, and only JSON bodies are accepted.
@@ -98,7 +100,7 @@ the marketing site into `apps/web/src/app/globals.css`.
 | `/overview` | Open criticals, 30-day detected vs fixed, severity breakdown, fix speed, recent scans, activity |
 | `/findings` | Filter and search, then a drawer with the rule explanation, fix, evidence trail and status actions |
 | `/projects`, `/projects/:id` | Projects, CLI setup steps, keys (shown once, revocable), scans |
-| `/settings` | Workspace name, plan and usage, team and roles, audit log |
+| `/settings` | Workspace name, plan and usage, paying for a plan and past payments, team and roles, audit log |
 
 The CLI package name shown in the dashboard is set in `apps/web/src/lib/cli.ts`.
 
@@ -108,8 +110,9 @@ The CLI package name shown in the dashboard is set in `apps/web/src/lib/cli.ts`.
 2. Generate a rule-signing key with `pnpm --filter @fortis/api keys:rules` and store the private key as `RULES_SIGNING_PRIVATE_KEY`.
 3. Set `WEB_ORIGINS` and `WEB_URL` to the dashboard address, and `NODE_ENV=production`.
 4. For alert emails, set `RESEND_API_KEY` and `ALERTS_FROM` (a sender on a domain verified in Resend). Without them alerts still go to Slack.
-5. Set `TWO_FACTOR_KEY` to a random value of at least 32 characters (`openssl rand -base64 32`). It encrypts authenticator secrets; without it a key is derived from the rule-signing key.
-6. Start it with `pnpm --filter @fortis/api start`. Pending migrations run first; set `MIGRATE_ON_START=false` to run `pnpm db:migrate` yourself.
+5. For billing, set `PAYSTACK_SECRET_KEY` (`sk_test_…` until you go live), add the webhook URL `https://<api>/v1/billing/paystack/webhook` in Paystack (Settings → API Keys & Webhooks), and set `CRON_SECRET` on the API and the same value as the repository secret `FORTIS_CRON_SECRET` so the daily renewals job runs. Without the key, Settings says paying online isn't switched on and `scripts/set-plan.ts` still works.
+6. Set `TWO_FACTOR_KEY` to a random value of at least 32 characters (`openssl rand -base64 32`). It encrypts authenticator secrets; without it a key is derived from the rule-signing key.
+7. Start it with `pnpm --filter @fortis/api start`. Pending migrations run first; set `MIGRATE_ON_START=false` to run `pnpm db:migrate` yourself.
 
 ### Keeping free Render services awake
 

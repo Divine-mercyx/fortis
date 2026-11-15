@@ -3,16 +3,16 @@
 import { useState } from 'react';
 import useSWR from 'swr';
 
-import { PLANS, PLAN_IDS } from '@fortis/shared';
 
 import { Check, Plus, Users } from '@/components/icons';
 import { Words } from '@/components/motion';
 import { useSession } from '@/components/session';
 import { AlertsCard } from '@/components/alerts';
+import { BillingStatus, PaymentHistory, PlanCards } from '@/components/billing';
 import { TwoFactorCard } from '@/components/two-factor';
 import { Empty, FormError, Modal, Skeleton, useToast } from '@/components/ui';
 import { api, fetcher } from '@/lib/api';
-import { dateTime, initials, naira, timeAgo } from '@/lib/format';
+import { dateTime, initials, timeAgo } from '@/lib/format';
 
 type OrgInfo = { org: { id: string; name: string; plan: string }; role: string; plan: { id: string; name: string; maxProjects: number | null; maxSeats: number | null }; usage: { projects: number; seats: number } };
 type Member = { userId: string; name: string; email: string; role: string; joinedAt: string; twoFactorEnabled?: boolean };
@@ -150,36 +150,17 @@ export default function SettingsPage() {
                 ))}
               </div>
             ) : <Skeleton h={70} />}
-            <p className="small" style={{ margin: '20px 0 0' }}>Paying in naira by card or transfer is coming soon. To change plan during early access, email hello@fortis.dev.</p>
+            <BillingStatus />
           </div>
         </section>
       </div>
 
       <section className="card reveal" style={{ ['--d' as string]: '120ms' }}>
         <div className="card-head"><h3>Plans</h3><span className="small">Monthly, excluding VAT</span></div>
-        <div className="card-pad" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))', gap: 14 }}>
-          {PLAN_IDS.map((id) => {
-            const p = PLANS[id];
-            const current = id === org.plan;
-            return (
-              <div key={id} className="tile" style={{ ['--c' as string]: current ? 'var(--green)' : 'transparent', background: id === 'plus' ? 'var(--navy)' : '#fff', borderColor: id === 'plus' ? 'var(--navy)' : undefined }}>
-                <div className="lbl" style={{ color: id === 'plus' ? 'var(--mint)' : undefined }}>{p.name}{current ? ' · current' : ''}</div>
-                <div className="v" style={{ fontSize: 26, color: id === 'plus' ? '#fff' : undefined }}>
-                  {id === 'enterprise' ? `from ${naira(p.monthlyPriceKobo)}` : naira(p.monthlyPriceKobo)}
-                </div>
-                <ul style={{ listStyle: 'none', padding: 0, margin: '12px 0 0', fontSize: 13, color: id === 'plus' ? '#D3DBEA' : 'var(--ink-2)', display: 'grid', gap: 6 }}>
-                  <li>{limit(p.maxProjects)} projects · {limit(p.maxSeats)} seats</li>
-                  <li>{p.rulePacks.includes('fintech') ? 'Fintech rule pack' : 'Secrets, dependencies, infrastructure and mobile'}</li>
-                  <li>{p.dashboard ? 'Findings dashboard' : 'Results stay local'}</li>
-                  {p.dast !== 'none' ? <li>OWASP ZAP {p.dast === 'full' ? 'baseline + full scans' : 'baseline scans'} · {limit(p.maxTargets)} targets</li> : null}
-                  {p.stagingChecks ? <li>Access checks with two test users</li> : null}
-                  {p.releaseGates ? <li>Release gates</li> : null}
-                </ul>
-              </div>
-            );
-          })}
-        </div>
+        <PlanCards />
       </section>
+
+      {isAdmin ? <PaymentHistory /> : null}
 
       <TwoFactorCard onChange={() => { void refresh(); void refreshMembers(); void refreshAudit(); }} />
 
