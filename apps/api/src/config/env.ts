@@ -25,6 +25,10 @@ const schema = z.object({
   CRON_SECRET: z.preprocess((v) => (v === '' ? undefined : v), z.string().min(32).optional()),
   /** Apply pending database migrations when the server starts. */
   MIGRATE_ON_START: z.enum(['true', 'false']).default('true').transform((v) => v === 'true'),
+  /** Resend API key for alert emails. Unset, alerts go to Slack only and Settings says email isn't set up. */
+  RESEND_API_KEY: z.preprocess((v) => (v === '' ? undefined : v), z.string().optional()),
+  /** The sender of alert emails; its domain must be verified with Resend. */
+  ALERTS_FROM: z.string().default('Fortis <alerts@fortis.dev>'),
   /** Encrypts authenticator secrets. Unset, a key is derived from RULES_SIGNING_PRIVATE_KEY. */
   TWO_FACTOR_KEY: z.preprocess((v) => (v === '' ? undefined : v), z.string().min(32).optional()),
 });

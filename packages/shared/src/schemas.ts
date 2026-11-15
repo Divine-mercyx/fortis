@@ -27,6 +27,17 @@ export const loginSchema = z.object({
   password: z.string().min(1).max(200),
 });
 
+/* ---------- Alerts ---------- */
+
+/** What a workspace admin can change about alerts. A blank Slack URL removes Slack. */
+export const alertSettingsSchema = z.object({
+  emailEnabled: z.boolean().optional(),
+  emailTo: z.enum(['admins', 'everyone']).optional(),
+  minSeverity: z.enum(['critical', 'high']).optional(),
+  slackWebhookUrl: z.union([z.string().trim().url().max(500), z.literal(''), z.null()]).optional(),
+});
+export type AlertSettingsInput = z.infer<typeof alertSettingsSchema>;
+
 /* ---------- Two-factor authentication ---------- */
 
 /** A six-digit authenticator code, or a recovery code (xxxx-xxxx). Spaces are ignored. */

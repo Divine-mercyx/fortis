@@ -5,6 +5,7 @@ import { findRule, type CliScanInput } from '@fortis/shared';
 import { db } from '../db/client';
 import { findingEvents, findings, scans, targets } from '../db/schema';
 import { sha256 } from '../lib/crypto';
+import { queueScanAlerts } from '../lib/alerts';
 import { maskSnippet, maskText } from '../lib/mask';
 /** Who a scan belongs to. CLI uploads come with a key; server-side checks (exposure) have none. */
 export type IngestAuth = { orgId: string; projectId: string; tokenId: string | null };
@@ -38,7 +39,9 @@ export async function ingestScan(auth: IngestAuth, input: IngestInput): Promise<
   // Running-app results (ZAP and access checks) belong to a target; code results to the repo.
   const isDast = input.kind !== 'code';
   const targetId = isDast ? (input.targetId ?? null) : null;
-  return db.transaction(async (tx) => {
+  // New and reopened findings: the ones an alert may be about.
+  const alertable: string[] = [];
+  const result = await db.transaction(async (tx) => {
     const inserted = await tx
       .insert(scans)
       .values({
@@ -153,6 +156,7 @@ export async function ingestScan(auth: IngestAuth, input: IngestInput): Promise<
           orgId: auth.orgId, findingId: row!.id, type: 'detected', toStatus: 'open', scanId: scan.id,
         });
         newCount++;
+        alertable.push(row!.id);
         out.push({ fingerprint, findingId: row!.id, status: 'open', isNew: true });
         continue;
       }
@@ -170,7 +174,7 @@ export async function ingestScan(auth: IngestAuth, input: IngestInput): Promise<
           ...(f.secretStatus ? { secretStatus: f.secretStatus, secretCheckedAt: now } : {}),
           lastSeenAt: now,
           lastScanId: scan.id,
-          ...(reopen ? { status: 'open', fixedAt: null, statusReason: null } : {}),
+          ...(reopen ? { status: 'open', fixedAt: null, statusReason: null, alertedAt: null } : {}),
         })
         .where(eq(findings.id, prev.id));
       if (reopen) {
@@ -178,6 +182,7 @@ export async function ingestScan(auth: IngestAuth, input: IngestInput): Promise<
           orgId: auth.orgId, findingId: prev.id, type: 'reopened', fromStatus: 'fixed', toStatus: 'open', scanId: scan.id,
         });
         reopenedCount++;
+        alertable.push(prev.id);
       }
       out.push({ fingerprint, findingId: prev.id, status: reopen ? 'open' : prev.status, isNew: false });
     }
@@ -222,4 +227,7 @@ export async function ingestScan(auth: IngestAuth, input: IngestInput): Promise<
 
     return { scanId: scan.id, duplicate: false, findingsCount: incoming.size, newCount, reopenedCount, fixedCount, findings: out };
   });
+  // After the scan is saved, never inside it: sending can't slow down or fail an upload.
+  if (!result.duplicate) queueScanAlerts(auth.orgId, auth.projectId, result.scanId, alertable);
+  return result;
 }

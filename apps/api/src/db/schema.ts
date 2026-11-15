@@ -2,6 +2,7 @@ import { sql } from 'drizzle-orm';
 import {
   bigint,
   bigserial,
+  boolean,
   index,
   integer,
   jsonb,
@@ -256,6 +257,8 @@ export const findings = pgTable(
     firstSeenAt: timestamp('first_seen_at', { withTimezone: true }).notNull().defaultNow(),
     lastSeenAt: timestamp('last_seen_at', { withTimezone: true }).notNull().defaultNow(),
     fixedAt: timestamp('fixed_at', { withTimezone: true }),
+    /** When an alert went out for this finding. Cleared when it reopens, so a reopened finding alerts again. */
+    alertedAt: timestamp('alerted_at', { withTimezone: true }),
     firstScanId: uuid('first_scan_id').references(() => scans.id, { onDelete: 'set null' }),
     lastScanId: uuid('last_scan_id').references(() => scans.id, { onDelete: 'set null' }),
   },
@@ -302,3 +305,21 @@ export const auditLog = pgTable(
   },
   (t) => [index('audit_log_org_created_idx').on(t.orgId, t.createdAt)],
 );
+
+/** Where a workspace's alerts go when a scan finds something serious. No row means the defaults. */
+export const alertSettings = pgTable('alert_settings', {
+  orgId: uuid('org_id')
+    .primaryKey()
+    .references(() => organizations.id, { onDelete: 'cascade' }),
+  emailEnabled: boolean('email_enabled').notNull().default(true),
+  /** 'admins' (owners and admins) or 'everyone' in the workspace. */
+  emailTo: text('email_to').notNull().default('admins'),
+  /** 'critical', or 'high' for critical and high. */
+  minSeverity: text('min_severity').notNull().default('high'),
+  /** Slack incoming-webhook URL, sealed (lib/secret-box): it lets anyone post to the channel. */
+  slackWebhook: text('slack_webhook'),
+  lastSentAt: timestamp('last_sent_at', { withTimezone: true }),
+  /** The last delivery problem, shown in Settings until a delivery succeeds. */
+  lastError: text('last_error'),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+});
