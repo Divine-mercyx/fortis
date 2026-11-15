@@ -164,7 +164,7 @@ If the dependency check can't finish (OSV is down, or a lockfile can't be read),
 ```yaml
 - name: Install Fortis
   run: |
-    curl -fsSL https://github.com/Divine-mercyx/fortis/releases/download/cli-v0.1.0-beta.13/install.sh | FORTIS_VERSION=0.1.0-beta.13 sh
+    curl -fsSL https://github.com/Divine-mercyx/fortis/releases/download/cli-v0.1.0-beta.14/install.sh | FORTIS_VERSION=0.1.0-beta.14 sh
     echo "$HOME/.fortis/bin" >> "$GITHUB_PATH"
 - run: fortis scan --ci
   env:
@@ -566,7 +566,7 @@ It exits 1 if something stops Fortis doing its job. Things that are only worth k
 
 ## Changelog
 
-**Unreleased**
+**0.1.0-beta.14** (2026-11-13)
 - `fortis update` on Windows waits out a new `fortis.exe` that Windows still holds for a moment (antivirus scans a program it has just written or run) instead of failing with EBUSY, and a folder it can't delete yet no longer hides the real result. The next update clears it.
 - `fortis exposure [--target <url>]`: from Fortis's servers, the admin and database ports, admin pages (phpMyAdmin, Actuator, debug pages) and secret files (.env, .git, dumps) a verified, authorised target exposes to the internet. Needs a key and a plan with running-app tests; exits 1 on high findings, like `fortis test`. Exposure checks can also run daily or weekly from the dashboard.
 - A Mobile rule pack, free: server secrets that end up in the app (MOB-KEY-001), weakened TLS (MOB-TLS-001) and apps with no certificate pinning (MOB-PIN-001), for Android, iOS, Expo and React Native, and Flutter. New command `fortis mobile <app.apk|app.aab|app.ipa>` reads a built app and reports the keys inside it, a bundled .env, and plain-HTTP and App Transport Security settings, decoding the compiled AndroidManifest.xml, res/xml files and binary Info.plist.
