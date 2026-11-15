@@ -31,6 +31,12 @@ const schema = z.object({
   ALERTS_FROM: z.string().default('Fortis <alerts@fortis.dev>'),
   /** Encrypts authenticator secrets. Unset, a key is derived from RULES_SIGNING_PRIVATE_KEY. */
   TWO_FACTOR_KEY: z.preprocess((v) => (v === '' ? undefined : v), z.string().min(32).optional()),
+  /** Paystack secret key (sk_test_… or sk_live_…). Unset, Settings says paying online isn't set up yet. */
+  PAYSTACK_SECRET_KEY: z.preprocess((v) => (v === '' ? undefined : v), z.string().optional()),
+  /** VAT added to plan prices at checkout; the prices in plans.ts exclude it. */
+  BILLING_VAT_PERCENT: z.coerce.number().min(0).max(50).default(7.5),
+  /** Days a workspace keeps its paid plan after a renewal fails, before it steps down to Free. */
+  BILLING_GRACE_DAYS: z.coerce.number().int().min(0).max(30).default(7),
 });
 
 const parsed = schema.safeParse(process.env);

@@ -1,0 +1,38 @@
+# Renews paid plans: charges saved cards on their renewal day, retries once a day during the grace
+# period, emails reminders to workspaces that pay by transfer, and moves unpaid or cancelled plans
+# to Free. The API decides what is due; this job only knocks once a day.
+#
+# Needs the repository secret FORTIS_CRON_SECRET, equal to CRON_SECRET on the API service.
+name: Billing renewals
+
+on:
+  schedule:
+    # 07:17 UTC = 08:17 in Lagos, so a failed-payment email arrives at the start of the working day.
+    - cron: '17 7 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  run-due:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Run the renewals that are due
+        env:
+          API_URL: ${{ vars.FORTIS_API_URL || 'https://fortis-api-prqr.onrender.com' }}
+          CRON_SECRET: ${{ secrets.FORTIS_CRON_SECRET }}
+        run: |
+          if [ -z "$CRON_SECRET" ]; then
+            echo "::notice::FORTIS_CRON_SECRET isn't set, so billing renewals are off."
+            exit 0
+          fi
+          # A free Render service may be asleep: wake it first.
+          for i in 1 2 3 4 5 6; do
+            code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 90 "$API_URL/health" || true)
+            [ "$code" = "200" ] && break
+            sleep 20
+          done
+          out=$(curl -sS --fail-with-body --max-time 600 -X POST "$API_URL/v1/internal/billing/run-due" -H "x-fortis-cron: $CRON_SECRET")
+          echo "$out" | jq -c '{renewed: (.renewed | length), failed: (.failed | length), reminded: (.reminded | length), ended: (.ended | length), pending: (.pending | length)}'

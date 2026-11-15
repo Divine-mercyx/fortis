@@ -41,6 +41,10 @@ const ACTIVITY: Record<string, { label: string; icon: typeof Key }> = {
   'member.removed': { label: 'Teammate removed', icon: Users },
   'finding.status_changed': { label: 'Finding updated', icon: Check },
   'plan.changed': { label: 'Plan changed', icon: Shield },
+  'billing.payment_succeeded': { label: 'Payment received', icon: Shield },
+  'billing.renewal_failed': { label: 'Renewal payment failed', icon: Shield },
+  'billing.canceled': { label: 'Plan cancelled', icon: Shield },
+  'billing.ended': { label: 'Moved to Fortis Free', icon: Shield },
   'org.renamed': { label: 'Workspace renamed', icon: Shield },
 };
 

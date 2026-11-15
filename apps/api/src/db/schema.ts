@@ -367,3 +367,79 @@ export const gateExceptions = pgTable(
   },
   (t) => [index('gate_exceptions_project_idx').on(t.projectId, t.expiresAt)],
 );
+
+/* ---------- Billing (Paystack, naira) ---------- */
+
+/**
+ * A workspace's paid plan. One row per workspace, created by its first payment. `organizations.plan`
+ * stays the source of truth for what's unlocked; this row says how long it's paid for and how it renews.
+ */
+export const billingSubscriptions = pgTable(
+  'billing_subscriptions',
+  {
+    orgId: uuid('org_id')
+      .primaryKey()
+      .references(() => organizations.id, { onDelete: 'cascade' }),
+    plan: text('plan').notNull(),
+    /** 'active', 'past_due' (in the grace period) or 'ended' (stepped down to Free). */
+    status: text('status').notNull(),
+    currentPeriodStart: timestamp('current_period_start', { withTimezone: true }).notNull(),
+    currentPeriodEnd: timestamp('current_period_end', { withTimezone: true }).notNull(),
+    cancelAtPeriodEnd: boolean('cancel_at_period_end').notNull().default(false),
+    /** A cheaper plan that starts at the next renewal. */
+    nextPlan: text('next_plan'),
+    /** Paystack's reusable card authorization, sealed (lib/secret-box). Null: renew by paying again. */
+    authorization: text('authorization'),
+    cardBrand: text('card_brand'),
+    cardLast4: text('card_last4'),
+    cardExp: text('card_exp'),
+    billingEmail: text('billing_email').notNull(),
+    graceEndsAt: timestamp('grace_ends_at', { withTimezone: true }),
+    failedAttempts: integer('failed_attempts').notNull().default(0),
+    lastAttemptAt: timestamp('last_attempt_at', { withTimezone: true }),
+    reminderSentAt: timestamp('reminder_sent_at', { withTimezone: true }),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index('billing_subscriptions_due_idx').on(t.status, t.currentPeriodEnd)],
+);
+
+/** Every payment Fortis asked for: a checkout, an upgrade or a renewal. The reference is ours and unique. */
+export const billingPayments = pgTable(
+  'billing_payments',
+  {
+    id: id(),
+    orgId: uuid('org_id')
+      .notNull()
+      .references(() => organizations.id, { onDelete: 'cascade' }),
+    reference: text('reference').notNull(),
+    /** 'checkout' (new plan, a new month starts), 'upgrade' (credit for unused days) or 'renewal'. */
+    kind: text('kind').notNull(),
+    plan: text('plan').notNull(),
+    amountKobo: bigint('amount_kobo', { mode: 'number' }).notNull(),
+    vatKobo: bigint('vat_kobo', { mode: 'number' }).notNull().default(0),
+    /** 'pending', 'success', 'failed' or 'abandoned'. */
+    status: text('status').notNull().default('pending'),
+    channel: text('channel'),
+    failureReason: text('failure_reason'),
+    periodStart: timestamp('period_start', { withTimezone: true }),
+    periodEnd: timestamp('period_end', { withTimezone: true }),
+    createdBy: uuid('created_by').references(() => users.id, { onDelete: 'set null' }),
+    createdAt: createdAt(),
+    paidAt: timestamp('paid_at', { withTimezone: true }),
+    receiptSentAt: timestamp('receipt_sent_at', { withTimezone: true }),
+  },
+  (t) => [uniqueIndex('billing_payments_reference_key').on(t.reference), index('billing_payments_org_idx').on(t.orgId, t.createdAt)],
+);
+
+/** Paystack webhook events already handled, so a redelivered event changes nothing. */
+export const billingEvents = pgTable(
+  'billing_events',
+  {
+    id: id(),
+    eventKey: text('event_key').notNull(),
+    type: text('type').notNull(),
+    reference: text('reference'),
+    receivedAt: timestamp('received_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex('billing_events_key').on(t.eventKey)],
+);
