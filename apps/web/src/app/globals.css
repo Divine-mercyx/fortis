@@ -994,3 +994,21 @@ h1, h2, h3, h4 { color: var(--ink); margin: 0; font-weight: 800; letter-spacing:
 .recovery-grid { list-style: none; padding: 14px; margin: 0; display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px 18px; border: 1px dashed var(--line-2); border-radius: 12px; background: var(--surface-2); font-size: 15px; }
 .recovery-actions { display: flex; gap: 10px; align-items: center; margin-top: 10px; }
 @media (max-width: 420px) { .recovery-grid { grid-template-columns: 1fr; } .two-factor { flex-direction: column; } }
+
+/* ---------- Alerts ---------- */
+.alerts { display: grid; gap: 18px; }
+.alerts-row { display: grid; grid-template-columns: minmax(220px, 340px) 1fr; gap: 18px; align-items: end; }
+.alerts-row .field { margin: 0; }
+.alerts-note { margin: 0; color: var(--muted); max-width: 62ch; }
+.alerts-channel { border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px 16px; margin: 0; display: grid; gap: 12px; min-width: 0; }
+.alerts-channel legend { font-weight: 800; font-size: 13px; padding: 0 6px; color: var(--ink); }
+.alerts-channel .field { margin: 0; max-width: 520px; }
+.switch { display: inline-flex; align-items: center; gap: 10px; font-weight: 600; cursor: pointer; }
+.switch input { width: 18px; height: 18px; accent-color: var(--green); }
+.alerts-slack { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+.alerts-slack code { overflow-wrap: anywhere; color: var(--muted); }
+.alerts-actions { display: flex; gap: 10px; align-items: center; justify-content: flex-end; flex-wrap: wrap; }
+.alerts-actions .small { margin-right: auto; color: var(--muted); }
+.alerts-warn { display: flex; gap: 8px; align-items: flex-start; margin: 0; padding: 10px 12px; border-radius: 10px; background: var(--red-tint); color: var(--red); font-size: 14px; }
+.alerts-warn svg { width: 16px; height: 16px; flex: none; margin-top: 2px; }
+@media (max-width: 640px) { .alerts-row { grid-template-columns: 1fr; } }

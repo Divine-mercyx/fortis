@@ -9,6 +9,7 @@ import { AppError } from './lib/errors';
 import { cliRoutes } from './modules/cli.routes';
 import { authRoutes } from './modules/auth.routes';
 import { twoFactorRoutes } from './modules/two-factor.routes';
+import { alertRoutes } from './modules/alerts.routes';
 import { findingsRoutes } from './modules/findings.routes';
 import { orgRoutes } from './modules/orgs.routes';
 import { exposureRoutes } from './modules/exposure.routes';
@@ -52,6 +53,7 @@ export async function buildApp(opts: FastifyServerOptions = {}) {
 
   await app.register(authRoutes);
   await app.register(twoFactorRoutes);
+  await app.register(alertRoutes);
   await app.register(orgRoutes);
   await app.register(cliRoutes);
   await app.register(findingsRoutes);

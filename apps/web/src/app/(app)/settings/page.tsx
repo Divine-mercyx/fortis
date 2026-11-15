@@ -8,6 +8,7 @@ import { PLANS, PLAN_IDS } from '@fortis/shared';
 import { Check, Plus, Users } from '@/components/icons';
 import { Words } from '@/components/motion';
 import { useSession } from '@/components/session';
+import { AlertsCard } from '@/components/alerts';
 import { TwoFactorCard } from '@/components/two-factor';
 import { Empty, FormError, Modal, Skeleton, useToast } from '@/components/ui';
 import { api, fetcher } from '@/lib/api';
@@ -181,6 +182,8 @@ export default function SettingsPage() {
       </section>
 
       <TwoFactorCard onChange={() => { void refresh(); void refreshMembers(); void refreshAudit(); }} />
+
+      {isAdmin ? <AlertsCard orgId={org.id} /> : null}
 
       <section className="card reveal" style={{ ['--d' as string]: '160ms' }}>
         <div className="card-head">
