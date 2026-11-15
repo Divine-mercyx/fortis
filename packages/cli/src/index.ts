@@ -29,6 +29,7 @@ import { configureNetwork } from './net';
 import { osvCacheDir } from './rules/osv-cache';
 import { installKind, selfUpdate, UPDATE_HINT, updateCheckEnabled, updateNotice } from './update';
 import { c, err, log } from './ui';
+import { exitCode, gateLines } from './gate';
 
 const FREE_PACKS: RulePack[] = ['secrets', 'dependencies', 'infrastructure', 'mobile'];
 /** The packs a plan unlocks, plus the free ones: an API that predates a free pack still gets it run. */
@@ -299,16 +300,23 @@ async function cmdScan(flags: Flags): Promise<number> {
     // Masked like every other output: --json usually lands in CI logs.
     const accepted = new Set(known);
     const detections = result.detections.map((d) => ({ ...d, snippet: maskSnippet(d.snippet).slice(0, 300), ...(accepted.has(d) ? { baseline: true } : {}) }));
-    log(JSON.stringify({ root, ...result, detections, packs, failOn, blocking: blocking.length, baselined: known.length, upload: uploaded, prComment }, null, 2));
+    log(JSON.stringify({ root, ...result, detections, packs, failOn, blocking: blocking.length, baselined: known.length, upload: uploaded, gate: uploaded?.gate ?? null, prComment }, null, 2));
   } else {
     printReport({ ...result, detections: fresh }, { failOn, prePush, packs });
     if (uploaded) {
       log(c.grey(`Synced to ${who?.project.name}: ${uploaded.newCount} new · ${uploaded.fixedCount} fixed · ${uploaded.reopenedCount} reopened`));
       log(c.grey(`→ ${uploaded.dashboardUrl}`));
     }
+    if (uploaded?.gate?.enforced) {
+      for (const line of gateLines(uploaded.gate)) log(line);
+      if (blocking.length && uploaded.gate.status !== 'failed') log(c.grey(`  (The project's release gate decides this run, so --fail-on ${failOn} doesn't apply.)`));
+    } else if (ci && key && who?.entitlements.releaseGates && !uploaded) {
+      result.notes.push('The release gate could not be checked because the upload failed, so --fail-on decided this run.');
+    }
     for (const n of result.notes) log(c.yellow(`! ${n}`));
   }
-  return blocking.length ? 1 : 0;
+  // A project's release gate (Plus and Enterprise, CI) decides; otherwise the local --fail-on does.
+  return exitCode(uploaded?.gate, blocking.length);
 }
 
 async function cmdTest(flags: Flags): Promise<number> {

@@ -27,6 +27,23 @@ export const loginSchema = z.object({
   password: z.string().min(1).max(200),
 });
 
+/* ---------- Release gates ---------- */
+
+export const GATE_SEVERITIES = ['critical', 'high', 'medium'] as const;
+export const gatePolicySchema = z.object({
+  enabled: z.boolean().optional(),
+  minSeverity: z.enum(GATE_SEVERITIES).optional(),
+  blockLiveSecrets: z.boolean().optional(),
+  /** Comma-separated branch patterns; `*` matches within a path segment, `**` across them. Blank: every branch. */
+  branches: z.string().trim().max(300).regex(/^[\w./*,\s-]*$/, 'Use branch names and patterns like main, release/*').optional(),
+});
+export const gateExceptionSchema = z.object({
+  reason: z.string().trim().min(10, 'Say why this release can go out with the finding open').max(500),
+  /** Only this commit (7–40 hex characters). Blank: any commit until it expires. */
+  commit: z.union([z.string().trim().regex(/^[0-9a-f]{7,40}$/i, 'A commit is 7 to 40 hex characters'), z.literal('')]).optional(),
+  hours: z.number().int().min(1).max(72).default(24),
+});
+
 /* ---------- Alerts ---------- */
 
 /** What a workspace admin can change about alerts. A blank Slack URL removes Slack. */

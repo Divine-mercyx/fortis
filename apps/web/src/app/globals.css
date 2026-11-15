@@ -1012,3 +1012,17 @@ h1, h2, h3, h4 { color: var(--ink); margin: 0; font-weight: 800; letter-spacing:
 .alerts-warn { display: flex; gap: 8px; align-items: flex-start; margin: 0; padding: 10px 12px; border-radius: 10px; background: var(--red-tint); color: var(--red); font-size: 14px; }
 .alerts-warn svg { width: 16px; height: 16px; flex: none; margin-top: 2px; }
 @media (max-width: 640px) { .alerts-row { grid-template-columns: 1fr; } }
+
+/* ---------- Release gate ---------- */
+.gate { display: grid; gap: 22px; }
+.gate-policy { display: grid; gap: 14px; }
+.gate-form-row { display: grid; grid-template-columns: minmax(200px, 300px) minmax(200px, 1fr); gap: 14px; }
+.gate-form-row .field { margin: 0; min-width: 0; }
+.gate-note { margin: 0; color: var(--muted); max-width: 70ch; }
+.gate-actions { display: flex; gap: 10px; justify-content: flex-end; flex-wrap: wrap; }
+.gate-block h4 { margin: 0 0 8px; font-size: 13px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); }
+.gate-block .list li { align-items: center; }
+.gate-upsell { display: flex; gap: 16px; align-items: flex-start; }
+.gate-upsell > .ic { flex: none; width: 40px; height: 40px; border-radius: 11px; display: grid; place-items: center; background: var(--green-tint); color: var(--green); }
+.gate-upsell > .ic svg { width: 20px; height: 20px; }
+@media (max-width: 640px) { .gate-form-row { grid-template-columns: 1fr; } }

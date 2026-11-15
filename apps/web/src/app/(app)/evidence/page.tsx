@@ -30,7 +30,9 @@ type Evidence = {
     detected: number;
     fixed: number;
     medianFixSeconds: { severity: string; seconds: number; n: number }[];
+    releaseGates?: { passed: number; failed: number; excepted: number };
   };
+  releaseGateRuns?: { at: string; projectName: string; branch: string | null; commit: string | null; status: string; blocking: number; exceptionReason: string | null; approvedBy: string | null }[];
   findings: EvFinding[];
   decisions: { at: string; decision: string; reason: string | null; by: string | null; title: string; ruleId: string; severity: string }[];
   trail: { at: string; type: string; from: string | null; to: string | null; reason: string | null; by: string | null; ruleId: string; title: string }[];
@@ -212,7 +214,27 @@ export default function EvidencePage() {
           {data.level === 'full' ? (
             <>
               <section className="rp-section">
-                <h3>5. Staging test authorisations</h3>
+                <h3>5. Release gates</h3>
+                <p className="rp-note">
+                  CI runs a project&apos;s release gate judged: {data.summary.releaseGates?.passed ?? 0} passed, {data.summary.releaseGates?.failed ?? 0} blocked, {data.summary.releaseGates?.excepted ?? 0} released through an approved exception.
+                </p>
+                <table className="rp-table rp-compact">
+                  <thead><tr><th>When</th><th>Project</th><th>Branch · commit</th><th>Verdict</th><th>Approved by</th></tr></thead>
+                  <tbody>
+                    {data.releaseGateRuns?.length ? data.releaseGateRuns.map((g, i) => (
+                      <tr key={i}>
+                        <td>{dateTime(g.at)}</td>
+                        <td>{g.projectName}</td>
+                        <td>{g.branch ?? '—'}{g.commit ? ` · ${g.commit.slice(0, 7)}` : ''}</td>
+                        <td>{g.status === 'passed' ? 'Passed' : g.status === 'failed' ? `Blocked (${g.blocking})` : `Released with ${g.blocking} open`}{g.exceptionReason ? <span className="rp-sub">{g.exceptionReason}</span> : null}</td>
+                        <td>{g.approvedBy ?? '—'}</td>
+                      </tr>
+                    )) : <tr><td colSpan={5} className="muted">No CI runs were gated in this period.</td></tr>}
+                  </tbody>
+                </table>
+              </section>
+              <section className="rp-section">
+                <h3>6. Staging test authorisations</h3>
                 <table className="rp-table">
                   <thead><tr><th>Target</th><th>Domain verified</th><th>Authorised by</th><th>Status</th><th>Last test</th></tr></thead>
                   <tbody>
@@ -229,7 +251,7 @@ export default function EvidencePage() {
                 </table>
               </section>
               <section className="rp-section">
-                <h3>6. Evidence trail ({data.trail.length} events)</h3>
+                <h3>7. Evidence trail ({data.trail.length} events)</h3>
                 <table className="rp-table rp-compact">
                   <thead><tr><th>When</th><th>Event</th><th>Finding</th><th>By</th></tr></thead>
                   <tbody>
@@ -240,7 +262,7 @@ export default function EvidencePage() {
                 </table>
               </section>
               <section className="rp-section">
-                <h3>7. Administrative changes ({data.adminLog.length})</h3>
+                <h3>8. Administrative changes ({data.adminLog.length})</h3>
                 <table className="rp-table rp-compact">
                   <thead><tr><th>When</th><th>Action</th><th>By</th></tr></thead>
                   <tbody>
@@ -251,7 +273,7 @@ export default function EvidencePage() {
             </>
           ) : (
             <section className="rp-section no-print">
-              <p className="rp-note">Fortis Plus adds the full evidence trail, staging-test authorisations and the admin change log to this pack.</p>
+              <p className="rp-note">Fortis Plus adds release-gate verdicts, the full evidence trail, staging-test authorisations and the admin change log to this pack.</p>
             </section>
           )}
 

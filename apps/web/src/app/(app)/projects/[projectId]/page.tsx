@@ -8,6 +8,7 @@ import useSWR from 'swr';
 import { Alert, Arrow, Check, Git, Key, Plus, Trash } from '@/components/icons';
 import { CountUp, Words } from '@/components/motion';
 import { useSession } from '@/components/session';
+import { ReleaseGate } from '@/components/release-gate';
 import { StagingTargets } from '@/components/targets';
 import { CodeLine, CopyButton, Empty, FormError, Modal, SeverityPill, Skeleton, StatusTag, useToast } from '@/components/ui';
 import { StatTile } from '@/components/widgets';
@@ -252,6 +253,8 @@ export default function ProjectPage() {
           )}
         </section>
       </div>
+
+      <ReleaseGate projectId={projectId} />
 
       <StagingTargets projectId={projectId} />
 

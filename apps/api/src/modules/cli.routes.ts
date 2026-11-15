@@ -10,6 +10,7 @@ import { targets } from '../db/schema';
 
 import { env } from '../config/env';
 import { badRequest, forbidden, notFound, paymentRequired } from '../lib/errors';
+import { evaluateGate, storedGate } from '../lib/gates';
 import { rulesKeyId, rulesPublicKeyPem, signPayload } from '../lib/rules-signing';
 import { parse } from '../lib/validate';
 import { authenticateCli } from '../plugins/auth';
@@ -130,8 +131,23 @@ export async function cliRoutes(app: FastifyInstance) {
       throw badRequest('targetId is only used for running-app results.');
     }
     const result = await ingestScan(auth, input);
+    // A retried upload gets the verdict it already had; anything else is judged now.
+    const gate =
+      (result.duplicate ? await storedGate(result.scanId, auth.projectId) : null) ??
+      (await evaluateGate({
+        orgId: auth.orgId,
+        projectId: auth.projectId,
+        plan: planLimits(auth.plan),
+        scanId: result.scanId,
+        trigger: input.trigger,
+        kind: input.kind,
+        branch: input.branch,
+        commit: input.commit,
+        findingIds: result.findings.map((f) => f.findingId),
+      }));
     return reply.code(result.duplicate ? 200 : 201).send({
       ...result,
+      gate,
       dashboardUrl: `${env.WEB_URL}/projects/${auth.projectId}?scan=${result.scanId}`,
     });
   });
