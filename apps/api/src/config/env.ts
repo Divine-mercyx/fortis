@@ -37,6 +37,10 @@ const schema = z.object({
   BILLING_VAT_PERCENT: z.coerce.number().min(0).max(50).default(7.5),
   /** Days a workspace keeps its paid plan after a renewal fails, before it steps down to Free. */
   BILLING_GRACE_DAYS: z.coerce.number().int().min(0).max(30).default(7),
+  /** How long a single sign-on session lasts. Someone removed in the identity provider is out within this. */
+  SSO_SESSION_HOURS: z.coerce.number().int().min(1).max(168).default(12),
+  /** Development only: lets an identity provider on http:// or a private address (a local test IdP). */
+  SSO_ALLOW_PRIVATE_ISSUER: z.enum(['true', 'false']).default('false').transform((v) => v === 'true'),
 });
 
 const parsed = schema.safeParse(process.env);

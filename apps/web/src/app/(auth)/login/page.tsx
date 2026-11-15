@@ -20,6 +20,21 @@ function LoginForm() {
   // Set when the password was right and the account asks for an authenticator code.
   const [challenge, setChallenge] = useState<string | null>(null);
   const [useRecovery, setUseRecovery] = useState(false);
+  // Single sign-on: just the work email, then the company's identity provider.
+  const [sso, setSso] = useState(params.get('sso') === '1');
+  const [email, setEmail] = useState('');
+
+  async function startSso(address: string) {
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await api<{ authorizationUrl: string }>('/v1/auth/sso/start', { method: 'POST', body: { email: address, next: safeNext(params.get('next')) } });
+      window.location.assign(res.authorizationUrl);
+    } catch (err) {
+      setError((err as Error).message);
+      setBusy(false);
+    }
+  }
 
   async function onSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -35,7 +50,16 @@ function LoginForm() {
       }
       router.replace(safeNext(params.get('next')));
     } catch (err) {
-      setError((err as Error).message);
+      const e = err as ApiError;
+      // This domain signs in through its identity provider: go straight there.
+      if (e.code === 'SSO_REQUIRED') {
+        setSso(true);
+        setEmail(String(form.get('email') ?? ''));
+        setError(null);
+        void startSso(String(form.get('email') ?? ''));
+        return;
+      }
+      setError(e.message);
       setBusy(false);
     }
   }
@@ -86,6 +110,33 @@ function LoginForm() {
     );
   }
 
+  if (sso) {
+    return (
+      <form className="auth-form" onSubmit={(e) => { e.preventDefault(); void startSso(email); }} noValidate>
+        <span className="eyebrow reveal">Single sign-on</span>
+        <h1><Words>Sign in with your <span className="it accent">company.</span></Words></h1>
+        <p className="lead reveal" style={{ ['--d' as string]: '150ms' }}>
+          Enter your work email and we'll send you to your company's sign-in: Google Workspace, Microsoft or Okta.
+        </p>
+        <div className="reveal" style={{ ['--d' as string]: '220ms' }}>
+          <FormError message={error} />
+          <label className="field">
+            <span>Work email</span>
+            <input className="input" name="email" type="email" autoComplete="email" placeholder="you@company.com" required autoFocus value={email} onChange={(e) => setEmail(e.target.value)} />
+          </label>
+          <button className="btn btn-primary btn-block btn-lg" disabled={busy || !email.includes('@')} type="submit">
+            {busy ? <span className="spinner" /> : null}
+            {busy ? 'Opening your sign-in…' : 'Continue'}
+            {!busy ? <Arrow className="arr" /> : null}
+          </button>
+          <button type="button" className="btn btn-block" style={{ marginTop: 8 }} onClick={() => { setSso(false); setError(null); }}>
+            Sign in with a password instead
+          </button>
+        </div>
+      </form>
+    );
+  }
+
   return (
     <form className="auth-form" onSubmit={onSubmit} noValidate>
       <span className="eyebrow reveal">Welcome back</span>
@@ -104,6 +155,9 @@ function LoginForm() {
           {busy ? <span className="spinner" /> : null}
           {busy ? 'Signing in…' : 'Sign in'}
           {!busy ? <Arrow className="arr" /> : null}
+        </button>
+        <button type="button" className="btn btn-outline btn-block btn-lg" style={{ marginTop: 10 }} onClick={() => { setSso(true); setError(null); }}>
+          Sign in with SSO
         </button>
         <div className="auth-divider"><span>New to Fortis?</span></div>
         <Link href="/signup" className="btn btn-outline btn-block btn-lg">Create a free workspace</Link>

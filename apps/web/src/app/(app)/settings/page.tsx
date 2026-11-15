@@ -9,6 +9,7 @@ import { Words } from '@/components/motion';
 import { useSession } from '@/components/session';
 import { AlertsCard } from '@/components/alerts';
 import { BillingStatus, PaymentHistory, PlanCards } from '@/components/billing';
+import { SsoCard } from '@/components/sso';
 import { TwoFactorCard } from '@/components/two-factor';
 import { Empty, FormError, Modal, Skeleton, useToast } from '@/components/ui';
 import { api, fetcher } from '@/lib/api';
@@ -163,6 +164,8 @@ export default function SettingsPage() {
       {isAdmin ? <PaymentHistory /> : null}
 
       <TwoFactorCard onChange={() => { void refresh(); void refreshMembers(); void refreshAudit(); }} />
+
+      {isAdmin ? <SsoCard /> : null}
 
       {isAdmin ? <AlertsCard orgId={org.id} /> : null}
 

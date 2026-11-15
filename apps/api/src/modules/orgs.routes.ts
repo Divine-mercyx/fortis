@@ -12,6 +12,7 @@ import { badRequest, conflict, notFound, paymentRequired } from '../lib/errors';
 import { slugify } from '../lib/slug';
 import { parse } from '../lib/validate';
 import { requireOrgRole } from '../plugins/auth';
+import { endSsoSessions } from './sso.routes';
 
 const orgParams = z.object({ orgId: z.string().uuid() });
 const projectParams = orgParams.extend({ projectId: z.string().uuid() });
@@ -107,6 +108,7 @@ export async function orgRoutes(app: FastifyInstance) {
       if ((owners?.n ?? 0) <= 1) throw badRequest('An organisation needs at least one owner.', 'LAST_OWNER');
     }
     await db.delete(memberships).where(and(eq(memberships.orgId, orgId), eq(memberships.userId, userId)));
+    await endSsoSessions(orgId, userId);
     await audit(db, req, { orgId, action: 'member.removed', targetType: 'user', targetId: userId });
     return { ok: true };
   });

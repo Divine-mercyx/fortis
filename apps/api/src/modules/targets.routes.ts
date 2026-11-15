@@ -32,6 +32,22 @@ export function setTxtResolver(fn: TxtResolver | null) {
   txtResolver = fn ?? (async (name) => (await resolveTxt(name)).map((chunks) => chunks.join('')));
 }
 
+/** The TXT records at a name, or a readable reason there are none. */
+export async function resolveTxtRecords(name: string): Promise<{ records: string[]; error: string | null }> {
+  try {
+    return { records: await txtResolver(name), error: null };
+  } catch (e) {
+    const code = (e as { code?: string }).code;
+    return {
+      records: [],
+      error:
+        code === 'ENOTFOUND' || code === 'ENODATA'
+          ? `No TXT record found at ${name} yet. DNS changes can take a few minutes to appear.`
+          : `DNS lookup for ${name} failed (${code ?? 'unknown error'}). Try again shortly.`,
+    };
+  }
+}
+
 type TargetRow = typeof targets.$inferSelect;
 
 /** Ready means every safeguard has been met: domain proven, testing authorised, not paused. */
@@ -170,17 +186,9 @@ export async function targetRoutes(app: FastifyInstance) {
 
     const recordName = `${VERIFY_RECORD_PREFIX}.${row.hostname}`;
     const expected = `fortis-verify=${row.verificationToken}`;
-    let records: string[] = [];
-    let error: string | null = null;
-    try {
-      records = await txtResolver(recordName);
-    } catch (e) {
-      const code = (e as { code?: string }).code;
-      error =
-        code === 'ENOTFOUND' || code === 'ENODATA'
-          ? `No TXT record found at ${recordName} yet. DNS changes can take a few minutes to appear.`
-          : `DNS lookup for ${recordName} failed (${code ?? 'unknown error'}). Try again shortly.`;
-    }
+    const lookup = await resolveTxtRecords(recordName);
+    const records = lookup.records;
+    let error = lookup.error;
     const verified = records.some((r) => r.trim() === expected);
     if (!verified && !error) {
       error = records.length

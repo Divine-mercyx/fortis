@@ -56,10 +56,13 @@ export const authPlugin = fp(async (app: FastifyInstance) => {
   });
 });
 
-export async function startSession(req: FastifyRequest, reply: FastifyReply, userId: string) {
+export async function startSession(req: FastifyRequest, reply: FastifyReply, userId: string, opts: { ssoOrgId?: string } = {}) {
   const { token, hash } = newSessionToken();
-  const expiresAt = new Date(Date.now() + env.SESSION_TTL_DAYS * 86_400_000);
+  // A single sign-on session is short, so someone removed in the identity provider is soon out.
+  const ttl = opts.ssoOrgId ? env.SSO_SESSION_HOURS * 3_600_000 : env.SESSION_TTL_DAYS * 86_400_000;
+  const expiresAt = new Date(Date.now() + ttl);
   await db.insert(sessions).values({
+    ssoOrgId: opts.ssoOrgId ?? null,
     userId,
     tokenHash: hash,
     ip: req.ip,

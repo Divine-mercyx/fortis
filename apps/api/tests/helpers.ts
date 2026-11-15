@@ -15,7 +15,7 @@ export async function setupApp() {
 
 export async function resetDb() {
   await pool.query(`truncate audit_log, finding_events, findings, scans, targets, project_tokens, projects,
-    memberships, sessions, organizations, users, billing_events restart identity cascade`);
+    memberships, sessions, organizations, users, billing_events, sso_logins restart identity cascade`);
 }
 
 export type Client = {
