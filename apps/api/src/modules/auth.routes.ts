@@ -13,6 +13,7 @@ import { slugWithSuffix } from '../lib/slug';
 import { parse } from '../lib/validate';
 import { requireUser, SESSION_COOKIE, startSession } from '../plugins/auth';
 import { startLoginChallenge } from './two-factor.routes';
+import { assertPasswordAllowed } from '../lib/sso';
 
 const authRateLimit = { rateLimit: { max: env.AUTH_RATE_LIMIT_PER_MIN, timeWindow: '1 minute' } };
 
@@ -29,6 +30,7 @@ export async function listUserOrgs(userId: string) {
 export async function authRoutes(app: FastifyInstance) {
   app.post('/v1/auth/signup', { config: authRateLimit }, async (req, reply) => {
     const input = parse(signupSchema, req.body);
+    await assertPasswordAllowed(input.email);
     const passwordHash = await hashPassword(input.password);
 
     const result = await db.transaction(async (tx) => {
@@ -54,6 +56,7 @@ export async function authRoutes(app: FastifyInstance) {
     const [user] = await db.select().from(users).where(sql`lower(${users.email}) = ${input.email}`).limit(1);
     const ok = await verifyPassword(user?.passwordHash ?? (await dummyHash()), input.password);
     if (!user || !ok) throw unauthorized('Email or password is incorrect.', 'INVALID_CREDENTIALS');
+    await assertPasswordAllowed(user.email);
     // With 2FA on, the password only earns a challenge; the session comes from POST /v1/auth/login/2fa.
     if (user.twoFactorEnabledAt) return { twoFactorRequired: true, challenge: await startLoginChallenge(user.id) };
     await startSession(req, reply, user.id);

@@ -83,6 +83,8 @@ export const sessions = pgTable(
     createdAt: createdAt(),
     lastSeenAt: timestamp('last_seen_at', { withTimezone: true }).notNull().defaultNow(),
     expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+    /** Set when the session came from single sign-on, for that workspace. Such sessions are short. */
+    ssoOrgId: uuid('sso_org_id'),
   },
   (t) => [uniqueIndex('sessions_token_hash_key').on(t.tokenHash), index('sessions_user_idx').on(t.userId)],
 );
@@ -442,4 +444,77 @@ export const billingEvents = pgTable(
     receivedAt: timestamp('received_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [uniqueIndex('billing_events_key').on(t.eventKey)],
+);
+
+/* ---------- Single sign-on (OIDC) ---------- */
+
+/** A workspace's identity provider. Plus and Enterprise. One per workspace, for one email domain. */
+export const ssoConnections = pgTable(
+  'sso_connections',
+  {
+    orgId: uuid('org_id')
+      .primaryKey()
+      .references(() => organizations.id, { onDelete: 'cascade' }),
+    domain: text('domain').notNull(),
+    verificationToken: text('verification_token').notNull(),
+    /** Proven with a DNS TXT record. Only one workspace can hold a verified domain. */
+    verifiedAt: timestamp('verified_at', { withTimezone: true }),
+    /** 'google', 'entra', 'okta' or 'oidc'. */
+    provider: text('provider').notNull().default('oidc'),
+    issuer: text('issuer'),
+    clientId: text('client_id'),
+    /** Sealed (lib/secret-box). */
+    clientSecret: text('client_secret'),
+    /** The role people get when they first sign in: 'viewer' or 'developer'. */
+    defaultRole: text('default_role').notNull().default('developer'),
+    enabled: boolean('enabled').notNull().default(false),
+    /** Password sign-in is refused for the domain. Needs a verified domain and a test sign-in. */
+    enforced: boolean('enforced').notNull().default(false),
+    /** The last test sign-in that worked with the current settings. */
+    testedAt: timestamp('tested_at', { withTimezone: true }),
+    testedEmail: text('tested_email'),
+    createdAt: createdAt(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index('sso_connections_domain_idx').on(t.domain)],
+);
+
+/** Who signed in through which workspace's provider, by the provider's stable subject. */
+export const ssoIdentities = pgTable(
+  'sso_identities',
+  {
+    orgId: uuid('org_id')
+      .notNull()
+      .references(() => organizations.id, { onDelete: 'cascade' }),
+    subject: text('subject').notNull(),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    email: text('email').notNull(),
+    createdAt: createdAt(),
+    lastLoginAt: timestamp('last_login_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [primaryKey({ columns: [t.orgId, t.subject] }), index('sso_identities_user_idx').on(t.userId)],
+);
+
+/** A sign-in in flight: the state, nonce and PKCE verifier, for ten minutes. */
+export const ssoLogins = pgTable(
+  'sso_logins',
+  {
+    id: id(),
+    stateHash: text('state_hash').notNull(),
+    /** Ties the flow to the browser that started it (an httpOnly cookie holds the other half). */
+    binderHash: text('binder_hash').notNull(),
+    orgId: uuid('org_id')
+      .notNull()
+      .references(() => organizations.id, { onDelete: 'cascade' }),
+    nonce: text('nonce').notNull(),
+    codeVerifier: text('code_verifier').notNull(),
+    next: text('next'),
+    /** A test from Settings: records that it works, signs nobody in. */
+    testBy: uuid('test_by').references(() => users.id, { onDelete: 'cascade' }),
+    createdAt: createdAt(),
+    expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+  },
+  (t) => [uniqueIndex('sso_logins_state_key').on(t.stateHash)],
 );

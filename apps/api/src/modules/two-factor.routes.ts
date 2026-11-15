@@ -15,6 +15,7 @@ import { open, seal } from '../lib/secret-box';
 import { newTotpSecret, otpauthUrl, verifyTotp } from '../lib/totp';
 import { parse } from '../lib/validate';
 import { requireUser, startSession } from '../plugins/auth';
+import { assertPasswordAllowed } from '../lib/sso';
 import { listUserOrgs } from './auth.routes';
 
 /*
@@ -141,6 +142,7 @@ export async function twoFactorRoutes(app: FastifyInstance) {
       }
       throw invalidCode();
     }
+    await assertPasswordAllowed(user.email);
     await startSession(req, reply, user.id);
     const left = how === 'recovery' ? await recoveryCodesLeft(user.id) : undefined;
     return {

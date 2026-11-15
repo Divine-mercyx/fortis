@@ -57,6 +57,13 @@
       "when": 1794776590687,
       "tag": "0007_billing",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1794778003303,
+      "tag": "0008_sso",
+      "breakpoints": true
     }
   ]
 }
