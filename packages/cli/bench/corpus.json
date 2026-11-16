@@ -59,7 +59,10 @@
     ]},
     {"repo": "apache/fineract", "commit": "405c18dcabfc235325e71616e816290234eead87", "languages": ["Java"], "findings": [
       {"rule": "SEC-GEN-001", "file": "integration-tests/src/test/java/org/apache/fineract/integrationtests/PasswordResetIntegrationTest.java", "line": 84, "verdict": "false", "why": "Made-up password in a test"},
-      {"rule": "SEC-GEN-001", "file": "twofactor-tests/src/test/java/org/apache/fineract/twofactortests/TwoFactorAuthenticationTest.java", "line": 61, "verdict": "false", "why": "An HTTP header's name"}
+      {"rule": "SEC-GEN-001", "file": "twofactor-tests/src/test/java/org/apache/fineract/twofactortests/TwoFactorAuthenticationTest.java", "line": 61, "verdict": "false", "why": "An HTTP header's name"},
+      {"rule": "FX-MONEY-001", "file": "fineract-charge/src/main/java/org/apache/fineract/portfolio/charge/request/ChargeRequest.java", "line": 41, "verdict": "true", "why": "A charge request keeps its amount as a Double, which loses precision before it reaches BigDecimal"},
+      {"rule": "FX-MONEY-001", "file": "fineract-loan/src/main/java/org/apache/fineract/portfolio/loanaccount/loanschedule/domain/LoanApplicationTerms.java", "line": 1687, "verdict": "true", "why": "The installment amount is computed as a double"},
+      {"rule": "FX-MONEY-001", "file": "fineract-tax/src/main/java/org/apache/fineract/portfolio/tax/service/TaxUtils.java", "line": 121, "verdict": "true", "why": "A tax amount computed in double arithmetic"}
     ]},
     {"repo": "moov-io/ach", "commit": "ff3a0988df1f84421b069bc58ff9c1315ba3b448", "languages": ["Go"], "minPackages": 71, "findings": [
       {"rule": "SUP-IMG-002", "file": "Dockerfile", "line": 1, "verdict": "true", "why": "Base image named by tag only"}
@@ -131,7 +134,8 @@
       {"rule": "SUP-GHA-001", "file": ".github/workflows/release.yml", "line": 80, "verdict": "true", "why": "Another publisher's action used by tag"},
       {"rule": "SUP-GHA-001", "file": ".github/workflows/release.yml", "line": 82, "verdict": "true", "why": "Another publisher's action used by tag"},
       {"rule": "SUP-IMG-002", "file": "Dockerfile", "line": 1, "verdict": "true", "why": "Base image named by tag only"},
-      {"rule": "SUP-IMG-002", "file": "Dockerfile", "line": 24, "verdict": "true", "why": "Base image named by tag only"}
+      {"rule": "SUP-IMG-002", "file": "Dockerfile", "line": 24, "verdict": "true", "why": "Base image named by tag only"},
+      {"rule": "FX-MONEY-001", "file": "BTCPayServer/Plugins/Wallets/Controllers/UIWalletsController.cs", "line": 1073, "verdict": "true", "why": "A default payment amount parsed as a double"}
     ]},
     {"repo": "maybe-finance/maybe", "commit": "77b5469832758d1cbee1a940f3012a1ae1c74cd3", "languages": ["Ruby"], "minPackages": 215, "findings": [
       {"rule": "SEC-GEN-001", "file": "docs/hosting/docker.md", "line": 93, "verdict": "false", "why": "Placeholder in the documentation"},
