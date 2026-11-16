@@ -148,6 +148,11 @@ export function upgradeCommand(file: string, eco: Ecosystem, name: string, versi
     case 'NuGet':
       return `dotnet add package ${name} --version ${version}`;
     case 'Maven':
+      if (direct) return `set ${name} to ${version} in ${base}`;
+      // A library that comes in through another: pin it where the build tool will apply it to the whole tree.
+      if (/^build\.gradle(\.kts)?$/.test(base)) return `pin it in ${base}: dependencies { constraints { implementation("${name}:${version}") } }`;
+      if (base === 'pom.xml') return `pin ${name} to ${version} in <dependencyManagement> in pom.xml`;
+      if (base === 'build.sbt') return `pin it in build.sbt: dependencyOverrides += "${name.split(':')[0]}" % "${name.split(':')[1]}" % "${version}"`;
       return `set ${name} to ${version} in ${base}`;
     case 'Pub':
       return `dart pub add ${name}:^${version}`;

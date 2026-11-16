@@ -70,6 +70,8 @@ ${c.bold('Scan options')}
   --junit <file>   write JUnit XML for CI systems that show test reports
   --pr-comment     in CI, post one comment on the pull request listing what it adds, updated in place
   --sbom <file>    also check a CycloneDX JSON SBOM (full Maven and Gradle coverage, including transitive)
+  --resolve        ask Gradle, Maven, sbt or dotnet for the full dependency tree of projects with no lockfile
+                   (runs the project's build tool; with --offline, from its local cache)
   --no-baseline    block on every finding, ignoring ${BASELINE_FILE}
   --submodules     also scan git submodules (skipped by default: they are separate repositories)
   --paths-from <f> only scan the files listed in f, one per line (- for stdin); never closes findings
@@ -203,7 +205,7 @@ async function cmdScan(flags: Flags): Promise<number> {
       /* no stdin: fall back to comparing with the remote branch */
     }
   }
-  const result = await runScan({ root, scope: partialScope ? 'changed' : 'full', only, packs, ignore: config.ignore, offline, pushed, sbom, submodules: Boolean(flags.submodules), ...osvOptions(flags) });
+  const result = await runScan({ root, scope: partialScope ? 'changed' : 'full', only, packs, ignore: config.ignore, offline, pushed, sbom, resolve: Boolean(flags.resolve), submodules: Boolean(flags.submodules), ...osvOptions(flags) });
   result.notes.unshift(...notes);
 
   // Git errors look like an empty repository. Passing here would also close every open finding.
@@ -825,7 +827,7 @@ async function cmdBaseline(flags: Flags): Promise<number> {
   const config = readProjectConfig(root);
   const api = apiUrl(str(flags.api) ?? config.apiUrl);
   const packs = await resolvePacks(api, resolveKey(api));
-  const result = await runScan({ root, scope: 'full', packs, ignore: config.ignore, offline: Boolean(flags.offline), sbom: str(flags.sbom), ...osvOptions(flags) });
+  const result = await runScan({ root, scope: 'full', packs, ignore: config.ignore, offline: Boolean(flags.offline), sbom: str(flags.sbom), resolve: Boolean(flags.resolve), ...osvOptions(flags) });
   const n = writeBaseline(root, result.detections);
   log(c.green('✓'), `Wrote ${BASELINE_FILE} with ${n} known finding(s) (${packs.join(', ')} rules).`);
   log(c.grey('Commit it. From now on only new findings block pushes and CI; the known ones stay visible in the dashboard.'));

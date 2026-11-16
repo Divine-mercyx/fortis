@@ -137,6 +137,24 @@ For sbt, add [sbt-dependency-lock](https://github.com/stringbean/sbt-dependency-
 
 **.NET without a lockfile:** project files list only direct references, so the scan says transitive packages weren't covered. Set `<RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>` and commit `packages.lock.json` to cover them. Floating versions (`8.*`) and ranges are named, not checked.
 
+**Or let the build tool list everything, with `--resolve`.** For Java, Kotlin, Scala and .NET projects with no lockfile, `fortis scan --resolve` asks the project's own build tool for the full tree, so a library that comes in through another one is checked too. A finding for one of those names both libraries, and says how to pin the fixed version where the build applies it to the whole tree.
+
+```bash
+fortis scan --resolve
+```
+
+| Build | What Fortis runs |
+|---|---|
+| Gradle | `gradle dependencies --configuration runtimeClasspath`, through the project's `gradlew` if it has one |
+| Maven | `mvn dependency:tree`, through `mvnw` if the project has one, once for all its modules |
+| sbt | `sbt dependencyTree` |
+| .NET | `dotnet restore`, then `dotnet list package --include-transitive --format json` (SDK 7.0.200 or later) |
+
+- **Off by default:** it runs the build tool, and so the project's build scripts. Use it on code you'd build anyway.
+- **Offline:** with `--offline` (and `--osv-db`), the tools are told to use only their local cache: `--offline` for Gradle, `-o` for Maven, sbt's `offline` setting, and no restore for .NET.
+- **Without the tool:** if it isn't installed or the build fails, the build files are read on their own as before, and the scan says why.
+- **Next time:** the scan says how to commit a lockfile or an SBOM for that build, so later scans need no flag.
+
 ## Commands
 
 | Command | What it does |
@@ -147,6 +165,7 @@ For sbt, add [sbt-dependency-lock](https://github.com/stringbean/sbt-dependency-
 | `fortis scan --fail-on high` | Block at high or above (default: critical) |
 | `fortis scan --json` / `--no-upload` / `--offline` | Machine output (secrets masked, like every other output), keep results local, or skip the network |
 | `fortis scan --sbom bom.json` | Also check a CycloneDX JSON SBOM |
+| `fortis scan --resolve` | Ask Gradle, Maven, sbt or dotnet for the full dependency tree of projects with no lockfile |
 | `fortis scan --junit report.xml` | Also write JUnit XML for CI test reports |
 | `fortis scan --ci --pr-comment` | Comment on the pull request with what it adds (GitHub and GitLab) |
 | `fortis scan --paths-from list.txt` | Only scan the files listed, one per line (`-` for stdin). Never closes findings. The VS Code extension uses this |
@@ -570,6 +589,7 @@ It exits 1 if something stops Fortis doing its job. Things that are only worth k
 **Unreleased**
 - Infobip API keys are named from their shape. Keys for Termii, Smile ID, Prembly, VerifyMe, Youverify, Anchor, Sudo, Paga, Remita, Okra and Moniepoint, which publish no key format, are named from the setting they're assigned to (`TERMII_API_KEY = "…"` is a Termii key), each with where to rotate it. Africa's Talking keys without the `atsk_` prefix are named the same way.
 - `fortis scan --verify` is checked against the real Paystack, Stripe and Flutterwave APIs each night: a key they never issued reads as revoked, and a request that's cut off reads as unknown.
+- `fortis scan --resolve` asks Gradle, Maven, sbt or dotnet for the full dependency tree of Java, Kotlin, Scala and .NET projects with no lockfile, so libraries that come in through other libraries (Log4Shell's way in) are checked too. A finding names the library it comes in through, and says how to pin the fixed version in `build.gradle`, `pom.xml` or `build.sbt`. It's opt-in because it runs the build tool; with `--offline` the tools use their local cache, and without the tool the build files are read as before.
 - The four money checks now read Go, C#, PHP, Java and Kotlin too: money as floating point (FX-MONEY-001: `double` and `Double` in Java and Kotlin where `BigDecimal` belongs, `double` in C# where `decimal` belongs, `float` and Laravel `float`/`double` columns in PHP, `float64` in Go), card data in logs or in plain-text JPA, Entity Framework, Laravel and GORM columns (FX-PCI-001), transaction references built from the clock or a weak random such as `System.currentTimeMillis()`, `DateTime.Now.Ticks`, `time()`, `uniqid()`, `rand()` or Go's `math/rand` (FX-REF-001), and charge amounts taken from the request in Spring, ASP.NET Core, Laravel and Go handlers, followed through local variables (FX-AMT-001).
 - Release gates on Plus and Enterprise: when a project has a gate turned on in the dashboard, `fortis scan --ci` exits with the gate's verdict instead of `--fail-on`, and prints which findings blocked, or who approved the release and why. With no gate, or when the upload fails, `--fail-on` decides as before. `--json` output carries the verdict as `gate`.
 - `fortis update` on Windows waits out a new `fortis.exe` that Windows still holds for a moment (antivirus scans a program it has just written or run) instead of failing with EBUSY, and a folder it can't delete yet no longer hides the real result. The next update clears it.

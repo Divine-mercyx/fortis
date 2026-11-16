@@ -10,6 +10,7 @@ import { rulesFor } from './rules/index';
 import { terraformValues } from './rules/infrastructure';
 import { PINNING, PINNING_FILES } from './rules/mobile';
 import { findLockfiles } from './rules/lockfiles';
+import type { Runner } from './rules/resolve';
 import { JS_TS, PYTHON, TEST_PATH, type Detection, type ProjectContext, type SourceFile } from './rules/types';
 import { makeFilter, readSource } from './files';
 import { allFiles, changedFiles, checkoutInfo, type PushedRef } from './git';
@@ -30,6 +31,10 @@ export type ScanOptions = {
   pushed?: PushedRef[];
   /** A CycloneDX JSON SBOM to check as well as the lockfiles. */
   sbom?: string;
+  /** Ask Gradle, Maven, sbt or dotnet for the full dependency tree of build files with no lockfile (--resolve). */
+  resolve?: boolean;
+  /** Runs the build tools for --resolve. Tests replace it. */
+  resolveRunner?: Runner;
   fetchImpl?: typeof fetch;
   /** Also scan submodules (other repositories inside this one). */
   submodules?: boolean;
@@ -180,6 +185,7 @@ export async function runScan(opts: ScanOptions): Promise<ScanResult> {
         fetchImpl: opts.fetchImpl,
         osvDb: opts.osvDb,
         cacheDir: opts.osvCacheDir,
+        resolve: opts.resolve ? { offline: opts.offline, run: opts.resolveRunner } : undefined,
         // Only a full scan can say a lockfile is missing; a push may simply not have touched it.
         allPaths: opts.scope === 'full' ? paths : undefined,
       });
