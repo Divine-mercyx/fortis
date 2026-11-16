@@ -299,6 +299,10 @@ export const RULE_CATALOG: readonly RuleMeta[] = [
     summary: 'Floating point can\'t hold most decimal amounts exactly: 0.1 + 0.2 is 0.30000000000000004. On money, these errors add up into ledgers that don\'t balance and customers charged the wrong amount.',
     fix: 'Keep money as an integer in kobo (or the smallest unit), or use a decimal type: BigInt, a decimal library, and NUMERIC or DECIMAL columns.',
     fixPython: 'Use decimal.Decimal, or an integer in kobo, with models.DecimalField or Numeric columns. Parse with Decimal(value), not float(value).',
+    fixGo: 'Keep amounts as int64 kobo, or use a decimal library such as shopspring/decimal. Parse with decimal.NewFromString, not strconv.ParseFloat.',
+    fixCsharp: 'Use decimal (and a decimal(18,2) column), or a long in kobo. Parse with decimal.Parse, not double.Parse.',
+    fixPhp: "Keep amounts as integer kobo, or use bcmath or brick/money. In migrations use $table->decimal('amount', 15, 2) or an integer column.",
+    fixJvm: 'Use BigDecimal (with @Column(precision = 19, scale = 2)) or a Long in kobo. Parse with BigDecimal(value), not Double.parseDouble or toDouble().',
   },
   {
     id: 'FX-PCI-001',
@@ -316,6 +320,10 @@ export const RULE_CATALOG: readonly RuleMeta[] = [
     summary: 'A reference from Math.random() or the time can be guessed, and two requests in the same moment can collide. Providers use the reference to tell payments apart, so this leads to rejected payments, or to one being mistaken for another.',
     fix: 'Generate it with crypto.randomUUID(), or crypto.randomBytes(16).toString(\'hex\').',
     fixPython: 'Generate it with uuid.uuid4() or secrets.token_hex(16).',
+    fixGo: 'Generate it with uuid.New() or crypto/rand, never math/rand or time.Now().',
+    fixCsharp: 'Generate it with Guid.NewGuid() or RandomNumberGenerator, never Random or DateTime.Now.',
+    fixPhp: 'Generate it with Str::uuid() or bin2hex(random_bytes(16)), never time(), uniqid() or rand().',
+    fixJvm: 'Generate it with UUID.randomUUID() or SecureRandom, never Random, Math.random() or the clock.',
   },
   {
     id: 'FX-AMT-001',
