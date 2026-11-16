@@ -10,15 +10,30 @@ import TreeSitter from '@vscode/tree-sitter-wasm';
  * and only unpacks the ones a repository needs.
  */
 
-export type Language = 'javascript' | 'typescript' | 'tsx' | 'python';
+export type Language = 'javascript' | 'typescript' | 'tsx' | 'python' | 'go' | 'csharp' | 'java' | 'php';
 
 const GRAMMARS: Record<Language, string> = {
   javascript: 'tree-sitter-javascript',
   typescript: 'tree-sitter-typescript',
   tsx: 'tree-sitter-tsx',
   python: 'tree-sitter-python',
+  // For following calls in the account-takeover checks (analysis/other.ts). Kotlin has no grammar here.
+  go: 'tree-sitter-go',
+  csharp: 'tree-sitter-c-sharp',
+  java: 'tree-sitter-java',
+  php: 'tree-sitter-php',
 };
 
+/** Go, C#, Java and PHP files: parsed only to follow calls (analysis/other.ts), not by the JavaScript and Python rules. */
+export const callLanguageOf = (path: string): Language | null => {
+  if (/\.go$/i.test(path)) return 'go';
+  if (/\.cs$/i.test(path)) return 'csharp';
+  if (/\.java$/i.test(path)) return 'java';
+  if (/\.php$/i.test(path)) return 'php';
+  return null;
+};
+
+/** The languages the JavaScript and Python syntax-tree rules read. */
 export const languageOf = (path: string): Language | null => {
   if (/\.tsx$/i.test(path)) return 'tsx';
   if (/\.[cm]?ts$/i.test(path)) return 'typescript';

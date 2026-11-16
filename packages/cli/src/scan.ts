@@ -1,7 +1,7 @@
 import { SEVERITY_RANK, type RulePack, type Severity } from '@fortis/shared';
 
 import { takeAnalysisFailures } from './analysis/facts';
-import { languageOf, loadGrammars, type Language } from './analysis/parser';
+import { callLanguageOf, languageOf, loadGrammars, type Language } from './analysis/parser';
 import { createProject } from './analysis/project';
 import { scanDependencies } from './rules/dependencies';
 import { GLOBAL_LIMIT } from './rules/auth';
@@ -121,6 +121,8 @@ export async function runScan(opts: ScanOptions): Promise<ScanResult> {
   // Only the grammars this repository needs, and only if the rules that use them are running.
   if (rules.some((r) => r.pack === 'fintech')) {
     const languages = new Set(candidates.map(languageOf).filter((l): l is Language => l !== null));
+    // Go, C#, Java and PHP: to follow a login or reset handler into its services (analysis/other.ts).
+    for (const l of (opts.scope === 'full' ? candidates : [...candidates, ...otherPaths]).map(callLanguageOf)) if (l) languages.add(l);
     try {
       await loadGrammars(languages);
     } catch (err) {
