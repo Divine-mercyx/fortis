@@ -1,7 +1,7 @@
 name: Nightly accuracy
 
-# Things that can change without a commit here: OSV's API, the providers `fortis scan --verify` asks, and how the rules
-# behave on real code.
+# Things that can change without a commit here: OSV's API, the providers `fortis scan --verify` asks, Gradle's and
+# Maven's output (for --resolve), and how the rules behave on real code.
 # A scheduled failure opens one issue, and a later pass closes it. See scripts/report-nightly.mjs.
 
 on:
@@ -15,6 +15,8 @@ on:
       - packages/cli/bench/corpus.json
       - packages/cli/bench/corpus.ts
       - packages/cli/tests/verify-live.test.ts
+      - packages/cli/src/rules/resolve.ts
+      - packages/cli/tests/resolve-live.test.ts
 
 permissions:
   contents: read
@@ -57,6 +59,24 @@ jobs:
           FORTIS_LIVE_FLUTTERWAVE_TEST_KEY: ${{ secrets.FORTIS_LIVE_FLUTTERWAVE_TEST_KEY }}
           FORTIS_LIVE_FLUTTERWAVE_REVOKED_KEY: ${{ secrets.FORTIS_LIVE_FLUTTERWAVE_REVOKED_KEY }}
 
+  live-resolve:
+    name: Live --resolve tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      # The runner image has Java, Gradle and Maven.
+      - run: java -version && gradle --version && mvn --version
+      - run: pnpm --filter fortis-watchdog exec vitest run tests/resolve-live.test.ts
+        env:
+          FORTIS_LIVE_RESOLVE: '1'
+
   corpus:
     name: Real-world corpus
     runs-on: ubuntu-24.04
@@ -79,7 +99,7 @@ jobs:
 
   report:
     name: Open or close the issue
-    needs: [live-osv, live-verify, corpus]
+    needs: [live-osv, live-verify, live-resolve, corpus]
     if: always() && github.event_name != 'pull_request'
     runs-on: ubuntu-24.04
     permissions:
@@ -89,6 +109,6 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - env:
           GH_TOKEN: ${{ github.token }}
-          RESULT: ${{ (needs.live-osv.result == 'success' && needs.live-verify.result == 'success' && needs.corpus.result == 'success') && 'success' || 'failure' }}
+          RESULT: ${{ (needs.live-osv.result == 'success' && needs.live-verify.result == 'success' && needs.live-resolve.result == 'success' && needs.corpus.result == 'success') && 'success' || 'failure' }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: node packages/cli/scripts/report-nightly.mjs "$RESULT" "$RUN_URL"

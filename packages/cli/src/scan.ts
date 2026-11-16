@@ -1,3 +1,6 @@
+import { readFileSync } from 'node:fs';
+import { relative, resolve } from 'node:path';
+
 import { SEVERITY_RANK, type RulePack, type Severity } from '@fortis/shared';
 
 import { takeAnalysisFailures } from './analysis/facts';
@@ -7,9 +10,12 @@ import { scanDependencies } from './rules/dependencies';
 import { GLOBAL_LIMIT } from './rules/auth';
 import { GLOBAL_LIMIT_OTHER, OTHER_LANGUAGES } from './rules/auth-languages';
 import { rulesFor } from './rules/index';
-import { terraformValues } from './rules/infrastructure';
+import { CI_FILE, k8sExposedServiceRule, terraformValues, unresolvedNote } from './rules/infrastructure';
+import { chartsWithServices, renderCharts, type HelmRunner } from './rules/helm';
+import { planFindings } from './rules/terraform-plan';
 import { PINNING, PINNING_FILES } from './rules/mobile';
 import { findLockfiles } from './rules/lockfiles';
+import type { Runner } from './rules/resolve';
 import { JS_TS, PYTHON, TEST_PATH, type Detection, type ProjectContext, type SourceFile } from './rules/types';
 import { makeFilter, readSource } from './files';
 import { allFiles, changedFiles, checkoutInfo, type PushedRef } from './git';
@@ -30,6 +36,14 @@ export type ScanOptions = {
   pushed?: PushedRef[];
   /** A CycloneDX JSON SBOM to check as well as the lockfiles. */
   sbom?: string;
+  /** Ask Gradle, Maven, sbt or dotnet for the full dependency tree of build files with no lockfile (--resolve). */
+  resolve?: boolean;
+  /** Runs the build tools for --resolve. Tests replace it. */
+  resolveRunner?: Runner;
+  /** `terraform show -json` output to check, where every value is final (--terraform-plan). */
+  terraformPlan?: string;
+  /** Runs helm to render charts. Tests replace it. */
+  helmRunner?: HelmRunner;
   fetchImpl?: typeof fetch;
   /** Also scan submodules (other repositories inside this one). */
   submodules?: boolean;
@@ -98,9 +112,12 @@ export async function runScan(opts: ScanOptions): Promise<ScanResult> {
   // Go, C#, PHP, Java and Kotlin files join the project too, so a route can be followed into its controller.
   const otherPaths = (opts.scope === 'full' ? candidates : everything().filter(keep)).filter((p) => OTHER_LANGUAGES.test(p) && !TEST_PATH.test(p));
   ctx.project = createProject([...ctxPaths, ...otherPaths], (p) => readSource(opts.root, p));
-  // Terraform variables and locals, so a rule can judge `cidr_blocks = var.admin_cidrs`.
-  const tfPaths = (opts.scope === 'full' ? candidates : everything().filter(keep)).filter((p) => /\.(?:tf|tfvars)$/i.test(p));
-  if (tfPaths.length) ctx.terraform = terraformValues(tfPaths.map((p) => readSource(opts.root, p)).filter((f): f is SourceFile => f !== null));
+  // Terraform variables and locals, so a rule can judge `cidr_blocks = var.admin_cidrs`, with TF_VAR_ and -var values from CI files.
+  const tfPool = (opts.scope === 'full' ? candidates : everything().filter(keep));
+  const tfPaths = tfPool.filter((p) => /\.(?:tf|tfvars)$/i.test(p));
+  if (tfPaths.length) ctx.terraform = terraformValues([...tfPaths, ...tfPool.filter((p) => CI_FILE.test(p))].map((p) => readSource(opts.root, p)).filter((f): f is SourceFile => f !== null));
+  // Settings the infrastructure checks couldn't resolve, so the scan can say they weren't checked.
+  ctx.unresolved = [];
   // Go, C#, PHP, Java and Kotlin apps can turn on a rate limit for everything in one file too.
   if (!ctx.rateLimitAll && rules.some((r) => r.id === 'FX-RATE-001')) {
     const pool = (opts.scope === 'full' ? candidates : everything().filter(keep)).filter((p) => OTHER_LANGUAGES.test(p) && !TEST_PATH.test(p));
@@ -160,6 +177,42 @@ export async function runScan(opts: ScanOptions): Promise<ScanResult> {
     }
   }
 
+  const record = (d: Detection) => {
+    const key = `${d.ruleId}|${d.file}|${d.line}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    detections.push(d);
+  };
+  // Helm charts, rendered when Helm is installed: Services whose type or ports come from values through a template.
+  if (rules.some((r) => r.id === 'INF-K8S-001')) {
+    const charts = chartsWithServices(candidates, (p) => readSource(opts.root, p)?.text ?? null);
+    if (charts.length) {
+      const rendered = await renderCharts(opts.root, charts, opts.helmRunner);
+      notes.push(...rendered.notes);
+      for (const file of rendered.files) {
+        for (const d of k8sExposedServiceRule.run(file, ctx)) {
+          // The file check may already have found it in the template itself.
+          if (detections.some((x) => x.ruleId === d.ruleId && x.file === d.file)) continue;
+          record({ ...d, line: 0, title: `${d.title} (as rendered by helm template)` });
+        }
+      }
+    }
+  }
+  // A Terraform plan, where every value is final.
+  if (opts.terraformPlan && rules.some((r) => r.pack === 'infrastructure')) {
+    const rel = relative(opts.root, resolve(opts.root, opts.terraformPlan)).replace(/\\/g, '/');
+    try {
+      const plan = planFindings(readFileSync(resolve(opts.root, opts.terraformPlan), 'utf8'), rel);
+      for (const d of plan.detections) record(d);
+      ctx.unresolved.push(...plan.unresolved);
+      notes.push(`Terraform plan ${rel}: checked ${plan.resources} planned resource${plan.resources === 1 ? '' : 's'}.`);
+    } catch (e) {
+      notes.push(`Couldn't read the Terraform plan ${rel}: ${(e as Error).message}. Make it with terraform plan -out=tfplan, then terraform show -json tfplan > plan.json.`);
+    }
+  }
+  const unresolved = unresolvedNote(ctx.unresolved);
+  if (unresolved) notes.push(unresolved);
+
   const unreadable = takeAnalysisFailures();
   if (unreadable) {
     notes.push(`Fintech code rules couldn't read ${unreadable} file${unreadable === 1 ? '' : 's'}, so findings in them stay open.`);
@@ -180,6 +233,7 @@ export async function runScan(opts: ScanOptions): Promise<ScanResult> {
         fetchImpl: opts.fetchImpl,
         osvDb: opts.osvDb,
         cacheDir: opts.osvCacheDir,
+        resolve: opts.resolve ? { offline: opts.offline, run: opts.resolveRunner } : undefined,
         // Only a full scan can say a lockfile is missing; a push may simply not have touched it.
         allPaths: opts.scope === 'full' ? paths : undefined,
       });

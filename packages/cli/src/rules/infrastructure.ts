@@ -251,23 +251,67 @@ function azureOpenings(block: HclBlock): Opening[] {
 const dirOf = (path: string) => (path.includes('/') ? path.slice(0, path.lastIndexOf('/')) : '');
 export const TFVARS = /\.tfvars$/i;
 
+/** CI pipeline files, where TF_VAR_… and terraform -var values are set (#93). */
+export const CI_FILE = /(?:^|\/)(?:\.github\/workflows\/[^/]+\.ya?ml|\.gitlab-ci\.ya?ml|azure-pipelines\.ya?ml|bitbucket-pipelines\.ya?ml|\.circleci\/config\.ya?ml|Jenkinsfile|\.buildkite\/[^/]+\.ya?ml|cloudbuild\.ya?ml|\.drone\.ya?ml)$/i;
+
+/**
+ * Terraform values a CI file sets: `TF_VAR_name: value` (or `=`) in its environment, and `-var 'name=value'` on a
+ * terraform command line. Values that come from the CI system's own secrets or variables (`${{ … }}`, `$X`) are left
+ * out, since they aren't written down. Each value is turned into an HCL literal.
+ */
+export function ciTerraformVars(text: string): { env: Map<string, string>; cli: Map<string, string> } {
+  const literal = (raw: string): string | null => {
+    const v = raw.trim().replace(/^(["'])(.*)\1$/, '$2');
+    if (!v || /\$|\{\{|secrets\./.test(v)) return null;
+    if (/^(?:true|false|-?\d+(?:\.\d+)?)$/.test(v)) return v;
+    if (v.startsWith('[') && LITERAL.test(v)) return v;
+    return `"${v.replace(/"/g, '\\"')}"`;
+  };
+  const env = new Map<string, string>();
+  const cli = new Map<string, string>();
+  for (const m of text.matchAll(/\bTF_VAR_([A-Za-z_][\w-]*)\s*[:=]\s*("[^"\n]*"|'[^'\n]*'|[^\s#,}]+)/g)) {
+    const v = literal(m[2]!);
+    if (v) env.set(m[1]!, v);
+  }
+  for (const m of text.matchAll(/(?:^|\s)-var(?:=|\s+)(?:"([A-Za-z_][\w-]*)=([^"\n]*)"|'([A-Za-z_][\w-]*)=([^'\n]*)'|([A-Za-z_][\w-]*)=(\S+))/g)) {
+    const name = m[1] ?? m[3] ?? m[5]!;
+    const v = literal(m[2] ?? m[4] ?? m[6]!);
+    if (v) cli.set(name, v);
+  }
+  return { env, cli };
+}
+
+/** A setting whose value comes from outside the repository and couldn't be resolved, so it wasn't checked. */
+export type Unresolved = { ruleId: string; file: string; line: number; setting: string; value: string };
+
 /** A literal HCL value on one line: a string, number, bool or flat list of those. */
 const LITERAL = /^(?:"[^"\n$]*"|-?\d+(?:\.\d+)?|true|false|\[\s*(?:(?:"[^"\n$]*"|-?\d+)\s*,?\s*)*\])$/;
 
 /**
- * Literal values of variables (their defaults, then .tfvars), and locals, for every Terraform folder.
- * A rule can then judge `cidr_blocks = var.admin_cidrs` when the value is written down somewhere.
+ * Literal values of variables, and locals, for every Terraform folder, in Terraform's own order: a variable's default,
+ * then TF_VAR_… from a CI file, then .tfvars, then -var on a CI file's terraform command line. A rule can then judge
+ * `cidr_blocks = var.admin_cidrs` when the value is written down somewhere. CI values go to every folder that
+ * declares the variable, since a CI file doesn't say which folder it runs Terraform in.
  */
 export function terraformValues(files: SourceFile[]): Map<string, Map<string, string>> {
   const out = new Map<string, Map<string, string>>();
   const of = (dir: string) => out.get(dir) ?? out.set(dir, new Map()).get(dir)!;
   const tfvars: SourceFile[] = [];
+  const declared = new Map<string, Set<string>>();
+  const ci = { env: new Map<string, string>(), cli: new Map<string, string>() };
   for (const f of files) {
+    if (CI_FILE.test(f.path)) {
+      const found = ciTerraformVars(f.text);
+      for (const [k, v] of found.env) ci.env.set(k, v);
+      for (const [k, v] of found.cli) ci.cli.set(k, v);
+      continue;
+    }
     if (TFVARS.test(f.path)) { tfvars.push(f); continue; }
     if (!TERRAFORM.test(f.path)) continue;
     const vars = of(dirOf(f.path));
     for (const b of hclBlocks(f.text)) {
       if (b.kind === 'variable' && b.labels[0]) {
+        (declared.get(dirOf(f.path)) ?? declared.set(dirOf(f.path), new Set()).get(dirOf(f.path))!).add(b.labels[0]);
         const d = rawAttr(b, 'default');
         if (d && LITERAL.test(d)) vars.set(`var.${b.labels[0]}`, d);
       } else if (b.kind === 'locals') {
@@ -278,7 +322,12 @@ export function terraformValues(files: SourceFile[]): Map<string, Map<string, st
       }
     }
   }
-  // terraform.tfvars and *.auto.tfvars win over defaults.
+  const fromCi = (values: Map<string, string>) => {
+    for (const [dir, names] of declared) for (const [k, v] of values) if (names.has(k)) of(dir).set(`var.${k}`, v);
+  };
+  // TF_VAR_ environment variables win over defaults,
+  fromCi(ci.env);
+  // terraform.tfvars and *.auto.tfvars win over those,
   for (const f of tfvars) {
     const vars = of(dirOf(f.path));
     for (const m of stripHclComments(f.text).matchAll(/(?:^|\n)[ \t]*([A-Za-z_][\w-]*)[ \t]*=[ \t]*([^\n]+)/g)) {
@@ -286,7 +335,105 @@ export function terraformValues(files: SourceFile[]): Map<string, Map<string, st
       if (LITERAL.test(v)) vars.set(`var.${m[1]}`, v);
     }
   }
+  // and -var on the command line wins over everything.
+  fromCi(ci.cli);
   return out;
+}
+
+/* ------------------------------------------------- settings that couldn't be resolved */
+
+/** A value that comes from a variable, local, module output or data source, or is built with `${…}`. */
+const REF = /\b(?:var|local|module|data)\.[A-Za-z_]|\$\{/;
+
+/** A setting of the block's own level whose value is still a reference after resolveTerraform. */
+function refAttr(block: HclBlock, name: string): { value: string; line: number } | null {
+  const flat = flatBody(block);
+  const m = new RegExp(`(^|\\n)[ \\t]*${name}[ \\t]*=[ \\t]*([^\\n]+)`).exec(flat);
+  if (!m || !REF.test(m[2]!)) return null;
+  return { value: m[2]!.trim().slice(0, 80), line: block.bodyLine + lineAt(flat, m.index + m[1]!.length) - 1 };
+}
+
+/** Whether a firewall rule's ports could include an admin or database port: yes when they aren't written down. */
+function portsMayBeSensitive(b: HclBlock): boolean {
+  if (/\b(?:ip_)?protocol\s*=\s*"(?:-1|all)"/.test(b.body)) return true;
+  let known = false;
+  const from = /\bfrom_port\s*=\s*(-?\d+)/.exec(b.body);
+  const to = /\bto_port\s*=\s*(-?\d+)/.exec(b.body);
+  if (from && to) {
+    known = true;
+    if (sensitiveIn(Number(from[1]), Number(to[1])).length) return true;
+  }
+  for (const m of b.body.matchAll(/\b(?:destination_port_ranges?|ports)\s*=\s*(\[[^\]]*\]|"[^"]*")/g)) {
+    for (const s of [...m[1]!.matchAll(/"([^"]*)"/g)].map((x) => x[1]!)) {
+      const r = portSpec(s);
+      if (!r) continue;
+      known = true;
+      if (sensitiveIn(r[0], r[1]).length) return true;
+    }
+  }
+  return !known;
+}
+
+/** The settings each rule judges, by resource type. */
+const WATCHED: Record<string, Record<string, string[]>> = {
+  'INF-NET-001': {
+    aws_security_group_rule: ['cidr_blocks', 'ipv6_cidr_blocks'],
+    aws_vpc_security_group_ingress_rule: ['cidr_ipv4', 'cidr_ipv6'],
+    google_compute_firewall: ['source_ranges'],
+    azurerm_network_security_rule: ['source_address_prefix', 'source_address_prefixes'],
+  },
+  'INF-DB-001': {
+    aws_db_instance: ['publicly_accessible'],
+    aws_rds_cluster_instance: ['publicly_accessible'],
+    aws_redshift_cluster: ['publicly_accessible'],
+    aws_dms_replication_instance: ['publicly_accessible'],
+    module: ['publicly_accessible'],
+  },
+  'INF-STO-001': {
+    aws_s3_bucket: ['acl'],
+    aws_s3_bucket_acl: ['acl'],
+    aws_s3_bucket_public_access_block: ['block_public_acls', 'block_public_policy', 'ignore_public_acls', 'restrict_public_buckets'],
+    azurerm_storage_container: ['container_access_type'],
+    azurerm_storage_account: ['allow_nested_items_to_be_public', 'allow_blob_public_access'],
+    google_storage_bucket_iam_member: ['member'],
+    google_storage_bucket_iam_binding: ['members'],
+  },
+};
+
+/** Records the settings a rule would judge whose value comes from outside the repository (#93). */
+function watchRefs(file: SourceFile, ctx: ProjectContext | undefined, ruleId: keyof typeof WATCHED, block: HclBlock): void {
+  if (!ctx?.unresolved) return;
+  const type = block.kind === 'module' ? 'module' : block.labels[0] ?? '';
+  const targets: [HclBlock, string[]][] = [];
+  const keys = WATCHED[ruleId]![type];
+  if (keys) targets.push([block, keys]);
+  if (ruleId === 'INF-NET-001' && type === 'aws_security_group') for (const b of hclBlocks(block.body, block.bodyLine).filter((x) => x.kind === 'ingress')) targets.push([b, ['cidr_blocks', 'ipv6_cidr_blocks']]);
+  if (ruleId === 'INF-NET-001' && type === 'azurerm_network_security_group') for (const b of hclBlocks(block.body, block.bodyLine).filter((x) => x.kind === 'security_rule')) targets.push([b, ['source_address_prefix', 'source_address_prefixes']]);
+  for (const [b, names] of targets) {
+    if (ruleId === 'INF-NET-001' && !portsMayBeSensitive(b)) continue;
+    for (const name of names) {
+      const ref = refAttr(b, name);
+      if (ref && !isIgnored(file, ref.line)) ctx.unresolved.push({ ruleId, file: file.path, line: ref.line, setting: name, value: ref.value });
+    }
+  }
+}
+
+/** The "not checked" note for settings whose values couldn't be resolved. */
+export function unresolvedNote(items: Unresolved[]): string | null {
+  const seen = new Set<string>();
+  const unique = items.filter((u) => {
+    const key = `${u.file}|${u.line}|${u.setting}`;
+    return !seen.has(key) && seen.add(key);
+  });
+  if (!unique.length) return null;
+  const n = unique.length;
+  const shown = unique.slice(0, 10).map((u) => `  ${u.file}:${u.line} ${u.setting} = ${u.value} (${u.ruleId})`);
+  if (n > 10) shown.push(`  …and ${n - 10} more`);
+  return [
+    `Not checked: ${n === 1 ? '1 infrastructure setting gets its' : `${n} infrastructure settings get their`} value from outside the repository (a variable, module output, stack parameter or chart template), so ${n === 1 ? 'it' : 'they'} couldn't be judged.`
+      + ' Write the value in a .tfvars file or as a TF_VAR_ in the CI file, give the parameter a default, or scan the plan with --terraform-plan:',
+    ...shown,
+  ].join('\n');
 }
 
 /** A block body with its nested blocks blanked out, keeping line breaks. */
@@ -388,6 +535,7 @@ export const openPortRule: FileRule = {
   run(file, ctx) {
     const out: Detection[] = [];
     for (const block of tfBlocks(file, ctx).filter((b) => b.kind === 'resource' || b.kind === 'module')) {
+      watchRefs(file, ctx, 'INF-NET-001', block);
       for (const o of [...awsOpenings(block), ...gcpOpenings(block), ...azureOpenings(block), ...moduleOpenings(block)]) {
         if (isIgnored(file, o.line)) continue;
         out.push(hit(file, o.line, 'INF-NET-001', 'high', `Firewall open to the internet on ${describe(o.names)}`, OPEN_PORT_FIX));
@@ -413,6 +561,7 @@ export const publicStorageRule: FileRule = {
     };
     const S3_FIX = 'Keep the bucket private: remove the public ACL, set all four aws_s3_bucket_public_access_block settings to true, and share files with presigned URLs or through CloudFront with origin access control.';
     for (const b of tfBlocks(file, ctx).filter((x) => x.kind === 'resource' || x.kind === 'module')) {
+      if (b.kind === 'resource') watchRefs(file, ctx, 'INF-STO-001', b);
       // Bucket modules (terraform-aws-modules/s3-bucket) take the same settings as the resources.
       const type = b.kind === 'module' ? (/s3-bucket|s3_bucket|\bs3\b/i.test(str(attr(b, 'source')) ?? '') ? 'aws_s3_module' : '') : b.labels[0];
       if (type === 'aws_s3_module') {
@@ -457,6 +606,7 @@ export const publicDatabaseRule: FileRule = {
   run(file, ctx) {
     const out: Detection[] = [];
     for (const b of tfBlocks(file, ctx).filter((x) => x.kind === 'resource' || x.kind === 'module')) {
+      watchRefs(file, ctx, 'INF-DB-001', b);
       const type = b.kind === 'module' ? 'module' : b.labels[0];
       if (type === 'module') {
         // RDS, Aurora and Redshift modules pass publicly_accessible straight through.

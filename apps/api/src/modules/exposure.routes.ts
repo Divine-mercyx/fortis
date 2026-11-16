@@ -14,6 +14,7 @@ import { authenticateCli, requireOrgRole } from '../plugins/auth';
 import { ExposureError, exposureFindings, probeHost, SERVICES, type ProbeOptions } from './exposure.service';
 import { ingestScan } from './ingest.service';
 import { planLimits } from './orgs.routes';
+import { verifiedHostnames } from './target-hosts.routes';
 import { targetStatus } from './targets.routes';
 
 const params = z.object({ orgId: z.string().uuid(), projectId: z.string().uuid(), targetId: z.string().uuid() });
@@ -53,17 +54,48 @@ function assertRunnable(target: TargetRow, plan: string) {
   }
 }
 
-/** Run one exposure check and record it. Shared by the dashboard, the schedule and the CLI. */
+/** Host names checked at once in one exposure check. */
+const HOSTS_AT_ONCE = 4;
+
+/**
+ * Run one exposure check and record it. Shared by the dashboard, the schedule and the CLI. It checks the target's own
+ * host name and each of its verified extra host names (#92); an unverified host name is never contacted. Callers
+ * check the target's safeguards first (assertRunnable), and those cover every host name of the target.
+ */
 export async function runExposure(req: FastifyRequest, target: TargetRow, how: { trigger: 'manual' | 'ci' | 'schedule'; by: string }) {
   const started = Date.now();
-  let probe: Awaited<ReturnType<typeof probeHost>>;
-  try {
-    probe = await probeHost(target.hostname, probeOptions);
-  } catch (e) {
-    if (e instanceof ExposureError) throw badRequest(e.message, e.code);
-    throw e;
+  const hostnames = [target.hostname, ...(await verifiedHostnames(target.id)).filter((h) => h !== target.hostname)];
+  const runs: { hostname: string; probe: Awaited<ReturnType<typeof probeHost>> }[] = [];
+  const skippedHosts: { hostname: string; reason: string }[] = [];
+  // A few host names at a time, so ten extra hosts don't run past the dashboard's request time limit.
+  const outcomes: ({ ok: true; probe: Awaited<ReturnType<typeof probeHost>> } | { ok: false; error: unknown })[] = new Array(hostnames.length);
+  let next = 0;
+  await Promise.all(
+    Array.from({ length: Math.min(HOSTS_AT_ONCE, hostnames.length) }, async () => {
+      while (next < hostnames.length) {
+        const i = next++;
+        try {
+          outcomes[i] = { ok: true, probe: await probeHost(hostnames[i]!, probeOptions) };
+        } catch (error) {
+          outcomes[i] = { ok: false, error };
+        }
+      }
+    }),
+  );
+  for (const [i, hostname] of hostnames.entries()) {
+    const o = outcomes[i]!;
+    if (o.ok) {
+      runs.push({ hostname, probe: o.probe });
+      continue;
+    }
+    // The target's own host failing stops the check, as before; an extra host failing (a private address, no DNS)
+    // is skipped and reported, so one bad record doesn't hide the rest.
+    if (!(o.error instanceof ExposureError)) throw o.error;
+    if (i === 0) throw badRequest(o.error.message, o.error.code);
+    skippedHosts.push({ hostname, reason: o.error.message });
   }
-  const found = exposureFindings(target.hostname, probe.results, probe.pages);
+  const probe = runs[0]!.probe;
+  const found = runs.flatMap((r) => exposureFindings(r.hostname, r.probe.results, r.probe.pages));
   const result = await ingestScan(
     { orgId: target.orgId, projectId: target.projectId, tokenId: null },
     {
@@ -74,7 +106,7 @@ export async function runExposure(req: FastifyRequest, target: TargetRow, how: {
       scope: 'full',
       cliVersion: 'server',
       durationMs: Date.now() - started,
-      filesScanned: probe.results.length,
+      filesScanned: runs.reduce((n, r) => n + r.probe.results.length, 0),
       findings: found.map((f) => ({ ruleId: f.ruleId, severity: f.severity, title: f.title, file: f.file, snippet: f.snippet, detail: f.detail })),
     },
   );
@@ -84,7 +116,15 @@ export async function runExposure(req: FastifyRequest, target: TargetRow, how: {
     action: 'target.exposure_checked',
     targetType: 'target',
     targetId: target.id,
-    meta: { by: how.by, trigger: how.trigger, addresses: probe.addresses, open: probe.results.filter((r) => r.open).length, pages: probe.pages.length },
+    meta: {
+      by: how.by,
+      trigger: how.trigger,
+      hosts: runs.map((r) => r.hostname),
+      skippedHosts: skippedHosts.map((s) => s.hostname),
+      addresses: probe.addresses,
+      open: runs.reduce((n, r) => n + r.probe.results.filter((x) => x.open).length, 0),
+      pages: runs.reduce((n, r) => n + r.probe.pages.length, 0),
+    },
   });
   return {
     scanId: result.scanId,
@@ -93,8 +133,10 @@ export async function runExposure(req: FastifyRequest, target: TargetRow, how: {
     addresses: probe.addresses,
     refused: probe.refused,
     checked: SERVICES.length,
-    pages: probe.pages.map((p) => ({ url: p.url, what: p.check.what, severity: p.check.severity })),
-    open: probe.results.filter((r) => r.open).map((r) => ({ ip: r.ip, port: r.port, service: r.service, noAuth: r.noAuth ?? null, banner: r.banner ?? null })),
+    hosts: runs.map((r) => ({ hostname: r.hostname, addresses: r.probe.addresses, refused: r.probe.refused })),
+    skippedHosts,
+    pages: runs.flatMap((r) => r.probe.pages.map((p) => ({ url: p.url, what: p.check.what, severity: p.check.severity }))),
+    open: runs.flatMap((r) => r.probe.results.filter((x) => x.open).map((x) => ({ hostname: r.hostname, ip: x.ip, port: x.port, service: x.service, noAuth: x.noAuth ?? null, banner: x.banner ?? null }))),
     findings: found,
     newCount: result.newCount,
     fixedCount: result.fixedCount,

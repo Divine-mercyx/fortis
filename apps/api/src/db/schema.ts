@@ -194,6 +194,31 @@ export const targets = pgTable(
   (t) => [uniqueIndex('targets_project_url_key').on(t.projectId, t.url), index('targets_org_idx').on(t.orgId)],
 );
 
+/**
+ * More host names for a target's exposure checks (admin., api., backoffice.…). Each is proven with its own TXT record
+ * at _fortis-verify.<hostname> before Fortis connects to it, and runs under the target's authorisation and pause.
+ */
+export const targetHosts = pgTable(
+  'target_hosts',
+  {
+    id: id(),
+    orgId: uuid('org_id')
+      .notNull()
+      .references(() => organizations.id, { onDelete: 'cascade' }),
+    targetId: uuid('target_id')
+      .notNull()
+      .references(() => targets.id, { onDelete: 'cascade' }),
+    hostname: text('hostname').notNull(),
+    /** Value expected in the TXT record at _fortis-verify.<hostname>. */
+    verificationToken: text('verification_token').notNull(),
+    verifiedAt: timestamp('verified_at', { withTimezone: true }),
+    lastVerificationError: text('last_verification_error'),
+    createdBy: uuid('created_by').references(() => users.id, { onDelete: 'set null' }),
+    createdAt: createdAt(),
+  },
+  (t) => [uniqueIndex('target_hosts_target_hostname_key').on(t.targetId, t.hostname), index('target_hosts_org_idx').on(t.orgId)],
+);
+
 /* ---------- Scans and findings ---------- */
 
 export const scans = pgTable(

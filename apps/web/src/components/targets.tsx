@@ -199,7 +199,7 @@ function Exposure({ t, base, canRun, isAdmin }: { t: StagingTarget; base: string
           <span className="small">
             {data?.lastScan
               ? `Checked ${timeAgo(data.lastScan.at)} · ${n} admin and database ports, admin pages and secret files`
-              : `Checks ${n} admin and database ports (SSH, PostgreSQL, Redis, the Docker API…), admin pages (phpMyAdmin, Actuator, debug pages) and files (.env, .git) from the internet`}
+              : `Checks ${n} admin and database ports (SSH, PostgreSQL, Redis, the Docker API…), and admin pages (phpMyAdmin, Grafana, Actuator, debug pages) and files (.env, .git) on ports 443, 80, 8080, 8443 and 9000, from the internet`}
           </span>
         </div>
         <div className="exposure-actions">
@@ -234,6 +234,95 @@ function Exposure({ t, base, canRun, isAdmin }: { t: StagingTarget; base: string
         </ul>
       ) : data?.lastScan ? (
         <p className="exposure-clear"><Check /> No admin ports, admin pages or secret files answer from the internet.</p>
+      ) : null}
+    </div>
+  );
+}
+
+type TargetHost = {
+  id: string;
+  hostname: string;
+  status: 'verified' | 'unverified';
+  verification: { recordName: string; recordType: string; recordValue: string; verifiedAt: string | null; lastError: string | null };
+};
+
+/**
+ * More host names for the exposure check (admin., api., backoffice.…). Each one is proven with its own DNS record
+ * before Fortis connects to it; until then it's listed but never checked.
+ */
+function MoreHosts({ t, base, isAdmin }: { t: StagingTarget; base: string; isAdmin: boolean }) {
+  const toast = useToast();
+  const url = `${base}/${t.id}/hosts`;
+  const { data, mutate } = useSWR<{ hosts: TargetHost[]; max: number }>(url, fetcher);
+  const [hostname, setHostname] = useState('');
+  const [busy, setBusy] = useState<string | null>(null);
+
+  async function act(key: string, fn: () => Promise<unknown>) {
+    setBusy(key);
+    try {
+      await fn();
+      await mutate();
+    } catch (err) {
+      toast((err as Error).message, true);
+    } finally {
+      setBusy(null);
+    }
+  }
+  const add = (e: React.FormEvent) => {
+    e.preventDefault();
+    void act('add', async () => {
+      await api(url, { method: 'POST', body: { hostname } });
+      setHostname('');
+    });
+  };
+  const verify = (h: TargetHost) => act(h.id, async () => {
+    const r = await api<{ verified: boolean }>(`${url}/${h.id}/verify`, { method: 'POST' });
+    toast(r.verified ? `${h.hostname} verified` : 'Record not found yet', !r.verified);
+  });
+  const remove = (h: TargetHost) => window.confirm(`Stop checking ${h.hostname}?`) && act(h.id, () => api(`${url}/${h.id}`, { method: 'DELETE' }));
+
+  const hosts = data?.hosts ?? [];
+  if (!isAdmin && !hosts.length) return null;
+  return (
+    <div className="more-hosts">
+      <b>More host names</b>
+      <span className="small">The exposure check also covers these, once each one's DNS record proves you control it. Fortis never looks for host names on its own.</span>
+      {hosts.length ? (
+        <ul>
+          {hosts.map((h) => (
+            <li key={h.id}>
+              <div className="more-hosts-row">
+                <code>{h.hostname}</code>
+                <span className={`pill ${h.status === 'verified' ? 'p-ok' : 'p-medium'}`}>{h.status === 'verified' ? 'Verified' : 'Not checked until verified'}</span>
+                {isAdmin ? (
+                  <span className="more-hosts-actions">
+                    {h.status === 'unverified' ? (
+                      <button className="btn btn-outline btn-sm" disabled={busy !== null} onClick={() => void verify(h)}>
+                        {busy === h.id ? <span className="spinner" /> : <Shield />} Check DNS record
+                      </button>
+                    ) : null}
+                    <button className="btn btn-outline btn-sm" disabled={busy !== null} onClick={() => void remove(h)} aria-label={`Remove ${h.hostname}`}><Trash /></button>
+                  </span>
+                ) : null}
+              </div>
+              {h.status === 'unverified' ? (
+                <>
+                  <div className="dns">
+                    <div><span>Name</span><code>{h.verification.recordName}</code><CopyButton text={h.verification.recordName} /></div>
+                    <div><span>Value</span><code>{h.verification.recordValue}</code><CopyButton text={h.verification.recordValue} /></div>
+                  </div>
+                  {h.verification.lastError ? <p className="field-msg">{h.verification.lastError}</p> : null}
+                </>
+              ) : null}
+            </li>
+          ))}
+        </ul>
+      ) : null}
+      {isAdmin && data && hosts.length < data.max ? (
+        <form onSubmit={add}>
+          <input className="input" value={hostname} onChange={(e) => setHostname(e.target.value)} placeholder={`admin.${t.hostname.split('.').slice(-2).join('.')}`} aria-label="Host name" required maxLength={253} />
+          <button className="btn btn-outline btn-sm" disabled={busy !== null || !hostname.trim()}>{busy === 'add' ? <span className="spinner" /> : <Plus />} Add host name</button>
+        </form>
       ) : null}
     </div>
   );
@@ -311,6 +400,7 @@ function TargetCard({ t, base, isAdmin, canPause, dast, onChange, onAuthorize }:
             {!t.allowsActiveScan ? 'Production: passive baseline only.' : dast === 'baseline' ? 'Your plan runs passive baseline tests; full active scans come with Fortis Plus.' : null}
           </p>
           <Exposure t={t} base={base} canRun={canPause} isAdmin={isAdmin} />
+          <MoreHosts t={t} base={base} isAdmin={isAdmin} />
         </div>
       ) : null}
 

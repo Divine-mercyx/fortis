@@ -6,7 +6,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from
 
 import { pool } from '../src/db/client';
 import { setExposureProbeOptions } from '../src/modules/exposure.routes';
-import { exposureFindings, isPublicAddress, PAGE_CHECKS, probeHost, probePages, SERVICES, type Service } from '../src/modules/exposure.service';
+import { exposureFindings, isPublicAddress, PAGE_CHECKS, PAGE_ORIGINS, probeHost, probePages, SERVICES, type Service } from '../src/modules/exposure.service';
 import { setTxtResolver } from '../src/modules/targets.routes';
 import { projectWithKey, resetDb, setPlan, setupApp, signup, type Client } from './helpers';
 
@@ -355,6 +355,142 @@ describe('scheduled exposure checks', () => {
   it('only lets admins change the schedule, and checks the value', async () => {
     const { c, base, id } = await readyWithSsh();
     expect((await c.req({ method: 'PUT', url: `${base}/${id}/exposure/schedule`, payload: { schedule: 'hourly' } })).statusCode).toBe(400);
+  });
+});
+
+/* ------------------------------------------------- more host names and admin ports (#92) */
+
+/** An HTTP server that serves Grafana's login page, as Grafana does on a port of its own. */
+async function grafana(): Promise<number> {
+  const { createServer: createHttp } = await import('node:http');
+  const server = createHttp((req, res) => {
+    if (req.url === '/' || req.url === '/login') { res.writeHead(200, { 'Content-Type': 'text/html' }); res.end('<!doctype html><html><head><title>Grafana</title></head><body><div class="grafana-app"></div></body></html>'); return; }
+    res.writeHead(404); res.end('Not found');
+  });
+  await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));
+  fakes.push({ server: server as unknown as Server, port: (server.address() as AddressInfo).port });
+  return (server.address() as AddressInfo).port;
+}
+
+describe('admin pages on the ports admin tools use', () => {
+  it('checks 8080, 8443 and 9000 as well as 443 and 80, each over HTTPS and HTTP', () => {
+    expect(PAGE_ORIGINS.map((o) => `${o.scheme}:${o.port}`)).toEqual(['https:443', 'http:80', 'https:8443', 'http:8443', 'https:8080', 'http:8080', 'https:9000', 'http:9000']);
+  });
+
+  it('finds Grafana on 8443, and reports it per port', async () => {
+    const g = await grafana();
+    const ports: Record<number, number> = { 443: await closedPort(), 80: g, 8443: g };
+    const pages = await probePages('admin.example.com', '127.0.0.1', { dialPort: (p) => ports[p], timeoutMs: 1500 });
+    expect(pages.map((p) => `${p.check.what} ${p.url}`).sort()).toEqual([
+      'Grafana login is open to the internet http://admin.example.com/login',
+      'Grafana login is open to the internet http://admin.example.com:8443/login',
+    ]);
+  });
+});
+
+describe('more host names for a target', () => {
+  async function hostsSetup() {
+    const env = await setup();
+    const id = await target(env.c, env.base);
+    const hosts = `${env.base}/${id}/hosts`;
+    // TXT records: the target's, and whichever host names the test publishes.
+    const published = new Map<string, string>();
+    const own = (await env.c.req({ method: 'GET', url: env.base })).json().targets[0].verification;
+    published.set(own.recordName, own.recordValue);
+    setTxtResolver(async (name) => (published.has(name) ? [published.get(name)!] : []));
+    return { ...env, id, hosts, published };
+  }
+  const add = async (c: Client, hosts: string, hostname: string) => c.req({ method: 'POST', url: hosts, payload: { hostname } });
+  // Exposure runs are limited to 6 an hour per address, and the tests above use them up: each test here runs from its own.
+  const runFrom = (c: Client, url: string, ip: string) => c.req({ method: 'POST', url, headers: { 'x-forwarded-for': ip } });
+
+  it('adds a host name unverified, and verifies it only with its own TXT record', async () => {
+    const { c, hosts, published } = await hostsSetup();
+    const res = await add(c, hosts, 'Admin.Paywave.Example');
+    expect(res.statusCode).toBe(201);
+    const host = res.json().host;
+    expect(host).toMatchObject({ hostname: 'admin.paywave.example', status: 'unverified', verification: { recordName: '_fortis-verify.admin.paywave.example', recordType: 'TXT' } });
+
+    const early = await c.req({ method: 'POST', url: `${hosts}/${host.id}/verify` });
+    expect(early.json()).toMatchObject({ verified: false, host: { status: 'unverified' } });
+    expect(early.json().host.verification.lastError).toMatch(/No TXT record found at _fortis-verify\.admin\.paywave\.example/);
+
+    published.set(host.verification.recordName, host.verification.recordValue);
+    const done = await c.req({ method: 'POST', url: `${hosts}/${host.id}/verify` });
+    expect(done.json()).toMatchObject({ verified: true, host: { status: 'verified' } });
+    expect((await c.req({ method: 'GET', url: hosts })).json()).toMatchObject({ hosts: [{ hostname: 'admin.paywave.example', status: 'verified' }], max: 10 });
+  });
+
+  it('refuses IP addresses, localhost, duplicates and the target’s own host name, and caps the list', async () => {
+    const { c, hosts } = await hostsSetup();
+    expect((await add(c, hosts, '102.89.10.4')).json().error.code).toBe('TARGET_NOT_VERIFIABLE');
+    expect((await add(c, hosts, 'localhost')).json().error.code).toBe('TARGET_NOT_VERIFIABLE');
+    expect((await add(c, hosts, 'staging.paywave.example')).json().error.code).toBe('TARGET_HOST_EXISTS');
+    expect((await add(c, hosts, 'api.paywave.example')).statusCode).toBe(201);
+    expect((await add(c, hosts, 'https://api.paywave.example/')).json().error.code).toBe('TARGET_HOST_EXISTS');
+    for (let i = 1; i < 10; i++) expect((await add(c, hosts, `h${i}.paywave.example`)).statusCode).toBe(201);
+    expect((await add(c, hosts, 'one-too-many.paywave.example')).json().error.code).toBe('TARGET_HOSTS_LIMIT');
+  });
+
+  it('needs a plan with exposure checks, and can be removed', async () => {
+    const { c, hosts } = await hostsSetup();
+    const host = (await add(c, hosts, 'api.paywave.example')).json().host;
+    expect((await c.req({ method: 'DELETE', url: `${hosts}/${host.id}` })).json()).toEqual({ ok: true });
+    expect((await c.req({ method: 'GET', url: hosts })).json().hosts).toEqual([]);
+    await setPlan(c.orgId, 'free');
+    expect((await add(c, hosts, 'api.paywave.example')).statusCode).toBe(402);
+  });
+
+  it('the issue’s case: Grafana on 8443 of a verified admin. host is found, and an unverified host is never contacted', async () => {
+    const { c, base, id, hosts, published } = await hostsSetup();
+    const admin = (await add(c, hosts, 'admin.paywave.example')).json().host;
+    published.set(admin.verification.recordName, admin.verification.recordValue);
+    await c.req({ method: 'POST', url: `${hosts}/${admin.id}/verify` });
+    await add(c, hosts, 'backoffice.paywave.example'); // never verified
+
+    const g = await grafana();
+    const contacted: string[] = [];
+    setExposureProbeOptions({
+      resolve: async (h) => { contacted.push(h); return ['127.0.0.1']; },
+      allowPrivate: true,
+      services: [],
+      // Only the admin. host runs Grafana, on 8443; nothing else answers.
+      dialPort: (p, h) => (h === 'admin.paywave.example' && p === 8443 ? g : undefined),
+      timeoutMs: 1500,
+    });
+    const res = await runFrom(c, `${base}/${id}/exposure`, '198.51.100.11');
+    expect(res.statusCode).toBe(200);
+    expect(contacted).toEqual(['staging.paywave.example', 'admin.paywave.example']);
+    expect(res.json().hosts.map((h: { hostname: string }) => h.hostname)).toEqual(['staging.paywave.example', 'admin.paywave.example']);
+    expect(res.json().findings.map((f: { ruleId: string; file: string; title: string }) => `${f.ruleId} ${f.file} ${f.title}`)).toEqual([
+      'EXP-PANEL-001 http://admin.paywave.example:8443/login Grafana login is open to the internet',
+    ]);
+  });
+
+  it('touches no host name of a paused target', async () => {
+    const { c, base, id, hosts, published } = await hostsSetup();
+    const admin = (await add(c, hosts, 'admin.paywave.example')).json().host;
+    published.set(admin.verification.recordName, admin.verification.recordValue);
+    await c.req({ method: 'POST', url: `${hosts}/${admin.id}/verify` });
+    const contacted: string[] = [];
+    setExposureProbeOptions({ resolve: async (h) => { contacted.push(h); return ['127.0.0.1']; }, allowPrivate: true, services: [], pages: [] });
+    await c.req({ method: 'POST', url: `${base}/${id}/pause` });
+    expect((await runFrom(c, `${base}/${id}/exposure`, '198.51.100.12')).json().error.code).toBe('TARGET_NOT_READY');
+    expect(contacted).toEqual([]);
+  });
+
+  it('skips an extra host name that resolves to a private address, and still checks the rest', async () => {
+    const { c, base, id, hosts, published } = await hostsSetup();
+    const internal = (await add(c, hosts, 'internal.paywave.example')).json().host;
+    published.set(internal.verification.recordName, internal.verification.recordValue);
+    await c.req({ method: 'POST', url: `${hosts}/${internal.id}/verify` });
+    // allowPrivate stays off: the target resolves to a public address, the extra host to a private one. With no
+    // services and no pages, nothing is dialled: this checks only which hosts are refused.
+    setExposureProbeOptions({ resolve: async (h) => (h === 'internal.paywave.example' ? ['10.0.0.8'] : ['8.8.8.8']), pages: [], services: [] });
+    const res = await runFrom(c, `${base}/${id}/exposure`, '198.51.100.13');
+    expect(res.statusCode).toBe(200);
+    expect(res.json().skippedHosts).toEqual([{ hostname: 'internal.paywave.example', reason: expect.stringContaining('private or reserved addresses') }]);
+    expect(res.json().hosts.map((h: { hostname: string }) => h.hostname)).toEqual(['staging.paywave.example']);
   });
 });
 

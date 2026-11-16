@@ -100,7 +100,78 @@ function cfnTypeAt(lines: string[], index: number): string {
   return '';
 }
 
-export function cloudFormationFindings(file: SourceFile): InfraFinding[] {
+/** A CloudFormation template's parameter defaults (`Parameters: { Name: { Default: x } }`), in YAML or JSON. */
+export function cfnParameterDefaults(file: SourceFile): Map<string, string> {
+  const out = new Map<string, string>();
+  if (/\.json$/i.test(file.path) || file.text.trimStart().startsWith('{')) {
+    try {
+      const t = JSON.parse(file.text) as { Parameters?: Record<string, { Default?: unknown }> };
+      for (const [name, p] of Object.entries(t.Parameters ?? {})) {
+        if (p && ['string', 'number', 'boolean'].includes(typeof p.Default)) out.set(name, String(p.Default));
+      }
+    } catch {
+      /* not valid JSON: no defaults */
+    }
+    return out;
+  }
+  const start = file.lines.findIndex((l) => /^Parameters:\s*(?:#.*)?$/.test(l));
+  if (start < 0) return out;
+  let current = '';
+  let childIndent = -1;
+  for (let i = start + 1; i < file.lines.length; i++) {
+    const l = file.lines[i]!;
+    if (!l.trim() || l.trim().startsWith('#')) continue;
+    const ind = /^\s*/.exec(l)![0].length;
+    if (ind === 0) break;
+    if (childIndent < 0) childIndent = ind;
+    if (ind === childIndent) {
+      current = /^\s*([A-Za-z0-9]+):\s*(?:#.*)?$/.exec(l)?.[1] ?? '';
+      continue;
+    }
+    const d = /^\s*Default:\s*(.+?)\s*(?:#.*)?$/.exec(l);
+    if (current && d) out.set(current, d[1]!.replace(/^(["'])(.*)\1$/, '$2'));
+  }
+  return out;
+}
+
+/** The template with `!Ref Param` and `{"Ref": "Param"}` replaced by the parameter's default, line for line (#93). */
+export function resolveCloudFormation(file: SourceFile): SourceFile {
+  const params = cfnParameterDefaults(file);
+  if (!params.size) return file;
+  const text = file.text
+    .replace(/!Ref\s+([A-Za-z0-9]+)\b/g, (m, n: string) => params.get(n) ?? m)
+    .replace(/\{\s*["']?Ref["']?\s*:\s*["']?([A-Za-z0-9]+)["']?\s*\}/g, (m, n: string) => (params.has(n) ? `"${params.get(n)}"` : m));
+  return { ...file, text, lines: text.split(/\r?\n/) };
+}
+
+/** A CloudFormation value that's only known when the stack is deployed: a parameter with no default, an attribute, an import. */
+const CFN_REF = /!(?:Ref|GetAtt|ImportValue|Sub|If|FindInMap|Select|Join)\b|\{\s*["']?(?:Ref|Fn::[\w]+)["']?\s*:/;
+
+/** Settings the CloudFormation checks would judge whose value is only known at deploy time. */
+export function cloudFormationUnresolved(raw: SourceFile): { id: InfraId; line: number; setting: string; value: string }[] {
+  const file = resolveCloudFormation(raw);
+  const out: { id: InfraId; line: number; setting: string; value: string }[] = [];
+  const json = /\.json$/i.test(file.path) || file.text.trimStart().startsWith('{');
+  file.lines.forEach((line, i) => {
+    const m = /["']?(PubliclyAccessible|CidrIpv6|CidrIp|AccessControl)["']?\s*:\s*(.+?)\s*,?\s*$/.exec(line);
+    if (!m || !CFN_REF.test(m[2]!)) return;
+    const type = cfnTypeAt(file.lines, i);
+    const value = m[2]!.slice(0, 80);
+    if (m[1] === 'PubliclyAccessible' && /AWS::(?:RDS::DBInstance|Redshift::Cluster|DMS::ReplicationInstance)/.test(type)) out.push({ id: 'INF-DB-001', line: i + 1, setting: m[1], value });
+    else if (m[1] === 'AccessControl' && /S3::Bucket/.test(type)) out.push({ id: 'INF-STO-001', line: i + 1, setting: m[1], value });
+    else if (m[1]!.startsWith('CidrIp') && /SecurityGroup/.test(type)) {
+      // Only when the rule's ports could be an admin or database port.
+      const region = json ? file.text.slice(enclosing(file.text, file.lines.slice(0, i).join('\n').length + 1).start, enclosing(file.text, file.lines.slice(0, i).join('\n').length + 1).end) : file.lines.slice(yamlItem(file.lines, i).start, yamlItem(file.lines, i).end).join('\n');
+      const from = /["']?FromPort["']?\s*:\s*["']?(-?\d+)/.exec(region);
+      if (!from || portsIn(region, /["']?FromPort["']?\s*:\s*["']?(-?\d+)/, /["']?ToPort["']?\s*:\s*["']?(-?\d+)/, /["']?IpProtocol["']?\s*:\s*["']?-1\b/).length) out.push({ id: 'INF-NET-001', line: i + 1, setting: m[1]!, value });
+    }
+  });
+  return out;
+}
+
+export function cloudFormationFindings(raw: SourceFile): InfraFinding[] {
+  // Parameters with a default are judged by that default.
+  const file = resolveCloudFormation(raw);
   const out: InfraFinding[] = [];
   const json = /\.json$/i.test(file.path) || file.text.trimStart().startsWith('{');
   const region = (i: number): string => {
@@ -319,8 +390,11 @@ const formatRule = (id: InfraId): FileRule => ({
   pack: 'infrastructure',
   appliesTo: ALL_FORMATS,
   skipTests: true,
-  run(file) {
+  run(file, ctx) {
     if (!/AWS::|@pulumi|pulumi_|Microsoft\.|\.bicep$|LoadBalancer|NodePort/.test(file.text + file.path)) return [];
+    if (ctx?.unresolved && isCloudFormation(file)) {
+      for (const u of cloudFormationUnresolved(file)) if (u.id === id && !isIgnored(file, u.line)) ctx.unresolved.push({ ruleId: u.id, file: file.path, line: u.line, setting: u.setting, value: u.value });
+    }
     return formatFindings(file)
       .filter((f) => f.id === id && !isIgnored(file, f.line))
       .map((f) => ({ ruleId: f.id, severity: f.severity, title: f.title, file: file.path, line: f.line, snippet: (file.lines[f.line - 1] ?? '').trim(), fix: f.fix }));
