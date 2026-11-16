@@ -48,6 +48,50 @@ const MONO_FIX = 'Move the key to an environment variable or secret manager, the
 const DOJAH_FIX = 'Move the key to an environment variable or secret manager, then rotate it: in the Dojah dashboard, go to Developers → Configuration and regenerate the secret key for that environment.';
 const AT_FIX = "Move the key to an environment variable or secret manager, then rotate it: in the Africa's Talking dashboard, open the app, go to Settings → API Key and generate a new key (the old one stops working).";
 const TEST_SK_FIX = 'Move the key to an environment variable or secret manager, then rotate it where it was issued: Mono (app.mono.co → the app → regenerate the secret key) or Dojah (Developers → Configuration → regenerate the sandbox secret key).';
+const MOVE = 'Move the key to an environment variable or secret manager, then';
+const INFOBIP_FIX = `${MOVE} revoke it on Infobip's API key management page and create a new one. Infobip keys also expire on the date set when they were made.`;
+
+/*
+ * Providers that publish no key format (#95), named from the setting the key is assigned to instead:
+ * `TERMII_API_KEY = "…"` is reported as a Termii key, with where to rotate it. What each one documents:
+ *   Termii:      sent as api_key in the request body; dashboard → Settings → API token. No prefix or example (developer.termii.com/authentication).
+ *   Smile ID:    partner_id + api_key exchanged for a 15-minute token; keys made per environment in Developers → Security Settings. No format (docs.usesmileid.com).
+ *   Prembly:     secret key + App ID; dashboard → Integrations, live and sandbox apart. No format (docs.prembly.com/docs/faq).
+ *   VerifyMe:    API products sold as QoreID; no public key format found.
+ *   Youverify:   secret key in a `token` header; Youverify OS → Account Settings, test and live apart. No format (doc.youverify.co).
+ *   Anchor:      x-anchor-key header; Settings → Developers → API keys. No prefix or example (docs.getanchor.co/reference/authentication-1).
+ *   Sudo:        permanent Bearer keys; Developers → API Keys, delete and recreate to rotate. No format (docs.sudo.africa/docs/authentication).
+ *   Paga:        principal (public), credentials (secret) and a hash key; Manage Account → Manage API Keys. No format (developer-docs.paga.com).
+ *   Remita:      merchant ID + API key issued by Remita per merchant, short and not random-looking in demos. No format.
+ *   Okra:        okra.ng no longer serves Okra's API (checked 2026-11-16).
+ *   Moniepoint:  payment APIs are Monnify's (MK_PROD_ keys are named above); POS and business APIs use client credentials with no documented format.
+ *   Africa's Talking: atsk_ keys are named above; older keys and ones without the prefix are named here. The length isn't documented.
+ * `words` is matched against the setting name split into words (TERMII_API_KEY, termiiApiKey and termii.api_key → termii api key).
+ */
+type SettingProvider = { name: string; words: string[][]; unless?: RegExp; fix: string };
+const BY_SETTING: SettingProvider[] = [
+  { name: 'Termii', words: [['termii']], fix: `${MOVE} get a new one from the Termii dashboard (Settings → API token), or from Termii support if the dashboard can't reissue it.` },
+  { name: 'Infobip', words: [['infobip']], fix: INFOBIP_FIX },
+  { name: 'Smile ID', words: [['smile', 'id'], ['smileid'], ['smile', 'identity'], ['smileidentity']], fix: `${MOVE} rotate it in the Smile ID portal (Developers → Security Settings → Create Credential): create the new key, switch to it, then revoke the old one. Sandbox and production keys are separate.` },
+  { name: 'Prembly', words: [['prembly'], ['identitypass'], ['identity', 'pass']], fix: `${MOVE} replace it in the Prembly dashboard (Integrations), for the environment it belongs to (live or sandbox).` },
+  { name: 'VerifyMe', words: [['verifyme'], ['verify', 'me'], ['qoreid'], ['qore', 'id']], fix: `${MOVE} replace it where it was issued, in the VerifyMe (QoreID) dashboard, and delete the old one.` },
+  { name: 'Youverify', words: [['youverify'], ['you', 'verify']], fix: `${MOVE} generate a new key in the Youverify OS portal (Account Settings) for that environment. Test and live keys are separate.` },
+  { name: 'Anchor', words: [['anchor']], fix: `${MOVE} create a new key in the Anchor dashboard (Settings → Developers → API keys), switch to it, and delete the old one.` },
+  // SUDO_PASSWORD is the password for sudo on a Linux machine, not a Sudo key.
+  { name: 'Sudo', words: [['sudo']], unless: /pass(?:word|wd)?|pwd|user/i, fix: `${MOVE} delete the key in the Sudo dashboard (Developers → API Keys) and create a new one. Sudo keys don't expire on their own.` },
+  { name: 'Paga', words: [['paga'], ['mypaga']], fix: `${MOVE} replace the secret key (credentials) and, if it leaked too, the hash key in Paga Business (Manage Account → Manage API Keys).` },
+  { name: 'Remita', words: [['remita']], fix: `${MOVE} ask Remita for a new API key (Remita issues keys per merchant), and change any password or token kept next to it.` },
+  { name: 'Okra', words: [['okra']], fix: "Remove it from the code. okra.ng no longer serves Okra's API, so the key may no longer work, but it still belongs in a secret manager if it does." },
+  { name: 'Moniepoint', words: [['moniepoint']], fix: `${MOVE} issue new client credentials in the Moniepoint Business dashboard and delete the old ones.` },
+  { name: "Africa's Talking", words: [['africastalking'], ['africas', 'talking'], ['africa', 'talking']], fix: AT_FIX },
+];
+
+/** The provider a setting name belongs to, for providers whose keys have no shape of their own. */
+export function providerForSetting(setting: string): SettingProvider | null {
+  const words = setting.replace(/([a-z0-9])([A-Z])/g, '$1 $2').toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
+  const has = (seq: string[]) => words.some((_, i) => seq.every((w, j) => words[i + j] === w));
+  return BY_SETTING.find((p) => p.words.some(has) && !p.unless?.test(setting)) ?? null;
+}
 
 const GENERIC: Pattern[] = [
   { re: /-----BEGIN (?:RSA |EC |DSA |OPENSSH |PGP )?PRIVATE KEY-----/g, ruleId: 'SEC-GEN-001', severity: 'critical', title: 'Private key in code' },
@@ -72,6 +116,9 @@ const GENERIC: Pattern[] = [
   // as integration guides quote it; GitGuardian's Africa's Talking detector is also prefix-based. Africa's Talking's own
   // docs don't print a key, so the length isn't pinned down.
   { re: /\batsk_[A-Za-z0-9]{20,}\b/g, ruleId: 'SEC-GEN-001', severity: 'high', title: "Africa's Talking API key in code", fix: AT_FIX },
+  // Infobip: 32 hex characters, a dash and a UUID, sent as "Authorization: App <key>".
+  // Source: infobip.com/docs/essentials/api-essentials/api-authentication, whose sample key has this shape.
+  { re: /\b[0-9a-f]{32}-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/g, ruleId: 'SEC-GEN-001', severity: 'high', title: 'Infobip API key in code', fix: INFOBIP_FIX },
   { re: /\bSG\.[A-Za-z0-9_-]{22}\.[A-Za-z0-9_-]{43}\b/g, ruleId: 'SEC-GEN-001', severity: 'high', title: 'SendGrid API key in code' },
   { re: /\bkey-[0-9a-f]{32}\b/g, ruleId: 'SEC-GEN-001', severity: 'high', title: 'Mailgun API key in code' },
   { re: /\bre_[A-Za-z0-9]{8}_[A-Za-z0-9]{24,}\b/g, ruleId: 'SEC-GEN-001', severity: 'high', title: 'Resend API key in code' },
@@ -457,11 +504,16 @@ function genericLines(file: SourceFile, rawJson: boolean): Detection[] {
   const looksRandom = (value: string) => !PLACEHOLDER.test(value) && !NOT_SECRET.test(value) && entropy(value) >= 3.5
     && !(inTests && FAKE_VALUE.test(value))
     && !PAYMENT_KEYS.some((p) => { p.re.lastIndex = 0; return p.re.test(value); });
-  const reportAs = (title: string, text: string, line: number) => {
+  const reportAs = (title: string, text: string, line: number, fix?: string) => {
     if (isIgnored(file, line) || out.some((d) => d.line === line)) return;
-    out.push({ ruleId: 'SEC-GEN-001', severity: 'high', title, file: file.path, line, snippet: text.trim() });
+    out.push({ ruleId: 'SEC-GEN-001', severity: 'high', title, file: file.path, line, snippet: text.trim(), ...(fix && { fix }) });
   };
-  const report = (name: string, text: string, line: number) => reportAs(`Hard-coded ${name}`, text, line);
+  // A provider whose keys have no shape of their own is named from the setting the key is assigned to.
+  const report = (name: string, text: string, line: number) => {
+    const provider = providerForSetting(name);
+    if (provider) reportAs(`${provider.name} key in code (${name})`, text, line, provider.fix);
+    else reportAs(`Hard-coded ${name}`, text, line);
+  };
   const unquotedAllowed = CONFIG_FILE.test(file.path) && !EXAMPLE_FILE.test(file.path);
   const isNotebook = rawJson;
   file.lines.forEach((raw, i) => {
