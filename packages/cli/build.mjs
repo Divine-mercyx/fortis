@@ -9,7 +9,8 @@ const pkg = JSON.parse(readFileSync(new URL('./package.json', import.meta.url), 
 const sea = process.argv.includes('--sea');
 // Parser grammars travel inside the bundle, compressed, and each is only unpacked if a repository needs it.
 const wasm = (name) => brotliCompressSync(readFileSync(createRequire(import.meta.url).resolve(`@vscode/tree-sitter-wasm/wasm/${name}.wasm`))).toString('base64');
-const grammars = Object.fromEntries(['tree-sitter', 'tree-sitter-javascript', 'tree-sitter-typescript', 'tree-sitter-tsx', 'tree-sitter-python'].map((n) => [n, wasm(n)]));
+// Go, C#, Java and PHP add about 400 KB: they're read to follow calls in the account-takeover checks.
+const grammars = Object.fromEntries(['tree-sitter', 'tree-sitter-javascript', 'tree-sitter-typescript', 'tree-sitter-tsx', 'tree-sitter-python', 'tree-sitter-go', 'tree-sitter-c-sharp', 'tree-sitter-java', 'tree-sitter-php'].map((n) => [n, wasm(n)]));
 const outfile = sea ? 'dist-sea/fortis.cjs' : 'dist/fortis.js';
 await build({
   entryPoints: ['src/index.ts'],

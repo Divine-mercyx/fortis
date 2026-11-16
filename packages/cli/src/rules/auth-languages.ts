@@ -1,3 +1,5 @@
+import { methodAt, methodsReferenced, onlyMethodNamed, reachableText, type OtherLang } from '../analysis/other';
+
 import type { Detection, FileRule, ProjectContext, SourceFile } from './types';
 import { isIgnored } from './types';
 import { credentialKind, LIMITED, RESET_FIX, words } from './auth';
@@ -34,6 +36,29 @@ const hit = (file: SourceFile, f: Finding, ruleId: string): Detection => ({
 /** A line without its trailing comment and with string contents kept: enough for these patterns. */
 const stripComment = (line: string, lang: Lang) => line.replace(lang === 'php' ? /\s(?:\/\/|#)(?![^'"]*['"][^'"]*$).*$/ : /\s\/\/(?![^"]*"[^"]*$).*$/, '');
 const isCommentLine = (line: string) => /^\s*(?:\/\/|#|\*|\/\*)/.test(line);
+
+/* ------------------------------------------------- following calls (#91) */
+
+const CALL_LANG: Record<Lang, OtherLang> = { go: 'go', cs: 'csharp', php: 'php', java: 'java', kt: 'kotlin' };
+
+/**
+ * The text of everything a handler calls, in any file: a service's rate limiter, lockout or expiry check. Empty when
+ * the handler can't be found in the call model, so the checks keep to what they see in the handler itself.
+ */
+function followed(file: SourceFile, ctx: ProjectContext, at: { line: number; name?: string; lines?: [number, number] }): string {
+  const m = methodAt(ctx.project, file, at.line, at.name || undefined);
+  return m ? reachableText(ctx.project, m, at.lines) : '';
+}
+
+/**
+ * The same for a handler named in a route registration but declared in another file (`r.POST("/login", h.Login)`):
+ * resolved through `h`'s type where it can be, else the one method in the project with that name.
+ */
+function followedRef(file: SourceFile, lang: Lang, ctx: ProjectContext, line: number, ref: string): string {
+  const found = methodsReferenced(ctx.project, file, line, ref);
+  const byName = found.length ? found : [onlyMethodNamed(ctx.project, CALL_LANG[lang], ref.split('.').pop()!)].filter((m) => m !== null);
+  return byName.map((m) => `${m.text}\n${reachableText(ctx.project, m)}`).join('\n');
+}
 
 /* ------------------------------------------------- functions */
 
@@ -177,7 +202,7 @@ function classAttrs(file: SourceFile, fn: Fn, ctx: ProjectContext): string {
 
 /* ------------------------------------------------- routes */
 
-type Route = { line: number; path: string; handler?: string; inline?: Fn; text: string };
+type Route = { line: number; path: string; handler?: string; handlerRef?: string; inline?: Fn; text: string };
 
 /** Routes registered with a call (Go routers, minimal APIs, Laravel, Ktor), with their statement text. */
 function registeredRoutes(file: SourceFile, lang: Lang): Route[] {
@@ -202,7 +227,8 @@ function registeredRoutes(file: SourceFile, lang: Lang): Route[] {
       lang === 'php'
         ? (/::class\s*,\s*['"](\w+)['"]/.exec(args) ?? /^\s*['"](?:[\w\\]+@)?(\w+)['"]/.exec(args))?.[1]
         : /(\w+)\s*\)?\s*$/.exec(args.trim())?.[1];
-    out.push({ line: i + 1, path: m[1]!, handler, text });
+    const handlerRef = lang === 'php' ? handler : /([\w.]+)\s*\)?\s*$/.exec(args.trim())?.[1];
+    out.push({ line: i + 1, path: m[1]!, handler, handlerRef, text });
   });
   return out;
 }
@@ -255,7 +281,7 @@ function privilegedMethod(above: string, classAttrs: string): boolean {
  * `Route::post('login', [CustomerController::class, 'login'])`, or `Route::post('login', 'login')` inside
  * `Route::controller(CustomerController::class)->group(…)`. Returns that method and its whole controller, if found.
  */
-function laravelHandler(file: SourceFile, route: Route, ctx: ProjectContext): { method: string; controller: string } | null {
+function laravelHandler(file: SourceFile, route: Route, ctx: ProjectContext): { method: string; controller: string; file: SourceFile; line: number; name: string } | null {
   if (!ctx.project || !route.handler) return null;
   const cls =
     /\[\s*\\?(?:[\w\\]+\\)?(\w+)::class\s*,/.exec(route.text)?.[1] ??
@@ -272,7 +298,7 @@ function laravelHandler(file: SourceFile, route: Route, ctx: ProjectContext): { 
   const controller = path ? ctx.project.read(path) : null;
   if (!controller) return null;
   const fn = functionsOf(controller, 'php').find((f) => f.name === route.handler);
-  return fn ? { method: fn.text, controller: controller.text } : null;
+  return fn ? { method: fn.text, controller: controller.text, file: controller, line: fn.start, name: fn.name } : null;
 }
 
 /** Limits that cover the whole app, in these languages' frameworks. Feeds ProjectContext.rateLimitAll. */
@@ -314,6 +340,9 @@ export const otherRateLimitRule: FileRule = {
       if (privilegedMethod(above, classAttrs(file, fn, ctx)) || ADMIN_PATH.test(`${prefix}/${fn.route}`)) continue;
       if (LIMITED.test(above) || LIMITED.test(attrs) || LIMITED.test(fn.text) || /EnableRateLimiting|RateLimiter\s*\(|@Throttle|Bucket|tryConsume/.test(`${above}\n${attrs}\n${fn.text}`)) continue;
       if (/\[DisableRateLimiting\]/.test(above)) { report(fn.start, kind); continue; }
+      // A limiter or lockout in a service the handler calls, in this file or another (#91).
+      const deep = followed(file, ctx, { line: fn.start, name: fn.name });
+      if (LIMITED.test(deep) || /RateLimiter\s*\(|Bucket|tryConsume/.test(deep)) continue;
       report(routeAnnotationLine(file, fn) ?? fn.start, kind);
     }
     // Registered routes: Go routers, minimal APIs, Laravel, Ktor.
@@ -331,7 +360,17 @@ export const otherRateLimitRule: FileRule = {
       if (lang === 'php' && !handlerFn) {
         const found = laravelHandler(file, route, ctx);
         if (found && (LIMITED.test(found.method) || /\buse\s+ThrottlesLogins\b|middleware\s*\(\s*['"]throttle/.test(found.controller))) continue;
+        // …or in a service that controller method calls (#91).
+        if (found && LIMITED.test(followed(found.file, ctx, { line: found.line, name: found.name }))) continue;
       }
+      // A limiter or lockout in what the handler calls (#91): the handler in this file, an inline closure, or a handler
+      // declared in another file (`r.POST("/login", h.Login)`).
+      const deep = handlerFn
+        ? followed(file, ctx, { line: handlerFn.start, name: handlerFn.name })
+        : inline
+          ? followed(file, ctx, { line: route.line, lines: [route.line, route.line + inline.split('\n').length - 1] })
+          : lang !== 'php' && route.handlerRef ? followedRef(file, lang, ctx, route.line, route.handlerRef) : '';
+      if (LIMITED.test(deep) || /RateLimiter\s*\(|Bucket|tryConsume/.test(deep)) continue;
       report(route.line, kind);
     }
     return out;
@@ -503,8 +542,11 @@ export function otherResetFindings(file: SourceFile, ctx: ProjectContext = { ide
     });
     const consumes = NEW_SECRET.test(fn.text) && TOKEN_IN.test(fn.text) && !/RandomNumberGenerator|SecureRandom|random_bytes|crypto\/rand|Str::random|bin2hex|randomUUID|UUID\.randomUUID|Guid\.NewGuid/.test(fn.text);
     if (consumes) {
-      if (!CHECKS_EXPIRY.test(fn.text)) add({ line: fn.start, severity: 'medium', title: `${kind} reset token accepted without an expiry check`, fix: RESET_FIX.expiry });
-      else if (!SINGLE_USE.test(fn.text)) add({ line: fn.start, severity: 'medium', title: `${kind} reset token can be used more than once`, fix: RESET_FIX.reuse });
+      // The expiry and single-use checks often live in a token service the handler calls (#91).
+      let deep: string | null = null;
+      const withCalls = () => (deep ??= `${fn.text}\n${followed(file, ctx, { line: fn.start, ...(fn.name ? { name: fn.name } : { lines: [fn.start, fn.end] as [number, number] }) })}`);
+      if (!CHECKS_EXPIRY.test(fn.text) && !CHECKS_EXPIRY.test(withCalls())) add({ line: fn.start, severity: 'medium', title: `${kind} reset token accepted without an expiry check`, fix: RESET_FIX.expiry });
+      else if (!SINGLE_USE.test(fn.text) && !SINGLE_USE.test(withCalls())) add({ line: fn.start, severity: 'medium', title: `${kind} reset token can be used more than once`, fix: RESET_FIX.reuse });
     } else if (LOOKUP_BY_CONTACT.test(fn.text)) {
       const lines = fn.text.split('\n');
       const k = lines.findIndex((l) => NOT_FOUND.test(l) && !isCommentLine(l));
