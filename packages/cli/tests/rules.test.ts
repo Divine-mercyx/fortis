@@ -263,6 +263,67 @@ describe('FX-SEC-001 African payment providers', () => {
   });
 });
 
+describe('SEC-GEN-001 provider keys with no documented shape (#95)', () => {
+  // Built at runtime, so the repository holds nothing a secret scanner would flag.
+  const VALUE = ['q7Vw2Lk9', 'Xz4Rt8Mn', '3Bp6Yd1H'].join('');
+  const INFOBIP = [['003026ab', 'c133714d', 'f1834b86', '38bb496e'].join(''), '8f4b3d9a', 'e931', '478d', 'a994', '28a725159ab9'].join('-');
+
+  it('names an Infobip key from its shape, wherever it is assigned', () => {
+    const found = run(genericSecretRule, 'src/sms.ts', `const client = new Infobip({ baseUrl, auth: 'App ${INFOBIP}' });`);
+    expect(found.map((d) => [d.severity, d.title])).toEqual([['high', 'Infobip API key in code']]);
+    expect(found[0]!.fix).toContain("Infobip's API key management page");
+    expect(maskSnippet(found[0]!.snippet)).not.toContain(INFOBIP.slice(-16));
+  });
+
+  it.each([
+    ['TERMII_API_KEY', 'Termii', 'Settings → API token'],
+    ['infobipApiKey', 'Infobip', 'API key management page'],
+    ['SMILE_ID_API_KEY', 'Smile ID', 'Security Settings'],
+    ['smileIdentityApiKey', 'Smile ID', 'Security Settings'],
+    ['PREMBLY_SECRET_KEY', 'Prembly', 'Integrations'],
+    ['IDENTITYPASS_API_KEY', 'Prembly', 'Integrations'],
+    ['VERIFYME_API_KEY', 'VerifyMe', 'QoreID'],
+    ['QOREID_CLIENT_SECRET', 'VerifyMe', 'QoreID'],
+    ['YOUVERIFY_TOKEN', 'Youverify', 'Account Settings'],
+    ['ANCHOR_API_KEY', 'Anchor', 'Settings → Developers → API keys'],
+    ['SUDO_API_KEY', 'Sudo', 'Developers → API Keys'],
+    ['pagaSecretKey', 'Paga', 'Manage API Keys'],
+    ['REMITA_API_KEY', 'Remita', 'per merchant'],
+    ['OKRA_SECRET_KEY', 'Okra', 'okra.ng'],
+    ['MONIEPOINT_CLIENT_SECRET', 'Moniepoint', 'Moniepoint Business dashboard'],
+    ['AFRICASTALKING_API_KEY', "Africa's Talking", "Africa's Talking dashboard"],
+  ])('names the provider from the setting: %s', (setting, provider, where) => {
+    const found = run(genericSecretRule, 'src/config.ts', `export const ${setting} = '${VALUE}';`);
+    expect(found.map((d) => d.title)).toEqual([`${provider} key in code (${setting})`]);
+    expect(found[0]!.fix).toContain(where);
+  });
+
+  it('names it in config files too, where values go unquoted', () => {
+    const found = run(genericSecretRule, '.env', `TERMII_API_KEY=${VALUE}1\nPAGA_SECRET_KEY=${VALUE}2`);
+    expect(found.map((d) => d.title)).toEqual(['Termii key in code (TERMII_API_KEY)', 'Paga key in code (PAGA_SECRET_KEY)']);
+  });
+
+  it("doesn't take a word that only contains a provider's name for it", () => {
+    const src = [
+      `const SUDO_PASSWORD = '${VALUE}';`, // the password for sudo on a Linux machine
+      `const ANCHORAGE_API_KEY = '${VALUE}';`,
+      `const PAGANINI_TOKEN = '${VALUE}';`,
+      `const API_SECRET = '${VALUE}';`,
+    ].join('\n');
+    expect(run(genericSecretRule, 'src/config.ts', src).map((d) => d.title)).toEqual([
+      'Hard-coded SUDO_PASSWORD',
+      'Hard-coded ANCHORAGE_API_KEY',
+      'Hard-coded PAGANINI_TOKEN',
+      'Hard-coded API_SECRET',
+    ]);
+  });
+
+  it('still leaves placeholders and environment reads alone', () => {
+    const src = ["const TERMII_API_KEY = 'your_termii_api_key';", 'const SMILE_ID_API_KEY = process.env.SMILE_ID_API_KEY;'].join('\n');
+    expect(run(genericSecretRule, 'src/config.ts', src)).toEqual([]);
+  });
+});
+
 describe('SEC-GEN-001 African open banking, KYC and messaging keys', () => {
   const BODY = 'aB3dE6gH9jK2mN5pQ8sT1vW4';
   const MONO_LIVE = ['live', 'sk', BODY].join('_');

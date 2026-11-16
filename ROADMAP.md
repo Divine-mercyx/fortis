@@ -157,8 +157,8 @@ These are limits of what was built, not missing setup.
 - **CocoaPods, Conan and vcpkg:** OSV has no advisories for them. The scan names the packages and says they weren't checked.
 - **Java, Kotlin, Scala and .NET without a lockfile:** only direct dependencies are covered. Transitive ones need an SBOM or a lockfile, and the scan says so.
 - **Fintech rules in Go, C#, PHP, Java and Kotlin** have the first six checks, on line patterns. The four newer checks (money as floating point, card data, predictable references, client amounts) and the syntax-tree engine cover JavaScript, TypeScript and Python only.
-- **Provider keys with no documented format** have no named pattern: Infobip, Termii, Smile ID, Prembly, VerifyMe, Youverify, Anchor, Sudo, Paga, Remita, Okra and Moniepoint. The generic checks still report them in a secret-looking assignment.
-- **`fortis scan --verify`** is tested against mocked providers only. No real key has been checked.
+- **Provider keys with no documented format:** Termii, Smile ID, Prembly, VerifyMe, Youverify, Anchor, Sudo, Paga, Remita, Okra and Moniepoint publish no key shape, so a key is named only when it's assigned to a setting with the provider's name (`TERMII_API_KEY`). A bare key in a request body is still caught by the generic checks, without the provider's name. Why each one has no pattern is noted beside `BY_SETTING` in `packages/cli/src/rules/secrets.ts`. Infobip keys are named from their shape.
+- **`fortis scan --verify`** is checked nightly against the real Paystack, Stripe and Flutterwave APIs for unknown keys (revoked) and cut-off requests (unknown). A working key reading as live needs test-mode keys in the repository's secrets, and a rate-limited answer is only tested with mocks.
 - **macOS and Windows binaries are unsigned** until the certificates above exist, so Gatekeeper and SmartScreen warn on first run.
 
 ## Next checks, not built yet

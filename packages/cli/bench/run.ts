@@ -43,6 +43,7 @@ const FAKES: Record<string, string> = {
   MONO_PUBLIC: ['live', 'pk', rand(20)].join('_'),
   DOJAH_PROD: ['prod', 'sk', rand(25)].join('_'),
   AT_KEY: ['atsk', rand(64, '0123456789abcdef')].join('_'),
+  INFOBIP_KEY: [rand(32, '0123456789abcdef'), rand(8, '0123456789abcdef'), rand(4, '0123456789abcdef'), rand(4, '0123456789abcdef'), rand(4, '0123456789abcdef'), rand(12, '0123456789abcdef')].join('-'),
   MONNIFY_PROD:['MK', 'PROD', rand(10, 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789')].join('_'),
   AWS_KEY: `AKIA${rand(16, 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567')}`,
   GH_TOKEN: `ghp_${rand(36)}`,
