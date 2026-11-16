@@ -97,8 +97,8 @@ export type ProbeOptions = {
   resolve?: (hostname: string) => Promise<string[]>;
   /** Tests only: allow loopback so local fake services can stand in for real ones. */
   allowPrivate?: boolean;
-  /** Tests only: where a service's port is really listening. */
-  dialPort?: (port: number) => number;
+  /** Tests only: where a service's port is really listening, for this host name. */
+  dialPort?: (port: number, hostname: string) => number | undefined;
   services?: readonly Service[];
   timeoutMs?: number;
   concurrency?: number;
@@ -200,7 +200,8 @@ export async function probeHost(hostname: string, opts: ProbeOptions = {}): Prom
   const timeout = opts.timeoutMs ?? 1500;
   const jobs = addresses.flatMap((ip) => services.map((s) => ({ ip, s })));
   const results = await pool(jobs, opts.concurrency ?? 24, async ({ ip, s }) => {
-    const port = opts.dialPort ? opts.dialPort(s.port) : s.port;
+    const port = opts.dialPort ? opts.dialPort(s.port, hostname) : s.port;
+    if (port === undefined) return { ip, port: s.port, service: s.name, open: false } satisfies PortResult;
     const probe = NO_AUTH[s.port];
     const first = await talk(ip, port, null, timeout);
     if (!first.open) return { ip, port: s.port, service: s.name, open: false } satisfies PortResult;
@@ -249,6 +250,8 @@ export const PAGE_CHECKS: readonly PageCheck[] = [
   { path: '/server-status', match: /Apache Server Status for/, ruleId: 'EXP-PANEL-001', severity: 'medium', what: 'Apache server-status is public', fix: 'Allow /server-status only from localhost or the private network.' },
   { path: '/jenkins/', match: /Dashboard \[Jenkins\]|X-Jenkins|jenkins-head-icon/, ruleId: 'EXP-PANEL-001', severity: 'high', what: 'Jenkins is open to the internet', fix: PANEL_FIX },
   { path: '/grafana/login', match: /<title>Grafana<\/title>|grafana-app/, ruleId: 'EXP-PANEL-001', severity: 'medium', what: 'Grafana login is open to the internet', fix: PANEL_FIX },
+  // Grafana on a port of its own (3000, 8443…) serves its login at /login.
+  { path: '/login', match: /<title>Grafana<\/title>|grafana-app/, ruleId: 'EXP-PANEL-001', severity: 'medium', what: 'Grafana login is open to the internet', fix: PANEL_FIX },
   { path: '/swagger-ui.html', match: /swagger-ui/i, ruleId: 'EXP-PANEL-001', severity: 'medium', what: 'API documentation (Swagger UI) is public', fix: 'Serve API docs only in staging behind SSO, or turn them off in production builds. They map every route for an attacker.' },
   { path: '/swagger.json', match: /"(?:swagger|openapi)"\s*:\s*"\d/, ruleId: 'EXP-PANEL-001', severity: 'medium', what: 'API specification (swagger.json) is public', fix: 'Serve API docs only in staging behind SSO, or turn them off in production builds. They map every route for an attacker.' },
   { path: '/api-docs', match: /"(?:swagger|openapi)"\s*:\s*"\d|swagger-ui/i, ruleId: 'EXP-PANEL-001', severity: 'medium', what: 'API documentation (/api-docs) is public', fix: 'Serve API docs only in staging behind SSO, or turn them off in production builds. They map every route for an attacker.' },
@@ -290,30 +293,45 @@ function fetchPage(scheme: 'http' | 'https', ip: string, port: number, hostname:
   });
 }
 
-/** Check every well-known path over HTTPS and HTTP; report each one once, preferring HTTPS. */
+/**
+ * Where admin pages and files are looked for: the web ports, and the ports admin tools usually sit on (8080, 8443,
+ * 9000), each over HTTPS and plain HTTP (#92). Only these; no port range is swept.
+ */
+export const PAGE_ORIGINS: readonly { scheme: 'http' | 'https'; port: number }[] = [
+  { scheme: 'https', port: 443 },
+  { scheme: 'http', port: 80 },
+  { scheme: 'https', port: 8443 },
+  { scheme: 'http', port: 8443 },
+  { scheme: 'https', port: 8080 },
+  { scheme: 'http', port: 8080 },
+  { scheme: 'https', port: 9000 },
+  { scheme: 'http', port: 9000 },
+];
+
+/** Check every well-known path on every origin that answers; report each finding once per port, preferring HTTPS. */
 export async function probePages(hostname: string, ip: string, opts: ProbeOptions = {}): Promise<PageResult[]> {
   const checks = opts.pages ?? PAGE_CHECKS;
   const timeout = opts.timeoutMs ?? 4000;
-  const origins: { scheme: 'http' | 'https'; port: number }[] = [
-    { scheme: 'https', port: 443 },
-    { scheme: 'http', port: 80 },
-  ];
-  // Skip an origin that doesn't answer at all, so a closed port costs one request, not one per path.
-  const live: typeof origins = [];
-  for (const o of origins) {
-    const port = opts.dialPort ? opts.dialPort(o.port) : o.port;
-    if (await fetchPage(o.scheme, ip, port, hostname, '/', timeout)) live.push(o);
-  }
+  const dial = (port: number) => (opts.dialPort ? opts.dialPort(port, hostname) : port);
+  // Skip an origin that doesn't answer at all, so a closed port costs one request, not one per path. All at once,
+  // so filtered ports that never answer cost one timeout in total, not one each.
+  const answers = await Promise.all(PAGE_ORIGINS.map(async (o) => {
+    const port = dial(o.port);
+    return port !== undefined && (await fetchPage(o.scheme, ip, port, hostname, '/', timeout)) !== null;
+  }));
+  const live = PAGE_ORIGINS.filter((_, i) => answers[i]);
   const jobs = live.flatMap((o) => checks.map((check) => ({ o, check })));
   const hits = await pool(jobs, opts.concurrency ?? 8, async ({ o, check }) => {
-    const port = opts.dialPort ? opts.dialPort(o.port) : o.port;
-    const res = await fetchPage(o.scheme, ip, port, hostname, check.path, timeout);
+    const res = await fetchPage(o.scheme, ip, dial(o.port)!, hostname, check.path, timeout);
     if (!res || res.status !== 200 || !(check.match.test(res.body) || check.match.test(res.headers))) return null;
-    return { url: `${o.scheme}://${hostname}${o.port === (o.scheme === 'https' ? 443 : 80) ? '' : `:${o.port}`}${check.path}`, check };
+    return { url: `${o.scheme}://${hostname}${o.port === (o.scheme === 'https' ? 443 : 80) ? '' : `:${o.port}`}${check.path}`, check, port: o.port };
   });
-  const out: PageResult[] = [];
-  for (const h of hits) if (h && !out.some((x) => x.check.path === h.check.path)) out.push(h);
-  return out;
+  // One finding per thing per port: HTTPS comes first in PAGE_ORIGINS, so it wins over plain HTTP on the same port,
+  // and 443 and 80 count as one site.
+  const site = (port: number) => (port === 443 || port === 80 ? 'web' : String(port));
+  const out: (PageResult & { port: number })[] = [];
+  for (const h of hits) if (h && !out.some((x) => x.check.what === h.check.what && site(x.port) === site(h.port))) out.push(h);
+  return out.map(({ url, check }) => ({ url, check }));
 }
 
 /* ------------------------------------------------- findings */

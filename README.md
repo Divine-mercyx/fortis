@@ -53,6 +53,8 @@ Tests drop and recreate the schema of the database in `TEST_DATABASE_URL`
 | Organisation | `GET/PATCH /v1/orgs/:orgId`, members: `GET/POST /v1/orgs/:orgId/members`, `DELETE …/members/:userId` |
 | Projects | `GET/POST /v1/orgs/:orgId/projects`, `GET/DELETE …/projects/:projectId` |
 | CLI keys | `GET/POST …/projects/:projectId/tokens`, `DELETE …/tokens/:tokenId` |
+| Staging targets | `GET/POST …/projects/:projectId/targets`, `POST …/targets/:targetId/verify`, `…/authorize`, `…/pause`, `…/resume`, `DELETE …/targets/:targetId` |
+| Exposure checks | `GET/POST …/targets/:targetId/exposure`, `PUT …/exposure/schedule`, more host names: `GET/POST …/targets/:targetId/hosts`, `POST …/hosts/:hostId/verify`, `DELETE …/hosts/:hostId`; `POST /v1/cli/exposure` |
 | Findings | `GET /v1/orgs/:orgId/findings`, `GET/PATCH …/findings/:findingId`, `GET …/scans`, `GET …/overview`, `GET …/audit` |
 | CLI | `GET /v1/cli/whoami`, `GET /v1/cli/rules` (signed), `GET /v1/cli/rules/public-key`, `POST /v1/cli/scans` |
 
