@@ -401,6 +401,8 @@ describe('more host names for a target', () => {
     return { ...env, id, hosts, published };
   }
   const add = async (c: Client, hosts: string, hostname: string) => c.req({ method: 'POST', url: hosts, payload: { hostname } });
+  // Exposure runs are limited to 6 an hour per address, and the tests above use them up: each test here runs from its own.
+  const runFrom = (c: Client, url: string, ip: string) => c.req({ method: 'POST', url, headers: { 'x-forwarded-for': ip } });
 
   it('adds a host name unverified, and verifies it only with its own TXT record', async () => {
     const { c, hosts, published } = await hostsSetup();
@@ -456,7 +458,7 @@ describe('more host names for a target', () => {
       dialPort: (p, h) => (h === 'admin.paywave.example' && p === 8443 ? g : undefined),
       timeoutMs: 1500,
     });
-    const res = await c.req({ method: 'POST', url: `${base}/${id}/exposure` });
+    const res = await runFrom(c, `${base}/${id}/exposure`, '198.51.100.11');
     expect(res.statusCode).toBe(200);
     expect(contacted).toEqual(['staging.paywave.example', 'admin.paywave.example']);
     expect(res.json().hosts.map((h: { hostname: string }) => h.hostname)).toEqual(['staging.paywave.example', 'admin.paywave.example']);
@@ -473,7 +475,7 @@ describe('more host names for a target', () => {
     const contacted: string[] = [];
     setExposureProbeOptions({ resolve: async (h) => { contacted.push(h); return ['127.0.0.1']; }, allowPrivate: true, services: [], pages: [] });
     await c.req({ method: 'POST', url: `${base}/${id}/pause` });
-    expect((await c.req({ method: 'POST', url: `${base}/${id}/exposure` })).json().error.code).toBe('TARGET_NOT_READY');
+    expect((await runFrom(c, `${base}/${id}/exposure`, '198.51.100.12')).json().error.code).toBe('TARGET_NOT_READY');
     expect(contacted).toEqual([]);
   });
 
@@ -485,7 +487,7 @@ describe('more host names for a target', () => {
     // allowPrivate stays off: the target resolves to a public address, the extra host to a private one. With no
     // services and no pages, nothing is dialled: this checks only which hosts are refused.
     setExposureProbeOptions({ resolve: async (h) => (h === 'internal.paywave.example' ? ['10.0.0.8'] : ['8.8.8.8']), pages: [], services: [] });
-    const res = await c.req({ method: 'POST', url: `${base}/${id}/exposure` });
+    const res = await runFrom(c, `${base}/${id}/exposure`, '198.51.100.13');
     expect(res.statusCode).toBe(200);
     expect(res.json().skippedHosts).toEqual([{ hostname: 'internal.paywave.example', reason: expect.stringContaining('private or reserved addresses') }]);
     expect(res.json().hosts.map((h: { hostname: string }) => h.hostname)).toEqual(['staging.paywave.example']);
