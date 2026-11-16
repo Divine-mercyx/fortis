@@ -8,7 +8,7 @@ name: Install and push (e2e)
 on:
   pull_request:
   push:
-    branches: [main, claude/pensive-hawking-w00waj]
+    branches: [main]
   workflow_dispatch:
   workflow_call:
 

@@ -128,7 +128,7 @@ Microsoft reviews the first winget pull request by hand, so `winget install` wor
 | Require approval before outside contributors' workflows run | `Divine-mercyx`, as admin | Not visible without admin access |
 | Protect the default branch: require a pull request and the `check` job | `Divine-mercyx`, as admin | Not protected |
 | Protect `cli-v*` tags | `Divine-mercyx`, as admin | Not visible without admin access |
-| Rename `claude/pensive-hawking-w00waj` to `main`, and point the Render API and dashboard services at it. Then replace the old name in `CONTRIBUTING.md` and `.github/workflows/e2e.yml` | `Divine-mercyx`, as admin, then anyone | Not renamed |
+| Rename the default branch to `main` (Settings → Branches), point the Render API and dashboard services at `main` and check both redeploy, and move any branch protection to it. Then merge the pull request for #86, which already uses `main` in `CONTRIBUTING.md` and `.github/workflows/e2e.yml` | `Divine-mercyx`, as admin | Not renamed |
 
 ### Now that #61 to #64 are merged
 
