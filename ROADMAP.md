@@ -123,11 +123,11 @@ Microsoft reviews the first winget pull request by hand, so `winget install` wor
 
 | What | Who | State |
 |---|---|---|
-| Turn on private vulnerability reporting. `SECURITY.md` sends reporters there | `Divine-mercyx`, as admin | Off |
-| Turn on secret scanning with push protection, and Dependabot alerts | `Divine-mercyx`, as admin | Not visible without admin access. No Dependabot pull request has been opened yet |
-| Require approval before outside contributors' workflows run | `Divine-mercyx`, as admin | Not visible without admin access |
-| Protect the default branch: require a pull request and the `check` job | `Divine-mercyx`, as admin | Not protected |
-| Protect `cli-v*` tags | `Divine-mercyx`, as admin | Not visible without admin access |
+| Turn on private vulnerability reporting (Settings → Code security). `SECURITY.md` sends reporters there | `Divine-mercyx`, as admin | Off on 2026-11-16: the API reports it disabled, so a reporter has no private way in |
+| Turn on secret scanning with push protection, and Dependabot alerts (Settings → Code security). Dependabot security updates are optional | `Divine-mercyx`, as admin | Not visible without admin access. No Dependabot pull request has been opened yet |
+| Require approval before outside contributors' workflows run (Settings → Actions → General) | `Divine-mercyx`, as admin | Not visible without admin access |
+| Protect the default branch (Settings → Rules): require a pull request and the `check` job, and block force-pushes and deletion | `Divine-mercyx`, as admin | Not protected on 2026-11-16: no ruleset and no branch protection |
+| Protect `cli-v*` and `vscode-v*` tags (Settings → Rules): only maintainers may create, change or delete them, since pushing one publishes a release | `Divine-mercyx`, as admin | No ruleset on 2026-11-16, so anyone with write access can push one |
 | Rename `claude/pensive-hawking-w00waj` to `main`, and point the Render API and dashboard services at it. Then replace the old name in `CONTRIBUTING.md` and `.github/workflows/e2e.yml` | `Divine-mercyx`, as admin, then anyone | Not renamed |
 
 ### Now that #61 to #64 are merged
