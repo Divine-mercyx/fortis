@@ -72,6 +72,7 @@ ${c.bold('Scan options')}
   --sbom <file>    also check a CycloneDX JSON SBOM (full Maven and Gradle coverage, including transitive)
   --resolve        ask Gradle, Maven, sbt or dotnet for the full dependency tree of projects with no lockfile
                    (runs the project's build tool; with --offline, from its local cache)
+  --terraform-plan <file>  also check a Terraform plan (terraform show -json output), where every value is final
   --no-baseline    block on every finding, ignoring ${BASELINE_FILE}
   --submodules     also scan git submodules (skipped by default: they are separate repositories)
   --paths-from <f> only scan the files listed in f, one per line (- for stdin); never closes findings
@@ -117,7 +118,7 @@ function parseArgs(argv: string[]): { cmd: string; args: string[]; flags: Flags 
     if (a.startsWith('--')) {
       const [k, v] = a.slice(2).split('=', 2) as [string, string | undefined];
       if (v !== undefined) flags[k] = v;
-      else if (['key', 'api', 'fail-on', 'target', 'mode', 'openapi', 'minutes', 'zap-report', 'sarif', 'since', 'provider', 'staging-branch', 'wait', 'config', 'sbom', 'ca', 'osv-db', 'junit', 'postman', 'har', 'graphql', 'paths-from'].includes(k) && rest[i + 1] && !rest[i + 1]!.startsWith('--')) flags[k] = rest[++i]!;
+      else if (['key', 'api', 'fail-on', 'target', 'mode', 'openapi', 'minutes', 'zap-report', 'sarif', 'since', 'provider', 'staging-branch', 'wait', 'config', 'sbom', 'terraform-plan', 'ca', 'osv-db', 'junit', 'postman', 'har', 'graphql', 'paths-from'].includes(k) && rest[i + 1] && !rest[i + 1]!.startsWith('--')) flags[k] = rest[++i]!;
       else flags[k] = true;
     } else args.push(a);
   }
@@ -205,7 +206,7 @@ async function cmdScan(flags: Flags): Promise<number> {
       /* no stdin: fall back to comparing with the remote branch */
     }
   }
-  const result = await runScan({ root, scope: partialScope ? 'changed' : 'full', only, packs, ignore: config.ignore, offline, pushed, sbom, resolve: Boolean(flags.resolve), submodules: Boolean(flags.submodules), ...osvOptions(flags) });
+  const result = await runScan({ root, scope: partialScope ? 'changed' : 'full', only, packs, ignore: config.ignore, offline, pushed, sbom, resolve: Boolean(flags.resolve), terraformPlan: str(flags['terraform-plan']), submodules: Boolean(flags.submodules), ...osvOptions(flags) });
   result.notes.unshift(...notes);
 
   // Git errors look like an empty repository. Passing here would also close every open finding.
@@ -827,7 +828,7 @@ async function cmdBaseline(flags: Flags): Promise<number> {
   const config = readProjectConfig(root);
   const api = apiUrl(str(flags.api) ?? config.apiUrl);
   const packs = await resolvePacks(api, resolveKey(api));
-  const result = await runScan({ root, scope: 'full', packs, ignore: config.ignore, offline: Boolean(flags.offline), sbom: str(flags.sbom), resolve: Boolean(flags.resolve), ...osvOptions(flags) });
+  const result = await runScan({ root, scope: 'full', packs, ignore: config.ignore, offline: Boolean(flags.offline), sbom: str(flags.sbom), resolve: Boolean(flags.resolve), terraformPlan: str(flags['terraform-plan']), ...osvOptions(flags) });
   const n = writeBaseline(root, result.detections);
   log(c.green('✓'), `Wrote ${BASELINE_FILE} with ${n} known finding(s) (${packs.join(', ')} rules).`);
   log(c.grey('Commit it. From now on only new findings block pushes and CI; the known ones stay visible in the dashboard.'));
