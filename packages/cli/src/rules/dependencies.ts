@@ -7,6 +7,7 @@ import { cycloneDx, ecosystemOf, findLockfiles, goWorkModules, GRADLE_BUILD, isD
 import { fixedVersion, fixMessage, type OsvAffected } from './fix-version';
 import { globMatch } from './js-lockfiles';
 import { OsvCache } from './osv-cache';
+import { resolveTrees, type ResolvedTree, type Runner } from './resolve';
 import { affects, lookupLocal, type DbAdvisory } from './osv-db';
 import type { Detection } from './types';
 
@@ -67,7 +68,7 @@ function readText(path: string): string {
   return text.replace(/^﻿/, '');
 }
 
-export function readPackages(root: string, files: string[], opts: { sbom?: string; allPaths?: string[]; ignore?: string[] } = {}): LockRead {
+export function readPackages(root: string, files: string[], opts: { sbom?: string; allPaths?: string[]; ignore?: string[]; resolved?: ResolvedTree } = {}): LockRead {
   const notes: string[] = [];
   const packages: LockRead['packages'] = [];
   let incomplete = false;
@@ -88,6 +89,13 @@ export function readPackages(root: string, files: string[], opts: { sbom?: strin
     }
   }
 
+  // Build files whose full tree came from their build tool (--resolve): those packages instead of the build files.
+  if (opts.resolved) {
+    packages.push(...opts.resolved.packages);
+    for (const p of opts.resolved.packages) seen.add(p.ecosystem);
+    notes.push(...opts.resolved.notes);
+  }
+
   let pomFiles = 0;
   let jvmBuilds = 0;
   let pomChecked = 0;
@@ -99,6 +107,7 @@ export function readPackages(root: string, files: string[], opts: { sbom?: strin
   const lockfiles = chooseJsLockfiles(root, withGoWorkspaces(root, findLockfiles(files, opts.ignore), opts.ignore), notes);
   for (const file of lockfiles) {
     if (sbomRead && (isPomXml(file) || isRequirements(file) || isJvmBuild(file))) continue; // the SBOM already has this, and more
+    if (opts.resolved?.covered.has(file)) continue; // the build tool's tree already has this, and more
     const abs = join(root, file);
     if (!existsSync(abs)) continue;
     try {
@@ -127,13 +136,15 @@ export function readPackages(root: string, files: string[], opts: { sbom?: strin
     }
   }
 
+  // With --resolve already tried, the build files still read here are the ones the tool couldn't do: don't suggest it again.
+  const tried = Boolean(opts.resolved);
   if (pomFiles) {
     const declared = pomChecked + pomSkipped;
     const versions = pomSkipped ? `; the other ${pomSkipped} get their version from a parent POM or BOM` : '';
-    notes.push(`pom.xml: checked ${pomChecked} of ${declared} declared dependencies${versions}. Transitive dependencies aren't covered: generate a CycloneDX SBOM and pass --sbom for those (fortis ci init adds the step).`);
+    notes.push(`pom.xml: checked ${pomChecked} of ${declared} declared dependencies${versions}. Transitive dependencies aren't covered: ${tried ? '' : 'run with --resolve to ask Maven for the full tree, or '}generate a CycloneDX SBOM and pass --sbom (fortis ci init adds the step).`);
   }
-  if (dotnetProjects) notes.push(`.NET project files: only the packages they reference were checked (${dotnetProjects === 1 ? '1 project' : `${dotnetProjects} projects`}). Transitive packages need the lockfile: set <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile> and commit packages.lock.json, or pass --sbom.`);
-  if (jvmBuilds) notes.push(`Gradle and sbt build files: only the dependencies they declare were checked. Transitive dependencies need a CycloneDX SBOM passed with --sbom (fortis ci init adds the step for Gradle), Gradle dependency locking, or sbt-dependency-lock's build.sbt.lock.`);
+  if (dotnetProjects) notes.push(`.NET project files: only the packages they reference were checked (${dotnetProjects === 1 ? '1 project' : `${dotnetProjects} projects`}). Transitive packages need the lockfile: set <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile> and commit packages.lock.json, ${tried ? '' : 'run with --resolve to ask dotnet for them, '}or pass --sbom.`);
+  if (jvmBuilds) notes.push(`Gradle and sbt build files: only the dependencies they declare were checked. Transitive dependencies need ${tried ? '' : '--resolve (which asks Gradle or sbt for the full tree), '}a CycloneDX SBOM passed with --sbom (fortis ci init adds the step for Gradle), Gradle dependency locking, or sbt-dependency-lock's build.sbt.lock.`);
   if (directOnlyFiles) notes.push(`requirements files: only the packages they list were checked. Unless they're a full pip freeze, transitive dependencies aren't covered: use uv, Poetry or pip-compile, or pass --sbom for those.`);
   if (skippedElsewhere) {
     notes.push(`${skippedElsewhere === 1 ? '1 dependency has' : `${skippedElsewhere} dependencies have`} no exact version (pinned by range, unpinned, or installed from a branch, git, a tarball or a local folder), so ${skippedElsewhere === 1 ? "it wasn't" : "they weren't"} checked.`);
@@ -366,12 +377,15 @@ export async function scanDependencies(
     osvDb?: string;
     /** Cache folder for OSV answers; omitted means no cache. */
     cacheDir?: string;
+    /** Ask Gradle, Maven, sbt or dotnet for the full tree of build files with no lockfile (--resolve). `offline`: from their local cache only. */
+    resolve?: { offline?: boolean; run?: Runner; timeoutMs?: number };
     now?: () => number;
   } = {},
 ): Promise<{ detections: Detection[]; checked: number; error?: string; notes: string[]; incomplete: boolean }> {
   const fetchImpl = opts.fetchImpl ?? fetch;
   const base = opts.osvUrl ?? 'https://api.osv.dev';
-  const read = readPackages(root, files, opts);
+  const resolved = opts.resolve ? await resolveTrees(root, findLockfiles(files, opts.ignore), opts.resolve) : undefined;
+  const read = readPackages(root, files, { ...opts, resolved });
   const { notes } = read;
   const located = read.packages.filter((p) => opts.includeDev || !p.dev);
   if (!located.length) return { detections: [], checked: 0, notes, incomplete: read.incomplete };
