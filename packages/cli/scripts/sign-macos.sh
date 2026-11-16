@@ -10,7 +10,8 @@
 set -euo pipefail
 
 BIN=$1
-ENTITLEMENTS="$(cd "$(dirname "$0")" && pwd)/macos-entitlements.plist"
+SCRIPTS="$(cd "$(dirname "$0")" && pwd)"
+ENTITLEMENTS="$SCRIPTS/macos-entitlements.plist"
 sign() { codesign --force --options runtime --entitlements "$ENTITLEMENTS" "$@" "$BIN"; }
 
 if [ "${FORTIS_SIGN_CHECK:-}" = 1 ]; then
@@ -40,9 +41,21 @@ IDENTITY=$(security find-identity -v -p codesigning "$KEYCHAIN" | sed -n 's/.*"\
 
 sign --sign "$IDENTITY" --timestamp
 codesign --verify --strict "$BIN"
+# Notarization refuses a binary without all three, and Gatekeeper then blocks it.
+DETAILS=$(codesign -dv --verbose=4 "$BIN" 2>&1)
+grep -q '^Authority=Developer ID Application' <<<"$DETAILS" || { echo 'FAILED: not signed by a Developer ID Application certificate'; exit 1; }
+grep -q '^Timestamp=' <<<"$DETAILS" || { echo "FAILED: the signature has no secure timestamp"; exit 1; }
+grep -q 'flags=.*runtime' <<<"$DETAILS" || { echo 'FAILED: the hardened runtime is off'; exit 1; }
 
 # A bare binary can't have a ticket stapled to it, so Gatekeeper looks it up online when it first runs.
 echo "$APPLE_API_KEY_P8_BASE64" | base64 --decode > "$WORK/key.p8"
 ditto -c -k --keepParent "$BIN" "$WORK/notarize.zip"
-xcrun notarytool submit "$WORK/notarize.zip" --key "$WORK/key.p8" --key-id "$APPLE_API_KEY_ID" --issuer "$APPLE_API_ISSUER_ID" --wait --timeout 30m
+NOTARY=(--key "$WORK/key.p8" --key-id "$APPLE_API_KEY_ID" --issuer "$APPLE_API_ISSUER_ID")
+# notarytool can exit 0 for a rejected binary, so the result decides, not the exit code.
+xcrun notarytool submit "$WORK/notarize.zip" "${NOTARY[@]}" --wait --timeout 30m --output-format json > "$WORK/notary.json" || true
+if ! ID=$(node "$SCRIPTS/check-signing.mjs" notary "$WORK/notary.json"); then
+  # Apple's log says which file failed and why.
+  [ -n "$ID" ] && xcrun notarytool log "$ID" "${NOTARY[@]}" || true
+  exit 1
+fi
 echo 'ok: signed and notarized'

@@ -539,12 +539,12 @@ To release, bump `version` in `packages/cli/package.json` and push a matching ta
 - uses this version's changelog section below as the release notes. Before tagging, change its heading from "(unreleased)" to the release date;
 - builds, tests and publishes the wheels to PyPI (TestPyPI on a fork). `packages/python/build_wheel.py` makes one by hand.
 
-A tag also signs the macOS and Windows binaries, builds the Alpine ones, and updates the package managers. Each store or signing step without its secret is skipped. These are set up once, in a GitHub environment called `release` limited to `cli-v*` tags:
+A tag also signs the macOS and Windows binaries, builds the Alpine ones, and updates the package managers. Each store or signing step without its secret is skipped. A platform with only some of its signing secrets, or one that doesn't look right (a file path instead of a base64-encoded file, say), fails the release before building, and says which secret. The macOS binary is published only if Apple accepts its notarization. These are set up once, in a GitHub environment called `release` limited to `cli-v*` tags:
 
 | Secrets | What they need |
 |---|---|
 | `APPLE_CERT_P12_BASE64`, `APPLE_CERT_PASSWORD`, `APPLE_API_KEY_P8_BASE64`, `APPLE_API_KEY_ID`, `APPLE_API_ISSUER_ID` | An Apple Developer ID Application certificate, and an App Store Connect API key |
-| `WINDOWS_CERT_PFX_BASE64`, `WINDOWS_CERT_PASSWORD` | A code-signing certificate you can export as a PFX |
+| `WINDOWS_CERT_PFX_BASE64`, `WINDOWS_CERT_PASSWORD` | A code-signing certificate you can export as a PFX. Most CAs now keep the key on a hardware token or a cloud signing service instead, which needs its own signing step |
 | `PACKAGE_REPOS_TOKEN` | A token that can push to `Divine-mercyx/homebrew-tap` and `Divine-mercyx/scoop-bucket` |
 | `WINGET_TOKEN` | A classic token with the `public_repo` scope, for pull requests to `microsoft/winget-pkgs` |
 

@@ -52,7 +52,8 @@ jobs:
   binaries:
     needs: [check, e2e]
     # Signing secrets live in this environment, which an admin limits to cli-v* tags.
-    # Without them, binaries are built as before, and macOS and Windows warn about them.
+    # Without them, binaries are built as before, and macOS and Windows warn about them. With only
+    # some of a platform's secrets, or a malformed one, the release fails before building.
     environment: release
     env:
       APPLE_CERT_P12_BASE64: ${{ secrets.APPLE_CERT_P12_BASE64 }}
@@ -80,6 +81,12 @@ jobs:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      - name: Check the signing secrets
+        id: signing
+        shell: bash
+        run: |
+          case "$RUNNER_OS" in macOS) p=macos ;; Windows) p=windows ;; *) p=linux ;; esac
+          node packages/cli/scripts/check-signing.mjs secrets "$p"
       - name: Refresh the end-of-life dates for the Dockerfile rules
         working-directory: packages/cli
         shell: bash
@@ -98,10 +105,10 @@ jobs:
           echo "FORTIS_NODE_RUNTIME=$PWD/.runtime/node" >> "$GITHUB_ENV"
       - run: pnpm --filter fortis-watchdog build:binary
       - name: Sign and notarize (macOS)
-        if: runner.os == 'macOS' && env.APPLE_CERT_P12_BASE64 != ''
+        if: runner.os == 'macOS' && steps.signing.outputs.sign == 'true'
         run: bash packages/cli/scripts/sign-macos.sh packages/cli/dist-sea/fortis
       - name: Sign (Windows)
-        if: runner.os == 'Windows' && env.WINDOWS_CERT_PFX_BASE64 != ''
+        if: runner.os == 'Windows' && steps.signing.outputs.sign == 'true'
         shell: pwsh
         run: ./packages/cli/scripts/sign-windows.ps1 -Binary packages/cli/dist-sea/fortis.exe
       # beta.12's Linux binary needed glibc 2.38, so its Docker image failed and its wheels' manylinux_2_28
@@ -129,6 +136,12 @@ jobs:
       - name: The binary and its download are small enough
         if: runner.os != 'Windows'
         run: node packages/cli/scripts/check-binary-size.mjs packages/cli/dist-sea/fortis "packages/cli/out/fortis-${{ matrix.name }}.tar.gz"
+      - name: Say whether it's signed
+        if: runner.os != 'Linux'
+        shell: bash
+        run: |
+          if [ "${{ steps.signing.outputs.sign }}" = true ]; then state=signed; else state="**unsigned**: users see a security warning on first run"; fi
+          echo "- fortis-${{ matrix.name }}: $state" >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: ${{ matrix.name }}
