@@ -93,7 +93,8 @@ The code for each of these is merged. Each one waits on an account, a setting or
 
 | What | Who | State |
 |---|---|---|
-| Push the tag `cli-v0.1.0-beta.13`. This builds the binaries, the GitHub release, the Docker image, PyPI wheels, npm and the attestations | A maintainer who can push tags | Not done. beta.12 is on GitHub, PyPI and npm, but its Docker image failed (its Linux binary needed glibc 2.38), so beta.13 is the first with an image |
+| Push the tag `cli-v0.1.0-beta.13`. This builds the binaries, the GitHub release, the Docker image, PyPI wheels, npm and the attestations | A maintainer who can push tags | Done on 2026-11-11: the release run passed, and the GitHub release has every binary, `install.sh` and `SHA256SUMS` |
+| Make the container package `ghcr.io/divine-mercyx/fortis` public: the package's settings on GitHub → Change visibility → Public. A first push to ghcr.io is private, so `docker run` and the GitLab and Bitbucket templates, which run in the image, can't pull it | `Divine-mercyx`, as the package's owner | Private on 2026-11-16: ghcr.io refuses an anonymous pull, and the package page isn't public |
 | npm: package → Settings → Trusted publishing → GitHub Actions, repository `Divine-mercyx/fortis`, workflow `release-cli.yml` | `divine-fortis`, the only npm maintainer | Not proven. The last three release runs failed, and beta.12 has no release run |
 | PyPI: add a pending publisher for `fortis-watchdog`, same repository and workflow, environment `pypi` | Whoever will own the project on pypi.org | Not done. The project doesn't exist, so `pip install fortis-watchdog` fails |
 | After the tag: try each install, and check Gatekeeper on macOS and SmartScreen on Windows | A maintainer | Waits on the tag |
@@ -142,7 +143,7 @@ Microsoft reviews the first winget pull request by hand, so `winget install` wor
 
 | What | Who |
 |---|---|
-| Run each CI template in a sample repository: GitHub Actions, GitLab, Bitbucket, Azure DevOps, Jenkins, CircleCI, Buildkite. The variables each one needs are in the CLI docs under "Other CI systems" | Whoever holds an account on that system |
+| Run each CI template once in a sample repository with a critical finding: GitHub Actions, GitLab, Bitbucket, Azure DevOps, Jenkins, CircleCI, Buildkite. Check that the scan runs, the job fails, and the report (and on GitHub and GitLab the comment) appears where the CLI docs say under "Other CI systems". `tests/ci-templates-run.test.ts` already runs each template's own commands with that system's variables; what's left is the system accepting the file and showing the report. GitLab and Bitbucket wait on the public image above | Whoever holds an account on that system |
 | Run the `false-positive-shapes` export against production. It needs `DATABASE_URL`, so the nightly job doesn't run it | Whoever has production database access |
 | Confirm the nightly accuracy run starts on its schedule (02:30 UTC) and can open an issue | `Divine-mercyx`. It has only run on pull requests so far |
 
