@@ -54,6 +54,9 @@ function assertRunnable(target: TargetRow, plan: string) {
   }
 }
 
+/** Host names checked at once in one exposure check. */
+const HOSTS_AT_ONCE = 4;
+
 /**
  * Run one exposure check and record it. Shared by the dashboard, the schedule and the CLI. It checks the target's own
  * host name and each of its verified extra host names (#92); an unverified host name is never contacted. Callers
@@ -64,16 +67,32 @@ export async function runExposure(req: FastifyRequest, target: TargetRow, how: {
   const hostnames = [target.hostname, ...(await verifiedHostnames(target.id)).filter((h) => h !== target.hostname)];
   const runs: { hostname: string; probe: Awaited<ReturnType<typeof probeHost>> }[] = [];
   const skippedHosts: { hostname: string; reason: string }[] = [];
+  // A few host names at a time, so ten extra hosts don't run past the dashboard's request time limit.
+  const outcomes: ({ ok: true; probe: Awaited<ReturnType<typeof probeHost>> } | { ok: false; error: unknown })[] = new Array(hostnames.length);
+  let next = 0;
+  await Promise.all(
+    Array.from({ length: Math.min(HOSTS_AT_ONCE, hostnames.length) }, async () => {
+      while (next < hostnames.length) {
+        const i = next++;
+        try {
+          outcomes[i] = { ok: true, probe: await probeHost(hostnames[i]!, probeOptions) };
+        } catch (error) {
+          outcomes[i] = { ok: false, error };
+        }
+      }
+    }),
+  );
   for (const [i, hostname] of hostnames.entries()) {
-    try {
-      runs.push({ hostname, probe: await probeHost(hostname, probeOptions) });
-    } catch (e) {
-      // The target's own host failing stops the check, as before; an extra host failing (a private address, no DNS)
-      // is skipped and reported, so one bad record doesn't hide the rest.
-      if (!(e instanceof ExposureError)) throw e;
-      if (i === 0) throw badRequest(e.message, e.code);
-      skippedHosts.push({ hostname, reason: e.message });
+    const o = outcomes[i]!;
+    if (o.ok) {
+      runs.push({ hostname, probe: o.probe });
+      continue;
     }
+    // The target's own host failing stops the check, as before; an extra host failing (a private address, no DNS)
+    // is skipped and reported, so one bad record doesn't hide the rest.
+    if (!(o.error instanceof ExposureError)) throw o.error;
+    if (i === 0) throw badRequest(o.error.message, o.error.code);
+    skippedHosts.push({ hostname, reason: o.error.message });
   }
   const probe = runs[0]!.probe;
   const found = runs.flatMap((r) => exposureFindings(r.hostname, r.probe.results, r.probe.pages));
