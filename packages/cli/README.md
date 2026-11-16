@@ -81,6 +81,14 @@ Once a day, Fortis checks GitHub for a newer release and prints a notice if ther
 - **Base64 values:** values 32 to 4,096 characters long that decode to readable text are decoded and checked for the keys named above, up to 200 values per file.
 - **Kubernetes `Secret` manifests:** `data:` values are decoded and `stringData:` values read as they are. Credentials are reported, while usernames, hosts, empty values and Helm templates aren't.
 
+**Infrastructure values that come from outside the files.** A database made public by a pipeline variable looks harmless in the `.tf` file. The infrastructure checks resolve what they can, and list the rest as not checked rather than passing it:
+
+- **Terraform:** variables, locals and `.tfvars` are followed. So are `TF_VAR_…` values and `terraform … -var 'name=value'` written in a CI file (GitHub Actions, GitLab, Azure Pipelines, Bitbucket, CircleCI, Jenkins, Buildkite, Cloud Build, Drone), in Terraform's own order. A value taken from the CI system's own secrets or variables can't be known.
+- **Plans:** `fortis scan --terraform-plan plan.json` checks a plan, where every value is final, whatever set it: a pipeline, another repository's module or remote state. Make one with `terraform plan -out=tfplan && terraform show -json tfplan > plan.json`. Findings name the resource's address.
+- **CloudFormation:** `!Ref` and `{"Ref": …}` to a parameter are judged by its `Default`.
+- **Helm charts:** when Helm is installed, each chart with a Service template is rendered with `helm template` and its default values, and the rendered Services are checked. Rendering runs no hooks and talks to no cluster.
+- **What's left:** a setting the checks would judge whose value still comes from a variable, module output, stack parameter or chart template is listed under "Not checked", with its file and line.
+
 Run `fortis rules` for the list and `fortis explain FX-OWN-001` for why a rule matters and how to fix it.
 
 ### Dependency files it reads
@@ -147,6 +155,7 @@ For sbt, add [sbt-dependency-lock](https://github.com/stringbean/sbt-dependency-
 | `fortis scan --fail-on high` | Block at high or above (default: critical) |
 | `fortis scan --json` / `--no-upload` / `--offline` | Machine output (secrets masked, like every other output), keep results local, or skip the network |
 | `fortis scan --sbom bom.json` | Also check a CycloneDX JSON SBOM |
+| `fortis scan --terraform-plan plan.json` | Also check a Terraform plan (`terraform show -json` output) |
 | `fortis scan --junit report.xml` | Also write JUnit XML for CI test reports |
 | `fortis scan --ci --pr-comment` | Comment on the pull request with what it adds (GitHub and GitLab) |
 | `fortis scan --paths-from list.txt` | Only scan the files listed, one per line (`-` for stdin). Never closes findings. The VS Code extension uses this |
@@ -567,6 +576,7 @@ It exits 1 if something stops Fortis doing its job. Things that are only worth k
 ## Changelog
 
 **Unreleased**
+- `fortis scan --terraform-plan plan.json` checks a Terraform plan (`terraform show -json` output), where every value is final, so a database made public by a pipeline variable or another repository's module is found, with the resource's address. The infrastructure checks also read `TF_VAR_…` and `-var` values written in CI files, judge CloudFormation `!Ref` by the parameter's default, and render Helm charts with `helm template` when Helm is installed. A setting whose value still can't be resolved is listed under "Not checked" instead of passing silently.
 - The four money checks now read Go, C#, PHP, Java and Kotlin too: money as floating point (FX-MONEY-001: `double` and `Double` in Java and Kotlin where `BigDecimal` belongs, `double` in C# where `decimal` belongs, `float` and Laravel `float`/`double` columns in PHP, `float64` in Go), card data in logs or in plain-text JPA, Entity Framework, Laravel and GORM columns (FX-PCI-001), transaction references built from the clock or a weak random such as `System.currentTimeMillis()`, `DateTime.Now.Ticks`, `time()`, `uniqid()`, `rand()` or Go's `math/rand` (FX-REF-001), and charge amounts taken from the request in Spring, ASP.NET Core, Laravel and Go handlers, followed through local variables (FX-AMT-001).
 - Release gates on Plus and Enterprise: when a project has a gate turned on in the dashboard, `fortis scan --ci` exits with the gate's verdict instead of `--fail-on`, and prints which findings blocked, or who approved the release and why. With no gate, or when the upload fails, `--fail-on` decides as before. `--json` output carries the verdict as `gate`.
 - `fortis update` on Windows waits out a new `fortis.exe` that Windows still holds for a moment (antivirus scans a program it has just written or run) instead of failing with EBUSY, and a folder it can't delete yet no longer hides the real result. The next update clears it.

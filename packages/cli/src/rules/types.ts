@@ -33,6 +33,8 @@ export type ProjectContext = {
   rateLimitAll?: boolean;
   /** Literal values of Terraform variables and locals, by folder, so `var.x` can be judged. */
   terraform?: Map<string, Map<string, string>>;
+  /** Infrastructure settings whose value couldn't be resolved, collected during a scan so it can say they weren't checked. */
+  unresolved?: { ruleId: string; file: string; line: number; setting: string; value: string }[];
   /** Some file in the project pins certificates (CertificatePinner, a pin-set, TrustKit, ...). */
   pinning?: boolean;
 };
