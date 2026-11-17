@@ -330,6 +330,8 @@ jobs:
     environment: release
     env:
       PACKAGE_REPOS_TOKEN: ${{ secrets.PACKAGE_REPOS_TOKEN }}
+    outputs:
+      published: ${{ steps.publish.outputs.published }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
@@ -342,11 +344,38 @@ jobs:
           gh release download "$GITHUB_REF_NAME" --pattern SHA256SUMS --dir "$RUNNER_TEMP"
           node packages/cli/scripts/package-manifests.mjs --version "$GITHUB_REF_NAME" --sums "$RUNNER_TEMP/SHA256SUMS" --out "$RUNNER_TEMP/manifests"
       - name: Update the Homebrew tap and the Scoop bucket
+        id: publish
         if: env.PACKAGE_REPOS_TOKEN != ''
-        run: bash packages/cli/scripts/publish-manifests.sh "$RUNNER_TEMP/manifests"
+        run: |
+          bash packages/cli/scripts/publish-manifests.sh "$RUNNER_TEMP/manifests"
+          echo "published=true" >> "$GITHUB_OUTPUT"
       - name: Say what was skipped
         if: env.PACKAGE_REPOS_TOKEN == ''
         run: echo "::notice::PACKAGE_REPOS_TOKEN isn't set, so the Homebrew tap and Scoop bucket weren't updated."
+
+  # The README's install commands, run against the tap and bucket just updated: the release only
+  # passes once `brew install` and `scoop install` give this version. No secrets are used here.
+  package-installs:
+    needs: homebrew-scoop
+    if: needs.homebrew-scoop.outputs.published == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { runner: macos-15, how: brew }
+          - { runner: ubuntu-24.04, how: brew }
+          - { runner: windows-2025, how: scoop }
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: brew install divine-mercyx/tap/fortis
+        if: matrix.how == 'brew'
+        run: bash packages/cli/scripts/check-brew-install.sh "${GITHUB_REF_NAME#cli-v}"
+      - name: scoop install fortis
+        if: matrix.how == 'scoop'
+        shell: pwsh
+        run: ./packages/cli/scripts/check-scoop-install.ps1 -Version ($env:GITHUB_REF_NAME -replace '^cli-v', '')
 
   winget:
     needs: github-release
