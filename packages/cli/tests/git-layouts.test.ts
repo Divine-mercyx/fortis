@@ -69,10 +69,12 @@ describe('git layouts', () => {
     expect(r.detections.map((d) => d.file)).toEqual(['app.ts']);
   });
 
-  it('detached HEAD: no branch name is reported, and scanning works', async () => {
+  it('detached HEAD: no branch name outside CI, the CI system’s inside it, and scanning works', async () => {
     const dir = repo({ 'app.ts': `export const k = '${KEY}';\n` });
     git(dir, 'checkout', '-q', '--detach');
-    expect(currentBranch(dir)).toBeUndefined();
+    // An empty environment: these tests run inside CI themselves, whose own branch would be picked up.
+    expect(currentBranch(dir, {})).toBeUndefined();
+    expect(currentBranch(dir, { GITLAB_CI: 'true', CI_COMMIT_BRANCH: 'main' })).toBe('main');
     expect((await scan(dir)).detections).toHaveLength(1);
   });
 

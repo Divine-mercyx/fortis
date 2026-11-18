@@ -93,21 +93,22 @@ The code for each of these is merged. Each one waits on an account, a setting or
 
 | What | Who | State |
 |---|---|---|
-| Push the tag `cli-v0.1.0-beta.13`. This builds the binaries, the GitHub release, the Docker image, PyPI wheels, npm and the attestations | A maintainer who can push tags | Not done. beta.12 is on GitHub, PyPI and npm, but its Docker image failed (its Linux binary needed glibc 2.38), so beta.13 is the first with an image |
+| Push the tag `cli-v0.1.0-beta.13`. This builds the binaries, the GitHub release, the Docker image, PyPI wheels, npm and the attestations | A maintainer who can push tags | Done on 2026-11-11: the release run passed, and the GitHub release has every binary, `install.sh` and `SHA256SUMS` |
+| Make the container package `ghcr.io/divine-mercyx/fortis` public: the package's settings on GitHub → Change visibility → Public. A first push to ghcr.io is private, so `docker run` and the GitLab and Bitbucket templates, which run in the image, can't pull it | `Divine-mercyx`, as the package's owner | Private on 2026-11-16: ghcr.io refuses an anonymous pull, and the package page isn't public |
 | npm: package → Settings → Trusted publishing → GitHub Actions, repository `Divine-mercyx/fortis`, workflow `release-cli.yml` | `divine-fortis`, the only npm maintainer | Not proven. The last three release runs failed, and beta.12 has no release run |
 | PyPI: add a pending publisher for `fortis-watchdog`, same repository and workflow, environment `pypi` | Whoever will own the project on pypi.org | Not done. The project doesn't exist, so `pip install fortis-watchdog` fails |
 | After the tag: try each install, and check Gatekeeper on macOS and SmartScreen on Windows | A maintainer | Waits on the tag |
 
 ### Package managers and signing
 
-Each step is skipped with a notice, and doesn't fail the release, until its secret or repository exists.
+Each step is skipped with a notice, and doesn't fail the release, until its secret or repository exists. Signing is the exception: a platform with only some of its secrets set, or one that's malformed, fails the release before anything is built, so a half-finished setup can't ship unsigned binaries. The run's summary says whether each binary is signed.
 
 | What | Who | State |
 |---|---|---|
 | Create public repositories `Divine-mercyx/homebrew-tap` and `Divine-mercyx/scoop-bucket`, each with a first commit | `Divine-mercyx` | Not done. `brew install` and `scoop install` fail |
-| Settings → Environments: create `release`, limited to `cli-v*` tags. Add `PACKAGE_REPOS_TOKEN` (can push to both repositories above) and `WINGET_TOKEN` (classic token, `public_repo` scope) | `Divine-mercyx`, as admin | Not done. The repository has no environments |
-| Join the Apple Developer Program, create a Developer ID Application certificate and an App Store Connect API key, and add the five `APPLE_*` secrets | Whoever can sign up for the company | Not visible from outside |
-| Buy a Windows code-signing certificate, and add `WINDOWS_CERT_PFX_BASE64` and `WINDOWS_CERT_PASSWORD` | Whoever can buy it for the company | Not visible from outside |
+| Settings → Environments: limit `release` to `cli-v*` tags. Add `PACKAGE_REPOS_TOKEN` (can push to both repositories above) and `WINGET_TOKEN` (classic token, `public_repo` scope) | `Divine-mercyx`, as admin | On 2026-11-16, `release` existed but had no secrets and no deployment rule, so a workflow on any branch could use it |
+| Join the Apple Developer Program as an organisation (needs a D-U-N-S number), create a Developer ID Application certificate and an App Store Connect API key, and add the five `APPLE_*` secrets to `release` | Whoever can sign up for the company | Not done: `release` had no secrets on 2026-11-16 |
+| Choose a Windows code-signing route, buy the certificate, and add its secrets to `release`. Since June 2023, a new certificate's private key must stay on a hardware token or a cloud signing service, so most CAs no longer give out a PFX file. The workflow signs with `WINDOWS_CERT_PFX_BASE64` and `WINDOWS_CERT_PASSWORD`; a cloud service needs its own signing step, added once it's chosen | Whoever can buy it for the company, then anyone | Not done: `release` had no secrets on 2026-11-16 |
 
 Microsoft reviews the first winget pull request by hand, so `winget install` works once that is accepted.
 
@@ -116,18 +117,18 @@ Microsoft reviews the first winget pull request by hand, so `winget install` wor
 | What | Who | State |
 |---|---|---|
 | Create a publisher on the VS Code Marketplace, and an account and namespace on Open VSX | Whoever owns the brand | Not done |
-| Set `publisher` in `packages/vscode/package.json` to that ID | Anyone, once the ID exists | Still the placeholder `fortis` |
-| Add the secrets `VSCE_PAT` and `OVSX_PAT`, then push the tag `vscode-v0.1.0` | `Divine-mercyx`, as admin | Not done. The release workflow has never run |
+| Set `publisher` in `packages/vscode/package.json` to that ID | Anyone, once the ID exists | Still the placeholder `fortis`. On 2026-11-16 that ID was free in both stores, so it can stay if it's the one registered |
+| Add the secrets `VSCE_PAT` and `OVSX_PAT`, then push the tag `vscode-v0.1.0` | `Divine-mercyx`, as admin | Not done. The release workflow has never run. It now fails if a secret is missing, creates the Open VSX namespace, and passes only once both stores list the version |
 
 ### Repository settings
 
 | What | Who | State |
 |---|---|---|
-| Turn on private vulnerability reporting. `SECURITY.md` sends reporters there | `Divine-mercyx`, as admin | Off |
-| Turn on secret scanning with push protection, and Dependabot alerts | `Divine-mercyx`, as admin | Not visible without admin access. No Dependabot pull request has been opened yet |
-| Require approval before outside contributors' workflows run | `Divine-mercyx`, as admin | Not visible without admin access |
-| Protect the default branch: require a pull request and the `check` job | `Divine-mercyx`, as admin | Not protected |
-| Protect `cli-v*` tags | `Divine-mercyx`, as admin | Not visible without admin access |
+| Turn on private vulnerability reporting (Settings → Code security). `SECURITY.md` sends reporters there | `Divine-mercyx`, as admin | Off on 2026-11-16: the API reports it disabled, so a reporter has no private way in |
+| Turn on secret scanning with push protection, and Dependabot alerts (Settings → Code security). Dependabot security updates are optional | `Divine-mercyx`, as admin | Not visible without admin access. No Dependabot pull request has been opened yet |
+| Require approval before outside contributors' workflows run (Settings → Actions → General) | `Divine-mercyx`, as admin | Not visible without admin access |
+| Protect the default branch (Settings → Rules): require a pull request and the `check` job, and block force-pushes and deletion | `Divine-mercyx`, as admin | Not protected on 2026-11-16: no ruleset and no branch protection |
+| Protect `cli-v*` and `vscode-v*` tags (Settings → Rules): only maintainers may create, change or delete them, since pushing one publishes a release | `Divine-mercyx`, as admin | No ruleset on 2026-11-16, so anyone with write access can push one |
 | Rename the default branch to `main` (Settings → Branches), point the Render API and dashboard services at `main` and check both redeploy, and move any branch protection to it. Then merge the pull request for #86, which already uses `main` in `CONTRIBUTING.md` and `.github/workflows/e2e.yml` | `Divine-mercyx`, as admin | Not renamed |
 
 ### Now that #61 to #64 are merged
@@ -142,7 +143,7 @@ Microsoft reviews the first winget pull request by hand, so `winget install` wor
 
 | What | Who |
 |---|---|
-| Run each CI template in a sample repository: GitHub Actions, GitLab, Bitbucket, Azure DevOps, Jenkins, CircleCI, Buildkite. The variables each one needs are in the CLI docs under "Other CI systems" | Whoever holds an account on that system |
+| Run each CI template once in a sample repository with a critical finding: GitHub Actions, GitLab, Bitbucket, Azure DevOps, Jenkins, CircleCI, Buildkite. Check that the scan runs, the job fails, and the report (and on GitHub and GitLab the comment) appears where the CLI docs say under "Other CI systems". `tests/ci-templates-run.test.ts` already runs each template's own commands with that system's variables; what's left is the system accepting the file and showing the report. GitLab and Bitbucket wait on the public image above | Whoever holds an account on that system |
 | Run the `false-positive-shapes` export against production. It needs `DATABASE_URL`, so the nightly job doesn't run it | Whoever has production database access |
 | Confirm the nightly accuracy run starts on its schedule (02:30 UTC) and can open an issue | `Divine-mercyx`. It has only run on pull requests so far |
 

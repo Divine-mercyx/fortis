@@ -1,7 +1,9 @@
 name: Release VS Code extension
 
 # Publishes the extension when a tag like vscode-v0.1.0 is pushed. See packages/vscode/PUBLISHING.md.
-# A store without its secret (VSCE_PAT, OVSX_PAT) is skipped, so a fork can dry-run the rest.
+# In this repository both secrets (VSCE_PAT, OVSX_PAT) are required. In a fork, a store without its
+# secret is skipped, so the rest can be dry-run.
+# Re-running is safe: a version a store already has is skipped, and the run passes once both list it.
 
 on:
   push:
@@ -36,6 +38,8 @@ jobs:
   publish:
     needs: test
     runs-on: ubuntu-24.04
+    # The Marketplace can take a while to verify a new version.
+    timeout-minutes: 45
     env:
       VSCE_PAT: ${{ secrets.VSCE_PAT }}
       OVSX_PAT: ${{ secrets.OVSX_PAT }}
@@ -46,6 +50,17 @@ jobs:
         with:
           node-version: 22
           cache: pnpm
+      - name: Check the publishing secrets
+        run: |
+          missing=""
+          [ -n "$VSCE_PAT" ] || missing="$missing VSCE_PAT"
+          [ -n "$OVSX_PAT" ] || missing="$missing OVSX_PAT"
+          [ -z "$missing" ] && exit 0
+          if [ "$GITHUB_REPOSITORY" = "Divine-mercyx/fortis" ]; then
+            echo "::error::Missing secret(s):$missing. Add them in Settings > Secrets and variables > Actions, then re-run this workflow. Nothing was published."
+            exit 1
+          fi
+          echo "::warning::Missing secret(s):$missing. The stores they're for are skipped."
       - run: pnpm install --frozen-lockfile
       - name: Check the tag matches the extension version
         working-directory: packages/vscode
@@ -63,8 +78,23 @@ jobs:
       - name: Publish to the VS Code Marketplace
         if: env.VSCE_PAT != ''
         working-directory: packages/vscode
-        run: pnpm exec vsce publish --packagePath fortis-security.vsix --no-dependencies
+        run: pnpm exec vsce publish --packagePath fortis-security.vsix --no-dependencies --skip-duplicate
+      - name: Create the Open VSX namespace if it's missing
+        if: env.OVSX_PAT != ''
+        working-directory: packages/vscode
+        run: |
+          NS=$(node -p "require('./package.json').publisher")
+          status=$(curl -s -o /dev/null -w '%{http_code}' "https://open-vsx.org/api/$NS")
+          if [ "$status" = 404 ]; then pnpm exec ovsx create-namespace "$NS" --pat "$OVSX_PAT"; else echo "Namespace $NS: HTTP $status"; fi
       - name: Publish to Open VSX
         if: env.OVSX_PAT != ''
         working-directory: packages/vscode
-        run: pnpm exec ovsx publish fortis-security.vsix --pat "$OVSX_PAT"
+        run: pnpm exec ovsx publish fortis-security.vsix --pat "$OVSX_PAT" --skip-duplicate
+      - name: Wait for Open VSX to list it
+        if: env.OVSX_PAT != ''
+        working-directory: packages/vscode
+        run: node scripts/check-listing.mjs openvsx 10
+      - name: Wait for the VS Code Marketplace to list it
+        if: env.VSCE_PAT != ''
+        working-directory: packages/vscode
+        run: node scripts/check-listing.mjs marketplace 30

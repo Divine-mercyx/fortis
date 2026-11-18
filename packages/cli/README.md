@@ -256,14 +256,18 @@ Without a Fortis key, it writes the code scan only, which needs no secrets: the 
 
 Each uses the standalone binary or the Docker image, so your project doesn't need Node.
 
-| `--provider` | Writes | Code scan runs on | ZAP on staging |
-|---|---|---|---|
-| `gitlab` | `fortis.gitlab-ci.yml` | Docker image | Yes |
-| `bitbucket` | `bitbucket-pipelines.yml` | Docker image | No: Bitbucket restricts the Docker mounts ZAP needs |
-| `azure` | `azure-pipelines-fortis.yml` | Binary | Yes |
-| `jenkins` | `Jenkinsfile` | Binary | Yes, if the agent has Docker |
-| `circleci` | `.circleci/config.yml` | Binary | Yes |
-| `buildkite` | `.buildkite/pipeline.yml` | Binary | Yes, if the agent has Docker |
+| `--provider` | Writes | Code scan runs on | Results appear | ZAP on staging |
+|---|---|---|---|---|
+| `gitlab` | `fortis.gitlab-ci.yml` | Docker image | A merge-request comment (with `FORTIS_GITLAB_TOKEN`), and the JUnit report in the merge request's test summary and the pipeline's Tests tab | Yes |
+| `bitbucket` | `bitbucket-pipelines.yml` | Docker image | The step's Tests tab: Bitbucket reads any report under `test-results/` | No: Bitbucket restricts the Docker mounts ZAP needs |
+| `azure` | `azure-pipelines-fortis.yml` | Binary | The run's Tests tab | Yes |
+| `jenkins` | `Jenkinsfile` | Binary | The build's Test Result page (JUnit plugin) | Yes, if the agent has Docker. In a Multibranch Pipeline job only: a plain Pipeline job always skips a `when { branch }` stage |
+| `circleci` | `.circleci/config.yml` | Binary | The job's Tests tab | Yes |
+| `buildkite` | `.buildkite/pipeline.yml` | Binary | `fortis-junit.xml` in the step's artifacts. To see it as test results, add Buildkite's JUnit Annotate plugin or Test Engine | Yes, if the agent has Docker |
+
+A critical finding fails the job on every system, and each template publishes its report even when the scan fails. On GitLab, a branch with an open merge request is scanned in the merge-request pipeline, which can comment, and not again in the branch pipeline.
+
+Most CI systems check out a commit rather than a branch. On a detached checkout the scan takes the branch from the system's own variables (`CI_COMMIT_BRANCH`, `BITBUCKET_BRANCH`, `BUILD_SOURCEBRANCH`, `BRANCH_NAME`, `CIRCLE_BRANCH`, `BUILDKITE_BRANCH`, and on GitHub the pull request's source branch), so the dashboard shows it and a release gate that names branches applies. A pull request counts as its source branch.
 
 Bitbucket, Jenkins, CircleCI and Buildkite read one fixed pipeline file. If you already have one, Fortis never overwrites it, even with `--force`. It writes `fortis.bitbucket-pipelines.yml`, `Jenkinsfile.fortis`, `.circleci/fortis.yml` or `.buildkite/pipeline.fortis.yml` for you to copy from. Run `fortis ci init` to see which variables each one needs.
 
@@ -539,12 +543,12 @@ To release, bump `version` in `packages/cli/package.json` and push a matching ta
 - uses this version's changelog section below as the release notes. Before tagging, change its heading from "(unreleased)" to the release date;
 - builds, tests and publishes the wheels to PyPI (TestPyPI on a fork). `packages/python/build_wheel.py` makes one by hand.
 
-A tag also signs the macOS and Windows binaries, builds the Alpine ones, and updates the package managers. Each store or signing step without its secret is skipped. These are set up once, in a GitHub environment called `release` limited to `cli-v*` tags:
+A tag also signs the macOS and Windows binaries, builds the Alpine ones, and updates the package managers. Each store or signing step without its secret is skipped. A platform with only some of its signing secrets, or one that doesn't look right (a file path instead of a base64-encoded file, say), fails the release before building, and says which secret. The macOS binary is published only if Apple accepts its notarization. These are set up once, in a GitHub environment called `release` limited to `cli-v*` tags:
 
 | Secrets | What they need |
 |---|---|
 | `APPLE_CERT_P12_BASE64`, `APPLE_CERT_PASSWORD`, `APPLE_API_KEY_P8_BASE64`, `APPLE_API_KEY_ID`, `APPLE_API_ISSUER_ID` | An Apple Developer ID Application certificate, and an App Store Connect API key |
-| `WINDOWS_CERT_PFX_BASE64`, `WINDOWS_CERT_PASSWORD` | A code-signing certificate you can export as a PFX |
+| `WINDOWS_CERT_PFX_BASE64`, `WINDOWS_CERT_PASSWORD` | A code-signing certificate you can export as a PFX. Most CAs now keep the key on a hardware token or a cloud signing service instead, which needs its own signing step |
 | `PACKAGE_REPOS_TOKEN` | A token that can push to `Divine-mercyx/homebrew-tap` and `Divine-mercyx/scoop-bucket` |
 | `WINGET_TOKEN` | A classic token with the `public_repo` scope, for pull requests to `microsoft/winget-pkgs` |
 

@@ -41,7 +41,7 @@ const sbomSteps = `      - uses: actions/setup-java@v6
 `;
 
 /** Gradle build files and version catalogs list direct dependencies only, and Gradle can list them all. */
-const gradleSbomSteps = `      - uses: actions/setup-java@v4
+const gradleSbomSteps = `      - uses: actions/setup-java@v6
         with:
           distribution: temurin
           java-version: '21' # match your build
@@ -183,6 +183,9 @@ fortis-scan:
       junit: fortis-junit.xml
   rules:
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    # A branch with an open merge request is scanned in its merge-request pipeline, which can comment, not twice.
+    - if: $CI_COMMIT_BRANCH && $CI_OPEN_MERGE_REQUESTS
+      when: never
     - if: $CI_COMMIT_BRANCH
 ${opts.free ? '' : `
 fortis-staging:
@@ -319,6 +322,7 @@ pipeline {
       }
     }${opts.free ? '' : `
     stage('Fortis staging test') {
+      // "when { branch }" needs a Multibranch Pipeline job: in a plain Pipeline job this stage is always skipped.
       when {
         branch '${opts.stagingBranch}'
       }
@@ -431,7 +435,7 @@ const TEMPLATES: Record<CiProvider, Template> = {
 export const NEXT_STEPS: Record<Exclude<CiProvider, 'github' | 'gitlab'>, string[]> = {
   bitbucket: ['Enable Pipelines, and add the secured repository variable FORTIS_KEY.', 'This covers the code scan. Run fortis test from another machine: Bitbucket restricts the Docker mounts ZAP needs.'],
   azure: ['Create a pipeline from this file, and add the variables FORTIS_KEY (secret) and FORTIS_STAGING_URL.'],
-  jenkins: ['Add the secret-text credential fortis-key, and set FORTIS_STAGING_URL. Jenkins needs the JUnit plugin.'],
+  jenkins: ['Add the secret-text credential fortis-key, and set FORTIS_STAGING_URL. Jenkins needs the JUnit plugin.', 'Use a Multibranch Pipeline job: in a plain Pipeline job the staging stage is always skipped.'],
   circleci: ['Add the project environment variables FORTIS_KEY and FORTIS_STAGING_URL.'],
   buildkite: ['Give your agents FORTIS_KEY and FORTIS_STAGING_URL, with a hook or a secrets plugin.'],
 };

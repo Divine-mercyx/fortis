@@ -143,6 +143,14 @@ const GENERIC: Pattern[] = [
 
 /** `password = "…"`, `apiKey: '…'`, PHP's `'api_key' => '…'`, Go's `token := "…"` and similar, when the value looks random. */
 const ASSIGNMENT = /\b([A-Za-z0-9_]*(?:secret|token|api[_-]?key|private[_-]?key|password|passwd|client[_-]?secret)[A-Za-z0-9_]*)["']?\s*(?:=>|:=|[:=])\s*["'`]([^"'`\s]{16,})["'`]/gi;
+/** A `${…}` hole in a JS template literal, or a Kotlin, Groovy, Dart or shell string. */
+const HOLE = /\$\{[^}]*\}/;
+
+/**
+ * The parts of an assigned value written out in the code. A value built from variables
+ * (`AuthKey_${id}.p8`) is only as secret as its literal parts, so those are what get judged.
+ */
+const literalParts = (value: string): string[] => (HOLE.test(value) ? value.split(HOLE).filter(Boolean) : [value]);
 
 /** Config files where values go unquoted: `spring.datasource.password=…`, `API_TOKEN: …`. */
 const CONFIG_FILE = /\.(env|properties|ya?ml|ini|toml|conf|cfg)$|(^|\/)\.env(\.|$)|(^|\/)\.pypirc$/i;
@@ -538,7 +546,7 @@ function genericLines(file: SourceFile, rawJson: boolean): Detection[] {
     if (READS_ENV.test(text)) return;
     ASSIGNMENT.lastIndex = 0;
     for (const m of text.matchAll(ASSIGNMENT)) {
-      if (looksRandom(m[2]!)) report(m[1]!, text, i + 1);
+      if (literalParts(m[2]!).some((part) => part.length >= 16 && looksRandom(part))) report(m[1]!, text, i + 1);
     }
     if (!unquotedAllowed) return;
     const m = UNQUOTED.exec(text);

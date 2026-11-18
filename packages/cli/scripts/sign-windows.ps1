@@ -31,6 +31,8 @@ try {
   $signature = Get-AuthenticodeSignature $Binary
   if (-not $signature.SignerCertificate) { throw 'FAILED: the binary has no signature' }
   if (-not $check -and $signature.Status -ne 'Valid') { throw "FAILED: the signature is $($signature.Status)" }
+  # Without a timestamp the signature stops being valid when the certificate expires.
+  if (-not $signature.TimeStamperCertificate) { throw 'FAILED: the signature has no timestamp' }
   & $Binary --version
   if ($LASTEXITCODE -ne 0) { throw 'FAILED: the signed binary does not run' }
   Write-Host "ok: signed by $($signature.SignerCertificate.Subject), and it runs"

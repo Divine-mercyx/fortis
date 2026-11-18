@@ -1058,13 +1058,24 @@ for (const stream of [process.stdout, process.stderr]) {
   });
 }
 
+/**
+ * Ends with this exit code once Node has closed what's open, not straight away. On Windows, process.exit() just after
+ * a fetch can catch a handle mid-close, and Node aborts (`!(handle->flags & UV_HANDLE_CLOSING)`) with a crash code
+ * instead of this one: a scan that posted a pull-request comment would fail its CI job, or a failing one pass. Anything
+ * that would keep the process alive still can't: it exits anyway after a few seconds.
+ */
+function finish(code: number) {
+  process.exitCode = code;
+  setTimeout(() => process.exit(code), 3000).unref();
+}
+
 main().then(
   async (code) => {
     await showUpdateNotice().catch(() => undefined);
-    process.exit(code);
+    finish(code);
   },
   (e) => {
     err(c.red(`✖ ${(e as Error).message}`));
-    process.exit(2);
+    finish(2);
   },
 );
