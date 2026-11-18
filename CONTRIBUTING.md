@@ -42,7 +42,17 @@ pnpm --filter fortis-watchdog test
 
 ## Pull requests
 
-Branch from the deploy branch, `claude/pensive-hawking-w00waj`, and open your pull request against it. Render deploys this branch, so don't push to it directly. CI must pass before merging.
+Branch from `main`, and open your pull request against it. Render deploys `main`, so don't push to it directly. CI must pass before merging.
+
+If you cloned before the default branch was renamed to `main`, point your copy at it:
+
+```bash
+git fetch --prune origin
+git checkout -B main origin/main
+git remote set-head origin -a
+```
+
+Then delete your local copy of the old branch with `git branch -D <old name>`.
 
 ## Adding or fixing a rule
 
