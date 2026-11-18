@@ -117,8 +117,8 @@ Microsoft reviews the first winget pull request by hand, so `winget install` wor
 | What | Who | State |
 |---|---|---|
 | Create a publisher on the VS Code Marketplace, and an account and namespace on Open VSX | Whoever owns the brand | Not done |
-| Set `publisher` in `packages/vscode/package.json` to that ID | Anyone, once the ID exists | Still the placeholder `fortis` |
-| Add the secrets `VSCE_PAT` and `OVSX_PAT`, then push the tag `vscode-v0.1.0` | `Divine-mercyx`, as admin | Not done. The release workflow has never run |
+| Set `publisher` in `packages/vscode/package.json` to that ID | Anyone, once the ID exists | Still the placeholder `fortis`. On 2026-11-16 that ID was free in both stores, so it can stay if it's the one registered |
+| Add the secrets `VSCE_PAT` and `OVSX_PAT`, then push the tag `vscode-v0.1.0` | `Divine-mercyx`, as admin | Not done. The release workflow has never run. It now fails if a secret is missing, creates the Open VSX namespace, and passes only once both stores list the version |
 
 ### Repository settings
 
