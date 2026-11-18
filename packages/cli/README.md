@@ -256,14 +256,18 @@ Without a Fortis key, it writes the code scan only, which needs no secrets: the 
 
 Each uses the standalone binary or the Docker image, so your project doesn't need Node.
 
-| `--provider` | Writes | Code scan runs on | ZAP on staging |
-|---|---|---|---|
-| `gitlab` | `fortis.gitlab-ci.yml` | Docker image | Yes |
-| `bitbucket` | `bitbucket-pipelines.yml` | Docker image | No: Bitbucket restricts the Docker mounts ZAP needs |
-| `azure` | `azure-pipelines-fortis.yml` | Binary | Yes |
-| `jenkins` | `Jenkinsfile` | Binary | Yes, if the agent has Docker |
-| `circleci` | `.circleci/config.yml` | Binary | Yes |
-| `buildkite` | `.buildkite/pipeline.yml` | Binary | Yes, if the agent has Docker |
+| `--provider` | Writes | Code scan runs on | Results appear | ZAP on staging |
+|---|---|---|---|---|
+| `gitlab` | `fortis.gitlab-ci.yml` | Docker image | A merge-request comment (with `FORTIS_GITLAB_TOKEN`), and the JUnit report in the merge request's test summary and the pipeline's Tests tab | Yes |
+| `bitbucket` | `bitbucket-pipelines.yml` | Docker image | The step's Tests tab: Bitbucket reads any report under `test-results/` | No: Bitbucket restricts the Docker mounts ZAP needs |
+| `azure` | `azure-pipelines-fortis.yml` | Binary | The run's Tests tab | Yes |
+| `jenkins` | `Jenkinsfile` | Binary | The build's Test Result page (JUnit plugin) | Yes, if the agent has Docker. In a Multibranch Pipeline job only: a plain Pipeline job always skips a `when { branch }` stage |
+| `circleci` | `.circleci/config.yml` | Binary | The job's Tests tab | Yes |
+| `buildkite` | `.buildkite/pipeline.yml` | Binary | `fortis-junit.xml` in the step's artifacts. To see it as test results, add Buildkite's JUnit Annotate plugin or Test Engine | Yes, if the agent has Docker |
+
+A critical finding fails the job on every system, and each template publishes its report even when the scan fails. On GitLab, a branch with an open merge request is scanned in the merge-request pipeline, which can comment, and not again in the branch pipeline.
+
+Most CI systems check out a commit rather than a branch. On a detached checkout the scan takes the branch from the system's own variables (`CI_COMMIT_BRANCH`, `BITBUCKET_BRANCH`, `BUILD_SOURCEBRANCH`, `BRANCH_NAME`, `CIRCLE_BRANCH`, `BUILDKITE_BRANCH`, and on GitHub the pull request's source branch), so the dashboard shows it and a release gate that names branches applies. A pull request counts as its source branch.
 
 Bitbucket, Jenkins, CircleCI and Buildkite read one fixed pipeline file. If you already have one, Fortis never overwrites it, even with `--force`. It writes `fortis.bitbucket-pipelines.yml`, `Jenkinsfile.fortis`, `.circleci/fortis.yml` or `.buildkite/pipeline.fortis.yml` for you to copy from. Run `fortis ci init` to see which variables each one needs.
 

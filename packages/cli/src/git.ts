@@ -9,10 +9,34 @@ function git(cwd: string, args: string[]): string | null {
 }
 
 export const repoRoot = (cwd: string) => git(cwd, ['rev-parse', '--show-toplevel']);
-/** The branch name, or undefined on a detached HEAD (CI checkouts of a tag or a pull-request merge commit). */
-export const currentBranch = (cwd: string) => {
+type Env = Record<string, string | undefined>;
+
+/**
+ * The branch a CI system says it's building. Most check out a commit rather than a branch (GitLab, Jenkins, Azure
+ * and Buildkite always, GitHub for a pull request), so git alone can't tell, and a release gate that names branches
+ * would skip the scan. A pull request gives its source branch. A tag build gives none.
+ */
+export function ciBranch(env: Env = process.env): string | undefined {
+  const strip = (ref: string | undefined) => ref?.replace(/^refs\/heads\//, '') || undefined;
+  if (env.GITHUB_ACTIONS === 'true') return env.GITHUB_HEAD_REF || (env.GITHUB_REF_TYPE === 'branch' ? env.GITHUB_REF_NAME : undefined) || undefined;
+  if (env.GITLAB_CI === 'true') return env.CI_COMMIT_BRANCH || env.CI_MERGE_REQUEST_SOURCE_BRANCH_NAME || undefined;
+  if (env.BITBUCKET_BUILD_NUMBER) return env.BITBUCKET_BRANCH || undefined;
+  if (env.TF_BUILD) {
+    const ref = env.SYSTEM_PULLREQUEST_SOURCEBRANCH || env.BUILD_SOURCEBRANCH;
+    return ref?.startsWith('refs/heads/') ? strip(ref) : undefined;
+  }
+  // Multibranch Pipelines set BRANCH_NAME (PR-12 for a pull request, with CHANGE_BRANCH its source). A plain
+  // Pipeline job with the Git plugin sets GIT_BRANCH as origin/main.
+  if (env.JENKINS_URL) return env.CHANGE_BRANCH || env.BRANCH_NAME || env.GIT_BRANCH?.replace(/^(?:refs\/heads\/|origin\/)/, '') || undefined;
+  if (env.CIRCLECI) return env.CIRCLE_BRANCH || undefined;
+  if (env.BUILDKITE) return env.BUILDKITE_BRANCH || undefined;
+  return undefined;
+}
+
+/** The branch name: git's, or on a detached HEAD the CI system's. Undefined for a tag or a detached checkout outside CI. */
+export const currentBranch = (cwd: string, env: Env = process.env) => {
   const b = git(cwd, ['rev-parse', '--abbrev-ref', 'HEAD']);
-  return b && b !== 'HEAD' ? b : undefined;
+  return b && b !== 'HEAD' ? b : ciBranch(env);
 };
 export const currentCommit = (cwd: string) => git(cwd, ['rev-parse', 'HEAD']) ?? undefined;
 

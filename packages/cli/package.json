@@ -56,7 +56,8 @@
     "tsx": "^4.23.15",
     "typescript": "5.9.3",
     "undici": "^6.29.1",
-    "vitest": "^3.2.7"
+    "vitest": "^3.2.7",
+    "yaml": "2.8.1"
   },
   "publishConfig": {
     "access": "public",
