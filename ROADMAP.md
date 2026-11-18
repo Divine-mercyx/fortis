@@ -101,14 +101,14 @@ The code for each of these is merged. Each one waits on an account, a setting or
 
 ### Package managers and signing
 
-Each step is skipped with a notice, and doesn't fail the release, until its secret or repository exists.
+Each step is skipped with a notice, and doesn't fail the release, until its secret or repository exists. Signing is the exception: a platform with only some of its secrets set, or one that's malformed, fails the release before anything is built, so a half-finished setup can't ship unsigned binaries. The run's summary says whether each binary is signed.
 
 | What | Who | State |
 |---|---|---|
 | Create public repositories `Divine-mercyx/homebrew-tap` and `Divine-mercyx/scoop-bucket`, each with a first commit | `Divine-mercyx` | Not done. `brew install` and `scoop install` fail |
-| Settings → Environments: create `release`, limited to `cli-v*` tags. Add `PACKAGE_REPOS_TOKEN` (can push to both repositories above) and `WINGET_TOKEN` (classic token, `public_repo` scope) | `Divine-mercyx`, as admin | Not done. The repository has no environments |
-| Join the Apple Developer Program, create a Developer ID Application certificate and an App Store Connect API key, and add the five `APPLE_*` secrets | Whoever can sign up for the company | Not visible from outside |
-| Buy a Windows code-signing certificate, and add `WINDOWS_CERT_PFX_BASE64` and `WINDOWS_CERT_PASSWORD` | Whoever can buy it for the company | Not visible from outside |
+| Settings → Environments: limit `release` to `cli-v*` tags. Add `PACKAGE_REPOS_TOKEN` (can push to both repositories above) and `WINGET_TOKEN` (classic token, `public_repo` scope) | `Divine-mercyx`, as admin | On 2026-11-16, `release` existed but had no secrets and no deployment rule, so a workflow on any branch could use it |
+| Join the Apple Developer Program as an organisation (needs a D-U-N-S number), create a Developer ID Application certificate and an App Store Connect API key, and add the five `APPLE_*` secrets to `release` | Whoever can sign up for the company | Not done: `release` had no secrets on 2026-11-16 |
+| Choose a Windows code-signing route, buy the certificate, and add its secrets to `release`. Since June 2023, a new certificate's private key must stay on a hardware token or a cloud signing service, so most CAs no longer give out a PFX file. The workflow signs with `WINDOWS_CERT_PFX_BASE64` and `WINDOWS_CERT_PASSWORD`; a cloud service needs its own signing step, added once it's chosen | Whoever can buy it for the company, then anyone | Not done: `release` had no secrets on 2026-11-16 |
 
 Microsoft reviews the first winget pull request by hand, so `winget install` works once that is accepted.
 
