@@ -145,7 +145,7 @@ Microsoft reviews the first winget pull request by hand, so `winget install` wor
 |---|---|
 | Run each CI template once in a sample repository with a critical finding: GitHub Actions, GitLab, Bitbucket, Azure DevOps, Jenkins, CircleCI, Buildkite. Check that the scan runs, the job fails, and the report (and on GitHub and GitLab the comment) appears where the CLI docs say under "Other CI systems". `tests/ci-templates-run.test.ts` already runs each template's own commands with that system's variables; what's left is the system accepting the file and showing the report. GitLab and Bitbucket wait on the public image above | Whoever holds an account on that system |
 | Run the `false-positive-shapes` export against production. It needs `DATABASE_URL`, so the nightly job doesn't run it | Whoever has production database access |
-| Confirm the nightly accuracy run starts on its schedule (02:30 UTC) and can open an issue | `Divine-mercyx`. It has only run on pull requests so far |
+| See a scheduled nightly run close its own issue. Scheduled runs have started on their own every day since 2026-11-10 and passed since 2026-11-14, but GitHub starts them late: between 08:05 and 10:10 UTC, not the 02:30 the cron asks for. Scheduled failures opened #66 and #74, and the report step closed #74 when a manual run passed. No scheduled pass has had an open issue to close yet | `Divine-mercyx`. To see it sooner, open an issue titled `Nightly accuracy run is failing` by hand: the next scheduled pass closes it |
 
 ## Known gaps
 

@@ -458,7 +458,7 @@ Every rule is measured against a labelled benchmark in `bench/cases`. A line mar
 
 **Real code.** `pnpm corpus` scans open-source fintech and payments projects in each supported language, pinned to fixed commits, and compares the findings with `bench/corpus.json`, where each one has been reviewed as right or wrong. It reports precision and recall per rule.
 
-**Every night.** `.github/workflows/nightly.yml` runs the corpus and the live OSV tests, opens one issue if either fails, and closes it when a run passes.
+**Every night.** `.github/workflows/nightly.yml` runs the corpus and the live OSV, `--verify` and `--resolve` tests. If any fails, it opens one issue that names the checks that failed and how to rerun each, and closes it when a run passes.
 
 **Your feedback.** False positives marked in the dashboard can become new benchmark cases. An operator exports them as a rule ID, a file extension and the shape of the line, for example `const x = await x.findById(req.params.id);`. Every name, string, number and comment is removed, and a shape is only exported once at least two workspaces have reported it. No code leaves the dashboard this way.
 

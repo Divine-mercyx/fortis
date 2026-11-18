@@ -111,4 +111,6 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           RESULT: ${{ (needs.live-osv.result == 'success' && needs.live-verify.result == 'success' && needs.live-resolve.result == 'success' && needs.corpus.result == 'success') && 'success' || 'failure' }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          # Each job's result, so the issue names the ones that failed.
+          NEEDS: ${{ toJSON(needs) }}
         run: node packages/cli/scripts/report-nightly.mjs "$RESULT" "$RUN_URL"
