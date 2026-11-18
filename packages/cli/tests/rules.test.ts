@@ -35,6 +35,22 @@ describe('SEC-GEN-001 generic secrets', () => {
     const text = ['const password = "changeme-changeme-123";', 'const token = "aaaaaaaaaaaaaaaaaaaa";', 'const secret = process.env.SECRET ?? "Zx9Qm2Lp7Vt4Rk8Wn3Yb6Hc1";'].join('\n');
     expect(run(genericSecretRule, 'src/a.ts', text)).toHaveLength(0);
   });
+  it('judges a template literal by the parts written out, not the variables in it', () => {
+    const random = ['Zx9Qm2Lp7Vt4', 'Rk8Wn3Yb6Hc1'].join('');
+    const src = [
+      'const a = { APPLE_API_KEY_ID: `AuthKey_${mac.APPLE_API_KEY_ID}.p8` };', // a file name made from an ID
+      'const b = { STRIPE_SECRET_KEY: `sk_${mode}_${suffix}_${region}` };',
+      'const sessionToken = `tok_${userId}_${Date.now()}_${nonce}`;',
+      'const password = `${user}:${pass}`;',
+      // Still caught: a random literal written out beside a variable, or with none.
+      'const apiSecret = `${base}' + random + '`;',
+      'const token = `' + random + '`;',
+    ].join('\n');
+    expect(run(genericSecretRule, 'src/a.ts', src).map((d) => [d.line, d.title])).toEqual([
+      [5, 'Hard-coded apiSecret'],
+      [6, 'Hard-coded token'],
+    ]);
+  });
 });
 
 describe('FX-OWN-001 ownership checks', () => {
