@@ -105,7 +105,7 @@ Each step is skipped with a notice, and doesn't fail the release, until its secr
 
 | What | Who | State |
 |---|---|---|
-| Create public repositories `Divine-mercyx/homebrew-tap` and `Divine-mercyx/scoop-bucket`, each with a first commit | `Divine-mercyx` | Not done. `brew install` and `scoop install` fail |
+| Create public repositories `Divine-mercyx/homebrew-tap` and `Divine-mercyx/scoop-bucket`. They can be empty: the release makes the first commit, on `main`. A fine-grained `PACKAGE_REPOS_TOKEN` can only be limited to them once they exist | `Divine-mercyx` | Not done: neither existed on 2026-11-17. After each release, the workflow runs the README's `brew install` on macOS and Linux and `scoop install` on Windows, and fails unless each gives the new version |
 | Settings → Environments: create `release`, limited to `cli-v*` tags. Add `PACKAGE_REPOS_TOKEN` (can push to both repositories above) and `WINGET_TOKEN` (classic token, `public_repo` scope) | `Divine-mercyx`, as admin | Not done. The repository has no environments |
 | Join the Apple Developer Program, create a Developer ID Application certificate and an App Store Connect API key, and add the five `APPLE_*` secrets | Whoever can sign up for the company | Not visible from outside |
 | Buy a Windows code-signing certificate, and add `WINDOWS_CERT_PFX_BASE64` and `WINDOWS_CERT_PASSWORD` | Whoever can buy it for the company | Not visible from outside |
