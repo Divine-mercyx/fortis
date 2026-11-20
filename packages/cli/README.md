@@ -192,7 +192,7 @@ If the dependency check can't finish (OSV is down, or a lockfile can't be read),
 ```yaml
 - name: Install Fortis
   run: |
-    curl -fsSL https://github.com/Divine-mercyx/fortis/releases/download/cli-v0.1.0-beta.13/install.sh | FORTIS_VERSION=0.1.0-beta.13 sh
+    curl -fsSL https://github.com/Divine-mercyx/fortis/releases/download/cli-v0.1.0-beta.14/install.sh | FORTIS_VERSION=0.1.0-beta.14 sh
     echo "$HOME/.fortis/bin" >> "$GITHUB_PATH"
 - run: fortis scan --ci
   env:
@@ -599,7 +599,9 @@ It exits 1 if something stops Fortis doing its job. Things that are only worth k
 
 ## Changelog
 
-**Unreleased**
+**0.1.0-beta.14** (unreleased)
+- In CI, on a detached checkout, the branch name comes from the system's own variables (GitHub pull requests, GitLab, Bitbucket, Azure DevOps, Jenkins, CircleCI and Buildkite), so a scan is filed under the right branch. The GitLab template no longer runs twice for a branch with an open merge request. On Windows, the CLI no longer crashes on exit (exit code 127) after posting a pull-request comment.
+- SEC-GEN-001 judges a template literal by the parts written out in it: a value built from variables (`` `AuthKey_${id}.p8` ``) is no longer reported as a hard-coded secret, and a random-looking literal next to a `${…}` now is.
 - Infobip API keys are named from their shape. Keys for Termii, Smile ID, Prembly, VerifyMe, Youverify, Anchor, Sudo, Paga, Remita, Okra and Moniepoint, which publish no key format, are named from the setting they're assigned to (`TERMII_API_KEY = "…"` is a Termii key), each with where to rotate it. Africa's Talking keys without the `atsk_` prefix are named the same way.
 - `fortis scan --verify` is checked against the real Paystack, Stripe and Flutterwave APIs each night: a key they never issued reads as revoked, and a request that's cut off reads as unknown.
 - `fortis scan --resolve` asks Gradle, Maven, sbt or dotnet for the full dependency tree of Java, Kotlin, Scala and .NET projects with no lockfile, so libraries that come in through other libraries (Log4Shell's way in) are checked too. A finding names the library it comes in through, and says how to pin the fixed version in `build.gradle`, `pom.xml` or `build.sbt`. It's opt-in because it runs the build tool; with `--offline` the tools use their local cache, and without the tool the build files are read as before.

@@ -4,15 +4,16 @@ This is the status of the CLI roadmap tracked in [issue #4](https://github.com/D
 
 **Status on 2026-11-10:** all 35 items are built and merged. What remains is setup that only an owner can do: repository settings, store accounts, signing certificates and a tagged release. It is listed under [What's left, and who does it](#whats-left-and-who-does-it).
 
-## Where the CLI stands (0.1.0-beta.13)
+## Where the CLI stands (0.1.0-beta.14)
 
-New in beta.13: Linux binaries, wheels and the Docker image run on glibc 2.28 again (Debian 12, Ubuntu 22.04); Bun lockfiles; Mono, Dojah, Africa's Talking, Korapay and BudPay keys named; secrets read inside notebooks, PEM keys in JSON, base64 values and Kubernetes Secrets; and `fortis scan --verify`.
+New in beta.14, once it's tagged: the Infrastructure and Mobile packs, account-takeover checks in every supported language, the money checks in Go, C#, PHP, Java and Kotlin, `fortis exposure`, `fortis scan --resolve` and `--terraform-plan`, keys named for providers with no key format, and release gates. beta.13 (2026-11-10) is the latest release until then.
 
 - **Secrets:** checked in any file. Covers payment keys (Stripe, Paystack, Flutterwave, Monnify, SeerBit, OPay, Squad), cloud, SaaS and registry tokens, and passwords in database and broker URLs.
 - **Dependencies:** lockfiles for JavaScript, PHP, Python, Java, Kotlin, Scala, Go, .NET, Ruby, Rust, Dart, Swift, Elixir, Erlang, Haskell and R are checked against OSV. Findings show the fixed version and the upgrade command.
 - **Supply chain:** Docker base images and GitHub Actions.
-- **Infrastructure (unreleased):** its own free rule pack and dashboard tab. Terraform (AWS, Google Cloud, Azure), Kubernetes and Docker Compose files that open admin or database ports to the internet, make storage public, give a database a public address, or put a database on a public load balancer.
-- **Fintech code rules:** JavaScript, TypeScript and Python on syntax trees. All ten checks also run in Go, C#, PHP, Java and Kotlin, on line patterns.
+- **Infrastructure:** its own free rule pack and dashboard tab. Terraform (AWS, Google Cloud, Azure) and Terraform plans, Kubernetes, Helm, Docker Compose, CloudFormation and SAM, Pulumi, and Bicep and ARM files that open admin or database ports to the internet, make storage public, give a database a public address, or put a database on a public load balancer.
+- **Mobile:** a free rule pack for Android, iOS, Expo, React Native and Flutter: server secrets in the app, weakened TLS, and no certificate pinning.
+- **Fintech code rules:** JavaScript, TypeScript and Python on syntax trees. All ten checks, the account-takeover checks and the money checks also run in Go, C#, PHP, Java and Kotlin.
 - **`fortis test` and `fortis access`:** test a running app. Access checks cover writes, GraphQL, and Postman or HAR imports. ZAP runs with or without Docker.
 - **Pre-push hook:** works with npm, pnpm, Yarn, Bun, pip, uv, Poetry, a global install, or no Node, in every Windows shell.
 - **Distribution:** npm, standalone binaries (Alpine too), a Docker image, a GitHub Action, and `fortis update`.
@@ -93,6 +94,7 @@ The code for each of these is merged. Each one waits on an account, a setting or
 
 | What | Who | State |
 |---|---|---|
+| Release beta.14 (#80): once the nightly run passes again (#118), date the changelog heading, then push the tag `cli-v0.1.0-beta.14` on the merged commit. Check the release run, then try npm, pip, the curl installer, Docker and the GitHub Action on a clean machine | A maintainer who can push tags | Not done. The version, changelog and install examples are set |
 | Push the tag `cli-v0.1.0-beta.13`. This builds the binaries, the GitHub release, the Docker image, PyPI wheels, npm and the attestations | A maintainer who can push tags | Done on 2026-11-11: the release run passed, and the GitHub release has every binary, `install.sh` and `SHA256SUMS` |
 | Make the container package `ghcr.io/divine-mercyx/fortis` public: the package's settings on GitHub → Change visibility → Public. A first push to ghcr.io is private, so `docker run` and the GitLab and Bitbucket templates, which run in the image, can't pull it | `Divine-mercyx`, as the package's owner | Private on 2026-11-16: ghcr.io refuses an anonymous pull, and the package page isn't public |
 | npm: package → Settings → Trusted publishing → GitHub Actions, repository `Divine-mercyx/fortis`, workflow `release-cli.yml` | `divine-fortis`, the only npm maintainer | Not proven. The last three release runs failed, and beta.12 has no release run |
@@ -137,7 +139,7 @@ Microsoft reviews the first winget pull request by hand, so `winget install` wor
 |---|---|
 | #62: run migration `0002_secret_status.sql` with `pnpm db:migrate` when the API deploys. Until then the API accepts `secretStatus` but can't store it | Whoever deploys the API |
 | #64: for any provider it leaves unnamed, add a link to its key documentation, or a revoked key, to issue #7. Confirm the Africa's Talking key length the same way | A maintainer |
-| Done: 0.1.0-beta.13 is set in `packages/cli/package.json` and the changelog is dated. Push the tag to release it | Whoever releases |
+| 0.1.0-beta.14 is set in `packages/cli/package.json`. Change the changelog heading from "(unreleased)" to the release date, then push the tag | Whoever releases |
 
 ### Checks to run once
 
