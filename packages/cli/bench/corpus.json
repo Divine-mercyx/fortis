@@ -84,7 +84,6 @@
       {"rule": "SEC-GEN-001", "file": "packages/Webkul/Admin/src/Resources/lang/nl/app.php", "line": 4950, "verdict": "false", "why": "A translated label"},
       {"rule": "SEC-GEN-001", "file": "packages/Webkul/Admin/tests/e2e-pw/pages/admin/configuration/customer/CaptchaConfigurationPage.ts", "line": 15, "verdict": "false", "why": "Made-up value or a form field's name in a test"},
       {"rule": "SEC-GEN-001", "file": "packages/Webkul/Admin/tests/e2e-pw/pages/admin/configuration/magic-ai/MagicAiProvidersPage.ts", "line": 8, "verdict": "false", "why": "Made-up value or a form field's name in a test"},
-      {"rule": "SEC-GEN-001", "file": "packages/Webkul/Admin/tests/e2e-pw/tests/configuration/magic-ai/magic-ai.spec.ts", "line": 57, "verdict": "false", "why": "Made-up value or a form field's name in a test"},
       {"rule": "SEC-GEN-001", "file": "packages/Webkul/Admin/tests/Feature/Configuration/Customer/CaptchaConfigurationTest.php", "line": 126, "verdict": "false", "why": "Made-up value or a form field's name in a test"},
       {"rule": "SEC-GEN-001", "file": "packages/Webkul/Admin/tests/Feature/Configuration/Customer/CaptchaConfigurationTest.php", "line": 242, "verdict": "false", "why": "Made-up value or a form field's name in a test"},
       {"rule": "SEC-GEN-001", "file": "packages/Webkul/Customer/src/Captcha.php", "line": 212, "verdict": "false", "why": "A validation rule, not a value"},
