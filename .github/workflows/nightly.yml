@@ -8,12 +8,11 @@ on:
   schedule:
     - cron: '30 2 * * *'
   workflow_dispatch:
-  # Checks changes to the corpus itself. These runs never touch issues.
+  # Checks changes to this workflow and the live tests. These runs never touch issues. Pull requests that can
+  # change what a scan finds, the corpus included, run the corpus check in corpus.yml instead.
   pull_request:
     paths:
       - .github/workflows/nightly.yml
-      - packages/cli/bench/corpus.json
-      - packages/cli/bench/corpus.ts
       - packages/cli/tests/verify-live.test.ts
       - packages/cli/src/rules/resolve.ts
       - packages/cli/tests/resolve-live.test.ts

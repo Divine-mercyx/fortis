@@ -1,0 +1,47 @@
+name: Corpus
+
+# Runs the real-world corpus check on pull requests that can change what a scan finds, so a rule change that
+# alters findings on real code fails its own pull request instead of the next nightly run (#118).
+# The nightly run (nightly.yml) still runs it daily, for changes that come without a commit here.
+
+on:
+  pull_request:
+    paths:
+      - packages/cli/src/rules/**
+      - packages/cli/src/analysis/**
+      - packages/cli/src/scan.ts
+      - packages/cli/src/files.ts
+      - packages/cli/src/git.ts
+      - packages/shared/src/**
+      - packages/cli/package.json
+      - pnpm-lock.yaml
+      - packages/cli/bench/corpus.json
+      - packages/cli/bench/corpus.ts
+      - .github/workflows/corpus.yml
+
+permissions:
+  contents: read
+
+jobs:
+  corpus:
+    name: Real-world corpus
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      FORTIS_CORPUS_DIR: ${{ github.workspace }}/.corpus
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      # The clones, keyed on the pinned commits, so most runs don't download the repositories again.
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .corpus
+          key: corpus-${{ hashFiles('packages/cli/bench/corpus.json') }}
+      # On a failure, the log names each finding that changed. Review it, then fix the rule or record the
+      # review in packages/cli/bench/corpus.json (pnpm --filter fortis-watchdog corpus --report lists them all).
+      - run: pnpm --filter fortis-watchdog corpus
